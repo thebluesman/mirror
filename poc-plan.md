@@ -60,13 +60,25 @@ Using the living room dimensions already on hand from the Figma reference
 | Dining table | 153 × 92 |
 | Swivel chair | 98 × 98 |
 | Shoe rack | 79 × 29 |
-| ÄPPLARYD sofa | use IKEA's published dimensions for this model |
+| ÄPPLARYD sofa | *pin the specific variant (2-seat / 3-seat / corner) before the session — "ÄPPLARYD" alone spans multiple sizes* |
 
-Place these as labeled boxes at roughly their plan positions (exact placement doesn't
-need to match perfectly — this is a proportion/geometry test, not the final layout) in
-any throwaway 3D tool: a 5-minute Three.js scene, Blender, or even a Python script
-(e.g. `trimesh`) that can output a render. Set one camera position roughly at
+Place these at roughly their plan positions (exact placement doesn't need to match
+perfectly — this is a proportion/geometry and recognizability test, not the final
+layout) in any throwaway 3D tool: a 5-minute Three.js scene, Blender, or even a Python
+script (e.g. `trimesh`) that can output a render. Set one camera position roughly at
 "couch view, looking at the TV wall."
+
+For the sofa and swivel chair specifically — the two items the evaluation step judges
+on "is it recognizable as that object" — build a crude compound shape (seat block +
+backrest slab + arm bolsters for the sofa; seat + back + base for the chair) instead of
+a single box. This is maybe 30 extra minutes and matters: `product-review.md:437-447`
+argues a plain box depth map doesn't give the AI-still pipeline enough to render a
+recognizable sofa, and recommends pulling silhouette shapes into v1 for exactly that
+reason. Running this spike with pure boxes risks a **false no-go** — a bad result would
+be ambiguous between "depth conditioning doesn't work" and "a box just doesn't encode
+sofa," and the review already predicts the latter. Everything else (bookshelf, TV
+stand, shelving, dining table, shoe rack) can stay a plain labeled box — they aren't
+being judged on recognizability the same way.
 
 Render two outputs from that camera:
 - A **depth map** (grayscale, distance from camera).
@@ -101,6 +113,15 @@ Look at each output and ask, honestly:
 - Would this be good enough to make a real decision from (e.g. "yes, order this rug"),
   or does it still read as an AI-generated placeholder?
 
+Set the bar before looking at results, not after: call it a **go** if at least 3 of
+the 5 variations pass all three questions above without cherry-picking or extra
+prompting. One good result out of five is not a go — it means the technique is
+inconsistent, which is itself useful information but not a green light.
+
+If the result is borderline either way, get one outside reaction (partner, Supritha)
+before recording the outcome — self-judging a borderline result risks rationalizing
+toward whichever answer feels better after the time invested.
+
 ### 5. Decide and record the outcome
 
 Write down (a few sentences is enough) which of the three outcomes in "Decision this
@@ -108,12 +129,17 @@ session should produce" happened, and why. That becomes the next planning input 
 either straight into scoping the editor build, or back to the drawing board on the
 fidelity approach.
 
+**If the sofa/chair results are poor despite the silhouette shapes from step 1**, that's
+a real signal about the technique — record it as such. **If step 1 was run with plain
+boxes instead of silhouettes for any reason**, a poor result is inconclusive, not a
+no-go: re-run with silhouette shapes before deciding.
+
 ## Explicitly out of scope for this session
 
 - No floor-plan editor.
 - No app scaffolding, schema, or database.
-- No furniture silhouette geometry system (plain boxes are fine and, per the review,
-  a better test of whether *depth conditioning alone* can carry recognizability, before
-  spending days on parametric shapes).
+- No general furniture silhouette geometry *system* — just the two crude one-off
+  silhouettes from step 1 (sofa, chair). Building a reusable parametric taxonomy across
+  all archetypes is real work the review scopes for v1 proper, not this spike.
 - No integration into a real product — this is a standalone script/notebook and a
   fal.ai account, nothing more.
