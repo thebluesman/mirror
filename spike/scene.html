@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Depth-map spike — living room</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: #222; color: #ddd;
+    font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    overflow: hidden;
+  }
+  #stage {
+    position: fixed; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #canvas-wrap {
+    width: 1024px; height: 768px;
+    box-shadow: 0 0 0 1px #444, 0 20px 60px rgba(0,0,0,0.6);
+    background: #000;
+  }
+  canvas { display: block; width: 1024px; height: 768px; }
+  #hud {
+    position: fixed; top: 10px; left: 10px;
+    background: rgba(0,0,0,0.6); border: 1px solid #444;
+    padding: 10px 14px; font-size: 12px; line-height: 1.5;
+    border-radius: 6px; pointer-events: none;
+    white-space: pre;
+  }
+  #hud b { color: #fff; }
+  #toast {
+    position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);
+    background: rgba(0,0,0,0.75); border: 1px solid #555;
+    padding: 6px 14px; border-radius: 5px; font-size: 12px;
+    opacity: 0; transition: opacity 0.2s;
+    pointer-events: none;
+  }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<div id="stage"><div id="canvas-wrap"></div></div>
+
+<div id="hud"></div>
+<div id="toast"></div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+/* ============================================================
+   GEOMETRY DATA — copied verbatim from geometry.json so this
+   file works standalone over file:// (no fetch/CORS needed).
+   ============================================================ */
+const DATA = {
+  "meta": {
+    "source": "Figma 'Living Room' page (Emerald Residence 107), frame 0:2, scale 1px = 1cm",
+    "units": "cm",
+    "coords": "x = Figma x, z = Figma y (plan view), y = up. All footprints are [x, z] of top-left corner in plan + [width, depth].",
+    "assumed": "All heights are assumed (not in Figma): ceiling 240, window sill 90 / height 120, doors 210 tall. Billy+Hemnes uses poc-plan dims 169x38 (Figma drew 160x30). TV stand uses label dims 188x39 (Figma drew 180x39)."
+  },
+  "ceilingHeight": 240,
+  "floor": [
+    { "name": "living-room", "x": 474, "z": 324, "w": 656, "d": 378 },
+    { "name": "kitchen-and-passage", "x": 1130, "z": 274, "w": 369, "d": 428 }
+  ],
+  "walls": [
+    { "name": "north-tv-wall", "from": [474, 324], "to": [1130, 324], "note": "TV wall; interior face" },
+    { "name": "kitchen-west-stub", "from": [1130, 324], "to": [1130, 274], "note": "connects TV wall to kitchen back wall" },
+    { "name": "kitchen-north-wall", "from": [1130, 274], "to": [1499, 274] },
+    { "name": "east-wall", "from": [1499, 274], "to": [1499, 702], "openings": [ { "name": "main-door", "along": "z", "start": 562, "size": 140, "type": "door" } ] },
+    { "name": "south-wall", "from": [474, 702], "to": [1499, 702], "openings": [ { "name": "bedroom-door", "along": "x", "start": 892, "size": 108, "type": "door" }, { "name": "powder-room-door", "along": "x", "start": 1290, "size": 87, "type": "door" } ] },
+    { "name": "west-wall", "from": [474, 324], "to": [474, 702], "openings": [ { "name": "window-1", "along": "z", "start": 393, "size": 110, "type": "window" }, { "name": "window-2", "along": "z", "start": 533, "size": 110, "type": "window" } ] }
+  ],
+  "furniture": [
+    { "name": "bookshelf", "shape": "box", "x": 474, "z": 324, "w": 72, "d": 40, "h": 180 },
+    { "name": "tv-stand", "shape": "box", "x": 593, "z": 324, "w": 188, "d": 39, "h": 50 },
+    { "name": "tv-samsung-frame", "shape": "wall-slab", "x": 610, "z": 324, "w": 146, "d": 8, "h": 85, "elevation": 95, "note": "wall-mounted on north wall above TV stand" },
+    { "name": "billy-hemnes-shelving", "shape": "box", "x": 876, "z": 324, "w": 169, "d": 38, "h": 202 },
+    { "name": "water-cooler", "shape": "box", "x": 1096, "z": 324, "w": 34, "d": 30, "h": 100 },
+    { "name": "dining-table", "shape": "box", "x": 880, "z": 397, "w": 153, "d": 92, "h": 75, "note": "ok to model as tabletop slab on 4 leg posts if trivial, else box" },
+    { "name": "swivel-chair", "shape": "compound-chair", "x": 798, "z": 509, "w": 98, "d": 98, "note": "round swivel chair: cylindrical base pedestal + round seat at 45 + curved/slab backrest to ~100, facing north-east toward TV" },
+    { "name": "applaryd-sofa", "shape": "compound-sofa", "note": "L-shape, faces north (toward TV wall). Chaise on WEST end. Outline from Figma: main body x 494-816, z 609-702 (322x93); chaise x 494-585, z 540-702 (91x162). Heights: seat 47, back cushions to 82, arms ~65. Build as seat blocks + backrest slab along south edge + arm bolsters on both ends + chaise seat extension.", "main": { "x": 494, "z": 609, "w": 322, "d": 93 }, "chaise": { "x": 494, "z": 540, "w": 91, "d": 162 }, "seatHeight": 47, "backHeight": 82, "armHeight": 65 },
+    { "name": "shoe-rack", "shape": "box", "x": 1064, "z": 673, "w": 79, "d": 29, "h": 100 }
+  ],
+  "camera": {
+    "name": "couch-view",
+    "eye": [660, 115, 640],
+    "lookAt": [683, 120, 324],
+    "fovDeg": 60,
+    "note": "seated on the sofa main seat, looking north at the TV wall"
+  }
+};
+
+/* ============================================================
+   CONSTANTS
+   ============================================================ */
+const WALL_THICKNESS = 10;
+const WALL_HEIGHT = DATA.ceilingHeight; // 240
+const CANVAS_W = 1024, CANVAS_H = 768;
+
+// muted, distinguishable colors per furniture piece (mode 1 only)
+const COLORS = {
+  "bookshelf": 0x8a7f6d,
+  "tv-stand": 0x4a3c2f,
+  "tv-samsung-frame": 0x1c1c1e,
+  "billy-hemnes-shelving": 0xb9ad8f,
+  "water-cooler": 0x7fa8a3,
+  "dining-table": 0xc2a878,
+  "swivel-chair": 0x5c7191,
+  "applaryd-sofa": 0x8a9a7e,
+  "shoe-rack": 0x6d5a48,
+  "wall": 0xdcd6c9,
+  "floor-living-room": 0xcfc3ac,
+  "floor-kitchen-and-passage": 0xc7cdbb,
+  "ceiling": 0xefeae0
+};
+
+/* ============================================================
+   RENDERER / SCENE / CAMERA
+   ============================================================ */
+const wrap = document.getElementById("canvas-wrap");
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1); // keep exports at exactly 1024x768 px, no DPR scaling
+renderer.setSize(CANVAS_W, CANVAS_H, false);
+wrap.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x000000);
+
+const camera = new THREE.PerspectiveCamera(DATA.camera.fovDeg, CANVAS_W / CANVAS_H, 5, 3000);
+
+const CAMERA_PRESETS = {
+  // key 0 — couch view from geometry.json
+  0: {
+    eye: new THREE.Vector3(...DATA.camera.eye),
+    lookAt: new THREE.Vector3(...DATA.camera.lookAt)
+  },
+  // key 9 — reverse view from the main-door/kitchen passage looking at the
+  // sofa + swivel chair (the two silhouettes the spike evaluation judges)
+  9: {
+    eye: new THREE.Vector3(1400, 150, 630),
+    lookAt: new THREE.Vector3(660, 60, 590),
+    depthNear: 40, depthFar: 1000
+  }
+};
+
+function applyCameraPreset(which = 0) {
+  const p = CAMERA_PRESETS[which];
+  camera.position.copy(p.eye);
+  camera.up.set(0, 1, 0);
+  camera.lookAt(p.lookAt);
+  controls.target.copy(p.lookAt);
+  controls.update();
+  depthUniforms.uNear.value = p.depthNear ?? 30;
+  depthUniforms.uFar.value = p.depthFar ?? 600;
+}
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.screenSpacePanning = true;
+// initial preset is applied at the bottom of the file (after depthUniforms
+// exists), via the URL-param startup block
+
+/* ============================================================
+   LIGHTS (mode 1 only — depth/edge modes ignore these)
+   ============================================================ */
+const ambient = new THREE.AmbientLight(0xffffff, 0.55);
+scene.add(ambient);
+const sun = new THREE.DirectionalLight(0xffffff, 0.9);
+sun.position.set(600, 400, 200);
+scene.add(sun);
+
+/* ============================================================
+   FLOOR + CEILING
+   ============================================================ */
+const litMeshes = []; // meshes that should get edges + are visible in mode 1
+
+function addFloor(rect, color) {
+  const geo = new THREE.PlaneGeometry(rect.w, rect.d);
+  geo.rotateX(-Math.PI / 2);
+  const mat = new THREE.MeshLambertMaterial({ color, side: THREE.DoubleSide });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(rect.x + rect.w / 2, 0, rect.z + rect.d / 2);
+  scene.add(mesh);
+  litMeshes.push(mesh);
+}
+
+function addCeiling(rect, color) {
+  const geo = new THREE.PlaneGeometry(rect.w, rect.d);
+  geo.rotateX(-Math.PI / 2);
+  const mat = new THREE.MeshLambertMaterial({ color, side: THREE.DoubleSide });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(rect.x + rect.w / 2, WALL_HEIGHT, rect.z + rect.d / 2);
+  scene.add(mesh);
+  litMeshes.push(mesh);
+}
+
+DATA.floor.forEach(rect => {
+  addFloor(rect, COLORS["floor-" + rect.name] || 0xcccccc);
+  addCeiling(rect, COLORS.ceiling);
+});
+
+/* ============================================================
+   WALLS (centerline + thickness, with door/window openings
+   cut as real geometric gaps so they read as holes in depth)
+   ============================================================ */
+const wallMat = new THREE.MeshLambertMaterial({ color: COLORS.wall });
+
+function addWall(wallDef) {
+  const [x0, z0] = wallDef.from;
+  const [x1, z1] = wallDef.to;
+  const dx = x1 - x0, dz = z1 - z0;
+  const horizontal = Math.abs(dx) >= Math.abs(dz); // wall runs along world X
+  const length = horizontal ? Math.abs(dx) : Math.abs(dz);
+  const s0 = horizontal ? Math.min(x0, x1) : Math.min(z0, z1);
+
+  // NOTE: opening "start"/"size" in geometry.json are ABSOLUTE plan
+  // coordinates along the wall's axis (not offsets from wallDef.from) —
+  // verified against wall spans (e.g. east-wall's main-door start=562,
+  // size=140 -> ends at 702, exactly the wall's far endpoint). Convert
+  // to wall-local coordinates (0..length) here.
+  const openings = (wallDef.openings || [])
+    .map(o => ({ start: o.start - s0, end: o.start + o.size - s0, type: o.type, name: o.name }))
+    .sort((a, b) => a.start - b.start);
+
+  // full-height solid runs between/around openings
+  let cursor = 0;
+  const fullSolid = [];
+  openings.forEach(o => {
+    if (o.start > cursor) fullSolid.push({ a: cursor, b: o.start });
+    cursor = Math.max(cursor, o.end);
+  });
+  if (cursor < length) fullSolid.push({ a: cursor, b: length });
+
+  function addSegment(aLocal, bLocal, yBottom, yTop) {
+    const segLen = bLocal - aLocal;
+    if (segLen <= 0.001) return;
+    const midLocal = (aLocal + bLocal) / 2;
+    const h = yTop - yBottom;
+    const geo = horizontal
+      ? new THREE.BoxGeometry(segLen, h, WALL_THICKNESS)
+      : new THREE.BoxGeometry(WALL_THICKNESS, h, segLen);
+    const mesh = new THREE.Mesh(geo, wallMat);
+    const cx = horizontal ? s0 + midLocal : x0;
+    const cz = horizontal ? z0 : s0 + midLocal;
+    mesh.position.set(cx, yBottom + h / 2, cz);
+    scene.add(mesh);
+    litMeshes.push(mesh);
+  }
+
+  // full-height wall runs (no opening)
+  fullSolid.forEach(seg => addSegment(seg.a, seg.b, 0, WALL_HEIGHT));
+
+  // opening spans: doors get a lintel above; windows get sill below + lintel above
+  openings.forEach(o => {
+    if (o.type === "door") {
+      addSegment(o.start, o.end, 210, WALL_HEIGHT); // lintel, floor-to-210 is open
+    } else if (o.type === "window") {
+      addSegment(o.start, o.end, 0, 90);   // sill wall below opening
+      addSegment(o.start, o.end, 210, WALL_HEIGHT); // lintel above opening
+    }
+  });
+}
+
+DATA.walls.forEach(addWall);
+
+/* ============================================================
+   PLAIN-BOX FURNITURE
+   ============================================================ */
+function addBox(name, x, z, w, d, h, color, yBase = 0) {
+  const geo = new THREE.BoxGeometry(w, h, d);
+  const mat = new THREE.MeshLambertMaterial({ color });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(x + w / 2, yBase + h / 2, z + d / 2);
+  mesh.name = name;
+  scene.add(mesh);
+  litMeshes.push(mesh);
+  return mesh;
+}
+
+DATA.furniture.forEach(f => {
+  if (f.shape === "box") {
+    addBox(f.name, f.x, f.z, f.w, f.d, f.h, COLORS[f.name] || 0x999999);
+  } else if (f.shape === "wall-slab") {
+    // Mounted on the north wall's interior (room-side) face.
+    // Wall centerline is at z=324; interior face is ~ centerline + half thickness.
+    const faceZ = 324 + WALL_THICKNESS / 2;
+    addBox(f.name, f.x, faceZ, f.w, f.d, f.h, COLORS[f.name] || 0x222222, f.elevation);
+  }
+  // compound-sofa and compound-chair handled below
+});
+
+/* ============================================================
+   APPLARYD SOFA — compound silhouette (not a single box)
+   ============================================================ */
+(function buildSofa() {
+  const f = DATA.furniture.find(x => x.name === "applaryd-sofa");
+  const main = f.main, chaise = f.chaise;
+  const seatH = f.seatHeight;   // 47
+  const backH = f.backHeight;   // 82
+  const armH = f.armHeight;     // 65
+  const color = COLORS["applaryd-sofa"];
+  const backThickness = 25;
+  const armWidth = 15;
+
+  const group = new THREE.Group();
+
+  function box(w, h, d, x, y, z, c = color) {
+    const geo = new THREE.BoxGeometry(w, h, d);
+    const mat = new THREE.MeshLambertMaterial({ color: c });
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(x, y, z);
+    group.add(m);
+    return m;
+  }
+
+  // Backrest slab along the SOUTH edge of the main body, floor to backHeight,
+  // tilted back slightly (top leans further south, away from the seat).
+  const backZ = main.z + main.d - backThickness / 2;
+  const backMesh = box(
+    main.w, backH, backThickness,
+    main.x + main.w / 2, backH / 2, backZ
+  );
+  backMesh.rotation.x = THREE.MathUtils.degToRad(-8); // lean top away from sitter (south)
+  backMesh.position.z += 4; // nudge to compensate for tilt clipping into seat
+
+  // Main seat block (footprint minus the backrest's depth), seat height.
+  const mainSeatD = main.d - backThickness;
+  box(main.w, seatH, mainSeatD, main.x + main.w / 2, seatH / 2, main.z + mainSeatD / 2);
+
+  // Chaise seat extension (west end, extends further north than the main body).
+  const chaiseSeatD = chaise.d - backThickness; // stop short of the shared backrest zone
+  box(chaise.w, seatH, chaiseSeatD, chaise.x + chaise.w / 2, seatH / 2, chaise.z + chaiseSeatD / 2);
+
+  // Arm bolster at the EAST end of the main body (opposite the chaise).
+  box(
+    armWidth, armH, main.d,
+    main.x + main.w - armWidth / 2, armH / 2, main.z + main.d / 2
+  );
+
+  // Arm bolster along the outer WEST edge of the chaise.
+  box(
+    armWidth, armH, chaise.d,
+    chaise.x + armWidth / 2, armH / 2, chaise.z + chaise.d / 2
+  );
+
+  // Small front arm/bolster at the NORTH end of the chaise (front lip).
+  box(
+    chaise.w, armH, armWidth,
+    chaise.x + chaise.w / 2, armH / 2, chaise.z + armWidth / 2
+  );
+
+  scene.add(group);
+  group.traverse(o => { if (o.isMesh) litMeshes.push(o); });
+})();
+
+/* ============================================================
+   SWIVEL CHAIR — compound silhouette (not a single box)
+   ============================================================ */
+(function buildSwivelChair() {
+  const f = DATA.furniture.find(x => x.name === "swivel-chair");
+  const color = COLORS["swivel-chair"];
+  const cx = f.x + f.w / 2;
+  const cz = f.z + f.d / 2;
+  const seatTop = 45;
+
+  const group = new THREE.Group();
+  group.position.set(cx, 0, cz);
+
+  function mat() { return new THREE.MeshLambertMaterial({ color }); }
+
+  // Foot disk (base)
+  const foot = new THREE.Mesh(new THREE.CylinderGeometry(35, 38, 4, 24), mat());
+  foot.position.y = 2;
+  group.add(foot);
+
+  // Central column
+  const column = new THREE.Mesh(new THREE.CylinderGeometry(6, 6, seatTop - 4 - 12, 16), mat());
+  column.position.y = 4 + (seatTop - 4 - 12) / 2;
+  group.add(column);
+
+  // Seat cylinder
+  const seat = new THREE.Mesh(new THREE.CylinderGeometry(45, 42, 12, 32), mat());
+  seat.position.y = seatTop - 6;
+  group.add(seat);
+
+  // Backrest — curved-ish slab (approximated with a shallow cylinder wedge),
+  // rising from the seat to ~100cm, mounted on the side opposite the facing direction.
+  const backH = 100 - seatTop;
+  const backrest = new THREE.Mesh(
+    new THREE.CylinderGeometry(38, 38, backH, 24, 1, false, -Math.PI * 0.35, Math.PI * 0.7),
+    mat()
+  );
+  backrest.position.y = seatTop + backH / 2;
+  group.add(backrest);
+
+  // Orient the chair so the backrest arc (local +Z bulge) points south-east,
+  // leaving the open front facing north-west toward the TV wall.
+  group.rotation.y = THREE.MathUtils.degToRad(45);
+
+  scene.add(group);
+  group.traverse(o => { if (o.isMesh) litMeshes.push(o); });
+})();
+
+/* ============================================================
+   EDGE / WIREFRAME MODE — precomputed once from all lit meshes
+   ============================================================ */
+const edgesGroup = new THREE.Group();
+edgesGroup.visible = false;
+litMeshes.forEach(mesh => {
+  const eg = new THREE.EdgesGeometry(mesh.geometry, 15);
+  const line = new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: 0xffffff }));
+  // Use world transform, not local, since sofa/chair meshes are children
+  // of a Group (their .position/.rotation are relative to that group).
+  mesh.updateWorldMatrix(true, false);
+  line.matrix.copy(mesh.matrixWorld);
+  line.matrix.decompose(line.position, line.quaternion, line.scale);
+  line.matrixAutoUpdate = true;
+  edgesGroup.add(line);
+});
+scene.add(edgesGroup);
+
+/* ============================================================
+   DEPTH MODE — custom ShaderMaterial, linear eye-space depth,
+   normalized so WHITE = NEAR, BLACK = FAR (MiDaS/ControlNet convention)
+   ============================================================ */
+const depthUniforms = {
+  uNear: { value: 30 },  // cm
+  uFar: { value: 900 }   // cm
+};
+
+const depthMaterial = new THREE.ShaderMaterial({
+  uniforms: depthUniforms,
+  side: THREE.DoubleSide, // floor/ceiling planes are seen from their back face
+
+  vertexShader: `
+    varying float vViewZ;
+    void main() {
+      vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+      vViewZ = -mvPosition.z; // positive distance in front of camera, eye space
+      gl_Position = projectionMatrix * mvPosition;
+    }
+  `,
+  fragmentShader: `
+    uniform float uNear;
+    uniform float uFar;
+    varying float vViewZ;
+    void main() {
+      float d = clamp((vViewZ - uNear) / (uFar - uNear), 0.0, 1.0);
+      float shade = 1.0 - d; // near = white(1), far = black(0)
+      gl_FragColor = vec4(vec3(shade), 1.0);
+    }
+  `
+});
+
+/* ============================================================
+   MODE SWITCHING
+   ============================================================ */
+let mode = 1; // 1 = shaded, 2 = depth, 3 = edges
+
+function setMode(m) {
+  mode = m;
+  if (m === 1) {
+    scene.overrideMaterial = null;
+    scene.background = new THREE.Color(0x1a1a1a);
+    ambient.visible = true;
+    sun.visible = true;
+    litMeshes.forEach(o => o.visible = true);
+    edgesGroup.visible = false;
+  } else if (m === 2) {
+    scene.overrideMaterial = depthMaterial;
+    scene.background = new THREE.Color(0x000000);
+    litMeshes.forEach(o => o.visible = true);
+    edgesGroup.visible = false;
+  } else if (m === 3) {
+    scene.overrideMaterial = null;
+    scene.background = new THREE.Color(0x000000);
+    litMeshes.forEach(o => o.visible = false);
+    edgesGroup.visible = true;
+  }
+  updateHUD();
+}
+
+/* ============================================================
+   EXPORT (PNG download of current canvas)
+   ============================================================ */
+function exportPNG() {
+  renderer.render(scene, camera); // ensure buffer reflects current frame
+  const names = { 1: "shaded.png", 2: "depth.png", 3: "edge.png" };
+  renderer.domElement.toBlob(blob => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = names[mode];
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    showToast("Exported " + names[mode]);
+  }, "image/png");
+}
+
+/* ============================================================
+   KEYBOARD
+   ============================================================ */
+window.addEventListener("keydown", (e) => {
+  switch (e.key) {
+    case "1": setMode(1); break;
+    case "2": setMode(2); break;
+    case "3": setMode(3); break;
+    case "0": applyCameraPreset(0); break;
+    case "9": applyCameraPreset(9); break;
+    case "e": case "E": exportPNG(); break;
+    case "[": depthUniforms.uNear.value = Math.max(1, depthUniforms.uNear.value - 5); updateHUD(); break;
+    case "]": depthUniforms.uNear.value += 5; updateHUD(); break;
+    case "-": case "_": depthUniforms.uFar.value = Math.max(depthUniforms.uNear.value + 10, depthUniforms.uFar.value - 25); updateHUD(); break;
+    case "=": case "+": depthUniforms.uFar.value += 25; updateHUD(); break;
+    default: return;
+  }
+  e.preventDefault();
+});
+
+/* ============================================================
+   HUD
+   ============================================================ */
+const hud = document.getElementById("hud");
+const modeNames = { 1: "SHADED", 2: "DEPTH", 3: "EDGES" };
+
+function updateHUD() {
+  const p = camera.position;
+  hud.innerHTML =
+`<b>mode: ${modeNames[mode]}</b>  (1 shaded / 2 depth / 3 edges)
+camera: ${p.x.toFixed(0)}, ${p.y.toFixed(0)}, ${p.z.toFixed(0)}  fov ${camera.fov.toFixed(0)}
+depth near/far: ${depthUniforms.uNear.value.toFixed(0)}cm / ${depthUniforms.uFar.value.toFixed(0)}cm  ( [ ] near, - = far )
+<b>0</b> couch view   <b>9</b> reverse view (sofa)   <b>E</b> export PNG   drag/scroll: orbit`;
+}
+
+function showToast(msg) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => t.classList.remove("show"), 1500);
+}
+
+/* ============================================================
+   RENDER LOOP
+   ============================================================ */
+// URL params for headless/scripted capture: ?mode=1|2|3&cam=0|9&clean
+// (&clean hides the HUD/frame so a 1024x768 window screenshot IS the render)
+const qp = new URLSearchParams(location.search);
+if (qp.has("clean")) {
+  hud.style.display = "none";
+  document.getElementById("canvas-wrap").style.boxShadow = "none";
+}
+applyCameraPreset(qp.get("cam") === "9" ? 9 : 0);
+setMode([1, 2, 3].includes(Number(qp.get("mode"))) ? Number(qp.get("mode")) : 1);
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  updateHUD();
+  renderer.render(scene, camera);
+}
+animate();
+</script>
+</body>
+</html>

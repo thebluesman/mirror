@@ -1,0 +1,39 @@
+{
+  "meta": {
+    "source": "Figma 'Living Room' page (Emerald Residence 107), frame 0:2, scale 1px = 1cm",
+    "units": "cm",
+    "coords": "x = Figma x, z = Figma y (plan view), y = up. All footprints are [x, z] of top-left corner in plan + [width, depth].",
+    "assumed": "All heights are assumed (not in Figma): ceiling 240, window sill 90 / height 120, doors 210 tall. Billy+Hemnes uses poc-plan dims 169x38 (Figma drew 160x30). TV stand uses label dims 188x39 (Figma drew 180x39)."
+  },
+  "ceilingHeight": 240,
+  "floor": [
+    { "name": "living-room", "x": 474, "z": 324, "w": 656, "d": 378 },
+    { "name": "kitchen-and-passage", "x": 1130, "z": 274, "w": 369, "d": 428 }
+  ],
+  "walls": [
+    { "name": "north-tv-wall", "from": [474, 324], "to": [1130, 324], "note": "TV wall; interior face" },
+    { "name": "kitchen-west-stub", "from": [1130, 324], "to": [1130, 274], "note": "connects TV wall to kitchen back wall" },
+    { "name": "kitchen-north-wall", "from": [1130, 274], "to": [1499, 274] },
+    { "name": "east-wall", "from": [1499, 274], "to": [1499, 702], "openings": [ { "name": "main-door", "along": "z", "start": 562, "size": 140, "type": "door" } ] },
+    { "name": "south-wall", "from": [474, 702], "to": [1499, 702], "openings": [ { "name": "bedroom-door", "along": "x", "start": 892, "size": 108, "type": "door" }, { "name": "powder-room-door", "along": "x", "start": 1290, "size": 87, "type": "door" } ] },
+    { "name": "west-wall", "from": [474, 324], "to": [474, 702], "openings": [ { "name": "window-1", "along": "z", "start": 393, "size": 110, "type": "window" }, { "name": "window-2", "along": "z", "start": 533, "size": 110, "type": "window" } ] }
+  ],
+  "furniture": [
+    { "name": "bookshelf", "shape": "box", "x": 474, "z": 324, "w": 72, "d": 40, "h": 180 },
+    { "name": "tv-stand", "shape": "box", "x": 593, "z": 324, "w": 188, "d": 39, "h": 50 },
+    { "name": "tv-samsung-frame", "shape": "wall-slab", "x": 610, "z": 324, "w": 146, "d": 8, "h": 85, "elevation": 95, "note": "wall-mounted on north wall above TV stand" },
+    { "name": "billy-hemnes-shelving", "shape": "box", "x": 876, "z": 324, "w": 169, "d": 38, "h": 202 },
+    { "name": "water-cooler", "shape": "box", "x": 1096, "z": 324, "w": 34, "d": 30, "h": 100 },
+    { "name": "dining-table", "shape": "box", "x": 880, "z": 397, "w": 153, "d": 92, "h": 75, "note": "ok to model as tabletop slab on 4 leg posts if trivial, else box" },
+    { "name": "swivel-chair", "shape": "compound-chair", "x": 798, "z": 509, "w": 98, "d": 98, "note": "round swivel chair: cylindrical base pedestal + round seat at 45 + curved/slab backrest to ~100, facing north-east toward TV" },
+    { "name": "applaryd-sofa", "shape": "compound-sofa", "note": "L-shape, faces north (toward TV wall). Chaise on WEST end. Outline from Figma: main body x 494-816, z 609-702 (322x93); chaise x 494-585, z 540-702 (91x162). Heights: seat 47, back cushions to 82, arms ~65. Build as seat blocks + backrest slab along south edge + arm bolsters on both ends + chaise seat extension.", "main": { "x": 494, "z": 609, "w": 322, "d": 93 }, "chaise": { "x": 494, "z": 540, "w": 91, "d": 162 }, "seatHeight": 47, "backHeight": 82, "armHeight": 65 },
+    { "name": "shoe-rack", "shape": "box", "x": 1064, "z": 673, "w": 79, "d": 29, "h": 100 }
+  ],
+  "camera": {
+    "name": "couch-view",
+    "eye": [660, 115, 640],
+    "lookAt": [683, 120, 324],
+    "fovDeg": 60,
+    "note": "seated on the sofa main seat, looking north at the TV wall"
+  }
+}

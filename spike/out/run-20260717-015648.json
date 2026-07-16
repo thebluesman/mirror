@@ -1,0 +1,156 @@
+{
+  "timestamp": "20260717-015648",
+  "model": "flux",
+  "endpoint": "fal-ai/flux-control-lora-depth",
+  "prompt": "A photo of a real lived-in living room, view from the sofa toward the TV wall. Light grey fabric L-shaped sofa with chaise (Lejde light grey). Wall-mounted Samsung Frame TV, and directly below it a low dark wooden TV stand media console. Tall bookshelf in the corner, white Billy shelving unit against the wall. Light wood dining table with chairs. Round grey swivel chair. Warm white walls, light floor tiles, natural daylight from windows on the left, soft afternoon light. Realistic interior photography, natural colors, no people.",
+  "scale": 1.0,
+  "size": {
+    "width": 1024,
+    "height": 768
+  },
+  "n": 5,
+  "base_seed": null,
+  "estimated_cost_usd": 0.2,
+  "batches": [
+    {
+      "endpoint": "fal-ai/flux-control-lora-depth",
+      "request_args": {
+        "prompt": "A photo of a real lived-in living room, view from the sofa toward the TV wall. Light grey fabric L-shaped sofa with chaise (Lejde light grey). Wall-mounted Samsung Frame TV, and directly below it a low dark wooden TV stand media console. Tall bookshelf in the corner, white Billy shelving unit against the wall. Light wood dining table with chairs. Round grey swivel chair. Warm white walls, light floor tiles, natural daylight from windows on the left, soft afternoon light. Realistic interior photography, natural colors, no people.",
+        "control_lora_image_url": "https://v3b.fal.media/files/b/0aa2885c/0m9ayOxMNO_DUycP8tegI_depth.png",
+        "control_lora_strength": 1.0,
+        "image_size": {
+          "width": 1024,
+          "height": 768
+        },
+        "num_images": 1
+      },
+      "seed": 1154856416909712173,
+      "prompt": "A photo of a real lived-in living room, view from the sofa toward the TV wall. Light grey fabric L-shaped sofa with chaise (Lejde light grey). Wall-mounted Samsung Frame TV, and directly below it a low dark wooden TV stand media console. Tall bookshelf in the corner, white Billy shelving unit against the wall. Light wood dining table with chairs. Round grey swivel chair. Warm white walls, light floor tiles, natural daylight from windows on the left, soft afternoon light. Realistic interior photography, natural colors, no people.",
+      "image_files": [
+        "run-20260717-015648-1.png"
+      ],
+      "response_meta": {
+        "timings": {
+          "inference": 3.5265266820788383
+        },
+        "seed": 1154856416909712173,
+        "has_nsfw_concepts": [
+          false
+        ],
+        "prompt": "A photo of a real lived-in living room, view from the sofa toward the TV wall. Light grey fabric L-shaped sofa with chaise (Lejde light grey). Wall-mounted Samsung Frame TV, and directly below it a low dark wooden TV stand media console. Tall bookshelf in the corner, white Billy shelving unit against the wall. Light wood dining table with chairs. Round grey swivel chair. Warm white walls, light floor tiles, natural daylight from windows on the left, soft afternoon light. Realistic interior photography, natural colors, no people."
+      }
+    },
+    {
+      "endpoint": "fal-ai/flux-control-lora-depth",
+      "request_args": {
+        "prompt": "A photo of a real lived-in living room, view from the sofa toward the TV wall. Light grey fabric L-shaped sofa with chaise (Lejde light grey). Wall-mounted Samsung Frame TV, and directly below it a low dark wooden TV stand media console. Tall bookshelf in the corner, white Billy shelving unit against the wall. Light wood dining table with chairs. Round grey swivel chair. Warm white walls, light floor tiles, natural daylight from windows on the left, soft afternoon light. Realistic interior photography, natural colors, no people.",
+        "control_lora_image_url": "https://v3b.fal.media/files/b/0aa2885c/0m9ayOxMNO_DUycP8tegI_depth.png",
+        "control_lora_strength": 1.0,
+        "image_size": {
+          "width": 1024,
+          "height": 768
+        },
+        "num_images": 1
+      },
+      "seed": 14550694774730794277,
+      "prompt": "A photo of a real lived-in living room, view from the sofa toward the TV wall. Light grey fabric L-shaped sofa with chaise (Lejde light grey). Wall-mounted Samsung Frame TV, and directly below it a low dark wooden TV stand media console. Tall bookshelf in the corner, white Billy shelving unit against the wall. Light wood dining table with chairs. Round grey swivel chair. Warm white walls, light floor tiles, natural daylight from windows on the left, soft afternoon light. Realistic interior photography, natural colors, no people.",
+      "image_files": [
+        "run-20260717-015648-2.png"
+      ],
+      "response_meta": {
+        "timings": {
+          "inference": 4.139529363019392
+        },
+        "seed": 14550694774730794277,
+        "has_nsfw_concepts": [
+          false
+        ],
+        "prompt": "A photo of a real lived-in living room, view from the sofa toward the TV wall. Light grey fabric L-shaped sofa with chaise (Lejde light grey). Wall-mounted Samsung Frame TV, and directly below it a low dark wooden TV stand media console. Tall bookshelf in the corner, white Billy shelving unit against the wall. Light wood dining table with chairs. Round grey swivel chair. Warm white walls, light floor tiles, natural daylight from windows on the left, soft afternoon light. Realistic interior photography, natural colors, no people."
+      }
+    },
+    {
+      "endpoint": "fal-ai/flux-control-lora-depth",
+      "request_args": {
+        "prompt": "A photo of a real lived-in living room, view from the sofa toward the TV wall. Light grey fabric L-shaped sofa with chaise (Lejde light grey). Wall-mounted Samsung Frame TV, and directly below it a low dark wooden TV stand media console. Tall bookshelf in the corner, white Billy shelving unit against the wall. Light wood dining table with chairs. Round grey swivel chair. Warm white walls, light floor tiles, natural daylight from windows on the left, soft afternoon light. Realistic interior photography, natural colors, no people.",
+        "control_lora_image_url": "https://v3b.fal.media/files/b/0aa2885c/0m9ayOxMNO_DUycP8tegI_depth.png",
+        "control_lora_strength": 1.0,
+        "image_size": {
+          "width": 1024,
+          "height": 768
+        },
+        "num_images": 1
+      },
+      "seed": 11299585113553658286,
+      "prompt": "A photo of a real lived-in living room, view from the sofa toward the TV wall. Light grey fabric L-shaped sofa with chaise (Lejde light grey). Wall-mounted Samsung Frame TV, and directly below it a low dark wooden TV stand media console. Tall bookshelf in the corner, white Billy shelving unit against the wall. Light wood dining table with chairs. Round grey swivel chair. Warm white walls, light floor tiles, natural daylight from windows on the left, soft afternoon light. Realistic interior photography, natural colors, no people.",
+      "image_files": [
+        "run-20260717-015648-3.png"
+      ],
+      "response_meta": {
+        "timings": {
+          "inference": 3.631059910170734
+        },
+        "seed": 11299585113553658286,
+        "has_nsfw_concepts": [
+          false
+        ],
+        "prompt": "A photo of a real lived-in living room, view from the sofa toward the TV wall. Light grey fabric L-shaped sofa with chaise (Lejde light grey). Wall-mounted Samsung Frame TV, and directly below it a low dark wooden TV stand media console. Tall bookshelf in the corner, white Billy shelving unit against the wall. Light wood dining table with chairs. Round grey swivel chair. Warm white walls, light floor tiles, natural daylight from windows on the left, soft afternoon light. Realistic interior photography, natural colors, no people."
+      }
+    },
+    {
+      "endpoint": "fal-ai/flux-control-lora-depth",
+      "request_args": {
+        "prompt": "A photo of a real lived-in living room, view from the sofa toward the TV wall. Light grey fabric L-shaped sofa with chaise (Lejde light grey). Wall-mounted Samsung Frame TV, and directly below it a low dark wooden TV stand media console. Tall bookshelf in the corner, white Billy shelving unit against the wall. Light wood dining table with chairs. Round grey swivel chair. Warm white walls, light floor tiles, natural daylight from windows on the left, soft afternoon light. Realistic interior photography, natural colors, no people.",
+        "control_lora_image_url": "https://v3b.fal.media/files/b/0aa2885c/0m9ayOxMNO_DUycP8tegI_depth.png",
+        "control_lora_strength": 1.0,
+        "image_size": {
+          "width": 1024,
+          "height": 768
+        },
+        "num_images": 1
+      },
+      "seed": 17455914627048898799,
+      "prompt": "A photo of a real lived-in living room, view from the sofa toward the TV wall. Light grey fabric L-shaped sofa with chaise (Lejde light grey). Wall-mounted Samsung Frame TV, and directly below it a low dark wooden TV stand media console. Tall bookshelf in the corner, white Billy shelving unit against the wall. Light wood dining table with chairs. Round grey swivel chair. Warm white walls, light floor tiles, natural daylight from windows on the left, soft afternoon light. Realistic interior photography, natural colors, no people.",
+      "image_files": [
+        "run-20260717-015648-4.png"
+      ],
+      "response_meta": {
+        "timings": {
+          "inference": 3.3303776900283992
+        },
+        "seed": 17455914627048898799,
+        "has_nsfw_concepts": [
+          false
+        ],
+        "prompt": "A photo of a real lived-in living room, view from the sofa toward the TV wall. Light grey fabric L-shaped sofa with chaise (Lejde light grey). Wall-mounted Samsung Frame TV, and directly below it a low dark wooden TV stand media console. Tall bookshelf in the corner, white Billy shelving unit against the wall. Light wood dining table with chairs. Round grey swivel chair. Warm white walls, light floor tiles, natural daylight from windows on the left, soft afternoon light. Realistic interior photography, natural colors, no people."
+      }
+    },
+    {
+      "endpoint": "fal-ai/flux-control-lora-depth",
+      "request_args": {
+        "prompt": "A photo of a real lived-in living room, view from the sofa toward the TV wall. Light grey fabric L-shaped sofa with chaise (Lejde light grey). Wall-mounted Samsung Frame TV, and directly below it a low dark wooden TV stand media console. Tall bookshelf in the corner, white Billy shelving unit against the wall. Light wood dining table with chairs. Round grey swivel chair. Warm white walls, light floor tiles, natural daylight from windows on the left, soft afternoon light. Realistic interior photography, natural colors, no people.",
+        "control_lora_image_url": "https://v3b.fal.media/files/b/0aa2885c/0m9ayOxMNO_DUycP8tegI_depth.png",
+        "control_lora_strength": 1.0,
+        "image_size": {
+          "width": 1024,
+          "height": 768
+        },
+        "num_images": 1
+      },
+      "seed": 1282585643197101154,
+      "prompt": "A photo of a real lived-in living room, view from the sofa toward the TV wall. Light grey fabric L-shaped sofa with chaise (Lejde light grey). Wall-mounted Samsung Frame TV, and directly below it a low dark wooden TV stand media console. Tall bookshelf in the corner, white Billy shelving unit against the wall. Light wood dining table with chairs. Round grey swivel chair. Warm white walls, light floor tiles, natural daylight from windows on the left, soft afternoon light. Realistic interior photography, natural colors, no people.",
+      "image_files": [
+        "run-20260717-015648-5.png"
+      ],
+      "response_meta": {
+        "timings": {
+          "inference": 3.4089448610320687
+        },
+        "seed": 1282585643197101154,
+        "has_nsfw_concepts": [
+          false
+        ],
+        "prompt": "A photo of a real lived-in living room, view from the sofa toward the TV wall. Light grey fabric L-shaped sofa with chaise (Lejde light grey). Wall-mounted Samsung Frame TV, and directly below it a low dark wooden TV stand media console. Tall bookshelf in the corner, white Billy shelving unit against the wall. Light wood dining table with chairs. Round grey swivel chair. Warm white walls, light floor tiles, natural daylight from windows on the left, soft afternoon light. Realistic interior photography, natural colors, no people."
+      }
+    }
+  ]
+}
