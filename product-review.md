@@ -412,3 +412,158 @@ now, AI-still photorealism as the near-term photorealism answer, real furniture 
 as a follow-on milestone." Real-time ray-traced, game-console-grade rendering is not
 recommended at any point in this project's scope — the AI-still path exists precisely
 so that ambition doesn't have to be chased in the live renderer.
+
+---
+
+## Addendum 2 — the ten strategic questions (reconciled, 2026-07-16)
+
+Two independent passes answered the same ten framing questions Supritha raised
+(`claude/mirror-strategic-questions` and `claude/review-project-exploration-mujfo1`).
+They agreed on nine of ten. This reconciles them into one answer set and resolves the
+one place they didn't.
+
+### 1. Layout tool or visualization tool?
+
+**Layout-first, and not close.** Geometry, measurement, and collision are things a
+small team can get *correct* — you can look at a number and know if it's right.
+Visualization fidelity is a taste target with no stopping point. Building both as
+co-equal MVP priorities means neither finishes. Filter for the backlog: if a feature
+makes the model more correct, it's in scope; if it only makes the model prettier, it's
+queued behind the AI-still path (Addendum 1, §Fidelity). The one thing layout-first
+must not skip: the render-hook (one saved camera, one "generate a still" button that's
+allowed to be a stub) is a first-class extension point from day one, so visualization
+work later plugs into a socket instead of retrofitting one.
+
+### 2. Literal boxes vs. stylized recognizable silhouettes?
+
+**Yes — pull the "later" compound-primitives idea into v1.** A small taxonomy of
+furniture archetypes (sofa, chair, table, bed, cabinet, rug — the half-dozen that
+dominate a room), each a parametric silhouette generator (seat box + backrest + arms +
+legs, still driven by the schema's width/depth/height numbers) costs roughly 2–3 days
+per category and is still 100% procedural and dimensionally exact — no modeling
+software, no assets. Build those five or six well; leave everything else a labeled
+box. This isn't just polish: a recognizable silhouette gives the AI-still pipeline
+(question 4) a depth/edge map that actually looks like a chair instead of a box, so
+it's upstream infrastructure for the real photorealism payoff, not a separate line item.
+
+### 3. JSON file or a real database — is a world model inevitable?
+
+**Stay file-based until a concrete capability forces otherwise, and none does yet.**
+The eventual content list (objects, layouts, branches, measurements, scenarios,
+cameras, metadata) sounds database-shaped, but it's all data for one home, owned by
+one or two people, edited one person at a time (question 6's branch model rules out
+concurrent writes). That's a document, not a multi-tenant system — even hundreds of
+objects across dozens of scenario branches with full command history stays in the
+"diff it, grep it, git-blame it" size range. The real trigger for a database is a
+concrete capability — cross-home queries, concurrent-write serialization, indexed
+search over hundreds of homes — not a data-shape worry, and nothing on this roadmap
+needs those. Design the JSON schema as if it might feed database tables later (stable
+IDs everywhere, normalized references, no redundant derived data) so a migration would
+be mechanical if it ever comes, but don't build the migration now. If reasoning
+queries (question 7) ever need real indexed search, add an embedded, disposable,
+rebuild-from-JSON index at that point — never treat it as the source of truth.
+
+### 4. Where does photorealism happen?
+
+**The real-time viewport is the editor; AI-generated stills are the actual
+visualization product.** This is probably the single most important architectural call
+in this whole document — it's what makes "near-photorealistic" achievable at all
+instead of an open-ended scope risk. Workflow: arrange → preview in the real-time
+viewport → pick a saved camera → generate a photoreal still → decide. The real-time
+view is never judged on beauty; the still is the thing that gets shown to a second
+person or acted on. One technical constraint worth locking in now: don't hand the
+model a plain screenshot and ask it to "enhance" it — that drifts, reinterpreting
+proportions or inventing a doorway. Condition the generation on a depth/edge/normal map
+rendered directly from the scene (ControlNet-style structural conditioning), plus a
+text description of materials/colors pulled from the scene's own data. That's the
+difference between "AI reimagines your room" and "AI renders your room," and it's
+exactly why question 2's silhouette work matters — better input shapes condition a
+more faithful still.
+
+### 5. Digital twin, or spatial reasoning engine?
+
+**Digital twin now; spatial reasoning engine is an aspiration the architecture leaves
+open, not a claim to make today.** A twin with correct geometry, stable object IDs, and
+a command layer is exactly the substrate a reasoning engine would need (question 7) —
+but nothing in current scope answers "what can I do with my house," only "what does it
+look like if I do X." Build the twin honestly: store more structure than the MVP UI
+exposes (real IDs, real dimensions, real clearance semantics) so the schema doesn't
+need a rewrite when reasoning features arrive, but don't market the product as more
+than it does yet. Graduate the claim once reasoning queries actually ship, on
+evidence — not before.
+
+### 6. Should Scenarios be the primary organizational unit?
+
+**Yes, and it isn't a new concept — it's the layout-branch idea renamed and given a
+semantic label.** A draft/branch is transient (two people trying variations en route to
+one "current" layout); a scenario is durable ("Movie Night," "Hosting" — configurations
+you deliberately keep). Don't build two systems: one graph of named layouts, each with
+a parent/base reference and a set of changes from that base, tagged `draft`,
+`scenario`, or `current`. Comparison is the same diff operation regardless of tag —
+"compare Movie Night with Hosting" and "compare version 12 with version 15" become the
+same command with different arguments once layouts are addressable by name. Rename the
+schema field from generic `layouts` to `scenarios` now, before other code depends on
+the old name — cheap today, painful after the chat interface is already saying
+"version 12."
+
+### 7. Should Mirror reason about the space, not just edit it?
+
+**Yes as the long-term direction, but sequenced deliberately after the world model
+exists — don't pull it into MVP.** "Find every place this bookshelf fits" and "which
+layout maximizes seating" are deterministic geometry queries over the scene graph, not
+LLM capabilities — the same principle as Addendum 1's constraint-aware-suggestions
+pushback, generalized: the LLM may *call* `find_wall_space()` or `max_fit()` and phrase
+the result conversationally; it may never compute or invent the number itself. The
+clearance-overlay MVP feature and those two query functions are the first two entries
+on this list. Sequencing: ship editing with the command layer first; once objects have
+stable IDs and the geometry engine can answer clearance questions, reasoning queries
+are additive — same engine, more query types, exposed as more LLM tools. Name this as
+an explicit phase 2 in the roadmap rather than leaving it implicit.
+
+### 8. One week of fidelity budget — where does it go?
+
+**AI-still pipeline first, by a wide margin; baked lighting/PBR on the live viewport a
+distant second.** Ranked by perceived-quality-per-hour: (1) the AI-still pipeline
+(depth/structure-conditioned generation plus accurate material/color context) —
+externalized to a model that already does photorealism well, so a week buys a
+finished pipeline, not partial progress; (2) silhouette geometry (question 2) and
+camera framing together — cheap, and both compound into #1 (a well-chosen angle beats
+a great render from a bad one, same as photography); (3) materials in the real-time
+viewport — lower priority than it sounds, since most of this effort is thrown away the
+moment AI stills exist; (4) real-time lighting (baked GI, soft shadows) — least
+connected to the actual photorealism goal, spend the week elsewhere first.
+
+### 9. Should objects accumulate history and provenance, not just geometry?
+
+**Yes, and it's a small additive schema change, not a new subsystem.** The object
+schema already has a `Metadata` field; purchase date, price, material notes, and
+scenario/location history are just more fields on that same object, plus one derived
+view — an object's placement history, computed from the command log that already
+exists as a byproduct, not stored separately. Don't build an "object journal" feature
+for the MVP: expose existing command history filtered by object ID, and add a
+free-text `notes`/`purchaseInfo` field to the schema now, since it costs nothing to
+reserve and is painful to retrofit onto every existing object record later.
+
+### 10. The one-sentence definition
+
+**A digital twin, phrased with the action verbs that keep it from sounding passive.**
+The two independent passes disagreed here — one leaned toward "spatial reasoning
+engine, tightened"; the other argued explicitly for "digital twin" over reasoning-engine
+framing, on the grounds that naming the bigger claim today would justify building
+reasoning features before the twin itself is solid (question 5's answer settles this:
+twin now, reasoning as an evidenced-later graduation). Resolving in favor of the twin
+framing, but keeping the tightened, verb-driven phrasing from the other pass, since
+"digital twin" alone reads as passive and invites scope creep toward twin-fidelity
+(the RDR2 conversation) as the whole point:
+
+> **"A structured, accurate digital twin of your home that lets you plan, compare, and
+> decide changes before making them physically."**
+
+This rules out both rejected options on purpose: not "AI-powered interior design tool"
+(design-tool framing invites feature creep toward mood boards, style recommendations,
+and catalog breadth — none of which this project wants), and not "spatial reasoning
+engine" yet (that's where the architecture is headed per question 7, but naming it now
+would justify reasoning features before the twin is solid). It doubles as a scope
+filter: a feature belongs in Mirror if it makes the twin more accurate or more
+decidable — plan, compare, decide — and does not belong if it's about generic design
+assistance, marketplace/catalog breadth, or social sharing.
