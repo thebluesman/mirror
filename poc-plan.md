@@ -60,7 +60,7 @@ Using the living room dimensions already on hand from the Figma reference
 | Dining table | 153 × 92 |
 | Swivel chair | 98 × 98 |
 | Shoe rack | 79 × 29 |
-| ÄPPLARYD sofa | *pin the specific variant (2-seat / 3-seat / corner) before the session — "ÄPPLARYD" alone spans multiple sizes* |
+| ÄPPLARYD sofa | 3-seat with chaise longue, Lejde light grey (article 094.180.51) — 290 × 93 cm, 162 cm depth on the chaise side, 82 cm height including back cushions, 47 cm seat height |
 
 Place these at roughly their plan positions (exact placement doesn't need to match
 perfectly — this is a proportion/geometry and recognizability test, not the final
