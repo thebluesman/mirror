@@ -261,3 +261,154 @@ decision are what keep it thin.
 | Furniture from URL | Change input | Screenshot + vision extraction, mandatory dimension confirmation |
 | Node backend + SQLite | **Cut from MVP** | Browser app + versioned JSON project file; Tauri later if wanted |
 | Chat interface | Keep, resequence | Build last in MVP, after command layer is proven by the UI |
+
+---
+
+## Addendum — response to Shyam's PR comment (2026-07-16)
+
+Shyam answered the open questions and added new requirements in the PR thread. Going
+through each, with pushback where warranted (per the brief: don't just accommodate).
+
+### Open questions, answered
+
+**1. Drop the Figma importer; read the file via an MCP session instead.**
+Reasonable for a one-off personal project, but be clear about what this actually is:
+a **manual, one-time conversion**, not an importer. A Figma MCP session lets an LLM
+*look at* the file and describe it — that is not the same as guaranteed numeric
+extraction of exact coordinates and dimensions. Two things to verify before relying on
+it: (a) that the specific Figma MCP server in use actually exposes precise node
+geometry (position/size in the file's coordinate space), not just a visual/textual
+summary — if it only gives approximate descriptions, you're back to the 95%-accuracy
+problem the calibration step was designed to fix; (b) since this is a manual one-shot,
+any future change to the apartment's layout means redoing the session by hand — fine
+given "not moving anytime soon," but worth writing down as a known limitation rather
+than discovering it later. The JSON scene schema and the calibration step **still
+apply** regardless of how the numbers get extracted.
+
+**2. No vertical dimensions — assume nothing.** Confirmed; manual-entry-with-defaults
+flow (§5 above) stands as designed.
+
+**3. Single apartment, single level.** Confirmed; scene schema can skip
+multi-floor/multi-home for now (leave the slot, don't build the UI).
+
+**4. AI provider: free matters most, local-or-cloud both fine, no major privacy
+concern.** This argues for a **provider-abstraction layer**, not a specific provider —
+build the command-generation and vision-extraction calls behind a thin interface so the
+model/provider is swappable, then default to whichever free tier is currently most
+capable. Two things worth flagging: free cloud tiers come with real rate limits that
+will bite during active editing sessions, and local models (e.g. via Ollama) are
+meaningfully weaker at structured tool-call-style output and vision extraction than
+frontier cloud models — the chat command layer and furniture-image extraction are
+exactly the features most likely to degrade on a small local model. Recommendation:
+cloud free tier as the default, local as an opt-in fallback, never the other way
+around, and design the interface so switching is a config change, not a rewrite.
+
+**5. Yes — near-photorealistic renders were the actual ask.** See the fidelity section
+below; this reverses part of the original recommendation.
+
+### New requirements
+
+**Multi-user (2 users).** This is a real architectural addition, not a small one — but
+point 2 below (version management) turns out to solve it cleanly. See combined
+treatment below.
+
+**"Version management for the home" — yes, this makes sense, and it's good news.**
+What's being described is a branching model: each person (or the same person) works on
+a draft layout, the two of you compare and agree, then one draft becomes "current."
+That maps directly onto the command-log architecture already recommended — a "layout"
+is just a named sequence of commands from a base state, "current" is a pointer to one
+layout, and comparison is a diff over two command sequences (or two resulting scene
+snapshots). This also **resolves the multi-user problem** without needing real-time
+collaborative editing (which would require CRDTs/OT — genuinely hard, don't build it):
+two people editing the same shared JSON project file (synced via whatever file-sync
+tool you already use — Dropbox, iCloud, Syncthing) each work on their own named
+draft/branch, so they're never editing the same data at the same time, and merging is
+an explicit human decision ("let's go with my version"), not an automatic algorithm.
+Recommendation: model this explicitly as first-class **layout branches** in the schema
+(`layouts: [{name, base, commands[]}]`, `current: layoutId`) from the start — it's a
+small addition to the JSON structure and it's much more painful to retrofit than to
+design in now.
+
+**Photo-based room verification — dropped, confirmed.** No further action; the
+side-by-side viewpoint-comparison replacement stands.
+
+**3D model extraction from photos/video of decor.** Tempting, but **don't build this
+in-house** — it's the same class of problem as the room-verification feature that was
+just cut (photogrammetry/NeRF/Gaussian-splatting from casual phone capture), except
+harder, because now the output needs to be a clean, lightweight mesh that composites
+correctly into a scene at exact physical scale — thin lamp arms, upholstery, and glass
+are exactly the cases where consumer photogrammetry still falls over. This is also a
+solved-elsewhere problem: **use an existing tool's output as an import**, not a
+built-in pipeline. Apps like Polycam or Luma AI already do phone-based capture → mesh;
+let the user scan a piece of furniture there, export glTF/OBJ, and import it as a
+custom object through the same "confirm dimensions before insert" flow already
+recommended for URL-sourced furniture. If it's useful later, integrate one of those
+providers' APIs — don't reimplement photogrammetry.
+
+**Furniture from URL — confirmed, no scraping, screenshots/descriptions instead.**
+Matches the original recommendation; no change needed.
+
+**Chat command layer: sidebar + mention syntax for objects.** This is the right
+instinct and it directly answers the "which sofa?" object-addressing problem flagged
+earlier. It's a standard, well-understood pattern (Slack/Notion/Linear-style
+`@`-mention autocomplete) — recommend generalizing it to a single "reference" token
+type that can resolve to *any* addressable scene entity: an object, a camera position,
+a material/color property, a room. Critically, **the resolved mention should carry the
+entity's stable ID into the message sent to the LLM**, not just its display name — so
+disambiguation happens once, at mention-time in the UI (where the user can see the
+viewport and pick the right one), and the model never has to guess which "sofa" was
+meant. This is a genuinely good design decision and should be locked into the command
+schema early.
+
+### Fidelity: partial reversal, with pushback
+
+Section 1's original recommendation (blocks now, compound primitives later) is
+revised, but the request as stated — real-time rendering at "RDR2 on PS4" quality — is
+**not achievable for this project as a from-scratch build**, and should be pushed back
+on directly rather than quietly attempted and under-delivered.
+
+Why: RDR2-level visual quality is the output of a AAA studio's dedicated rendering
+team, years of engine work, and a large, hand-crafted, LOD'd asset pipeline. Even
+"just" the parts of that quality bar that matter for a room — physically-based
+materials, soft shadows, indirect/bounce lighting, screen-space reflections, tone
+mapping and color grading, anti-aliasing — is a multi-year specialty even before
+counting asset production. That bar is out of reach for a two-person personal tool
+regardless of engine choice (Unreal/Unity included), because the bottleneck isn't the
+engine, it's the artist-hours of lighting and material tuning per scene.
+
+**What's actually achievable, and recommended:**
+
+1. **A real-time viewport that's honest about being a real-time viewport.** Upgrade
+   from flat-color blocks to a "good video-game-editor" look: PBR materials (roughness/
+   metalness maps, even simple ones), baked lighting for a fixed room (bake once per
+   layout change, not per frame — this is far cheaper than dynamic GI), an environment
+   map for ambient light, soft shadow maps, and standard post-processing (SSAO, tone
+   mapping, a touch of bloom). This is realistic to build in Three.js or Babylon.js
+   with baked lightmaps and gets meaningfully closer to "looks like a game" without
+   chasing real-time path tracing. It will not look like RDR2. It will look like a
+   competent architectural-visualization tool, which is a legitimate and achievable
+   target.
+2. **AI-generated stills for the actual photorealism ask.** The original spec already
+   had this as a "future" item ("AI Rendering Enhancement" — screenshot in, enhanced
+   image out, geometry preserved). Given that Shyam's real want ("what will the room
+   look like with this rug and the rest of the decor") is fundamentally a *still-image*
+   question, not a *walkthrough* question, this should move from future/optional to a
+   **core MVP-adjacent deliverable**: render the current layout from a saved camera,
+   send it to an image model with the scene's material/color list as context, get back
+   a photorealistic still. This is where the actual "RDR2 quality" feeling comes from
+   in this architecture — not the live viewport.
+3. **Furniture asset quality follows from this.** A baked-lighting real-time viewport
+   makes flat-colored boxes look worse than they did on plain shading, so this is a
+   reasonable point to bring forward part of the "later" fidelity roadmap: for known
+   catalog items (IKEA in particular publishes some 3D assets; other retailers less
+   so), source or approximate real models instead of building compound primitives from
+   scratch; fall back to compound primitives + PBR materials for anything custom. This
+   is more work than originally scoped for MVP, and should be treated as its own
+   milestone after the single-room prototype proves out the rest of the pipeline —
+   not bundled into the first build.
+
+Net effect on MVP: the "blocks now, better later" plan becomes "PBR + baked lighting
+now, AI-still photorealism as the near-term photorealism answer, real furniture assets
+as a follow-on milestone." Real-time ray-traced, game-console-grade rendering is not
+recommended at any point in this project's scope — the AI-still path exists precisely
+so that ambition doesn't have to be chased in the live renderer.
