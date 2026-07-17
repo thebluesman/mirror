@@ -1,7 +1,7 @@
 # Spike 2 Outcome — Real-Time Render Pass (PoC 2)
 
-**Status: C2 passed as BORDERLINE (2026-07-17); D6 path-traced stills rendered;
-awaiting C3 (Shyam's final go / go-with-reframe / no-go).**
+**Status: GO-WITH-REFRAME (2026-07-17).** C2 passed as borderline; D6 path-traced
+stills rendered and reviewed at C3. See "Final decision" below.
 
 Successor to `OUTCOME.md` (spike 1, NO-GO on AI stills). Plan and decision bar:
 `poc2-plan.md`. Question: is honest real-time rendering good enough to be the
@@ -28,8 +28,9 @@ product's visualization mechanism?
     versions + r160 shim), GradientEquirect env, real GI. 300-sample 1024×768 stills
     of both C2 views (~2 s/sample on this Mac's SwiftShader ≈ 10 min/still, vs the
     25–90 min the cloud-sandbox memo projected).
-- Contact sheet: `out2/contact-sheet.html` (raster views vs spike-1 AI stills;
-  path-traced stills in `out2/pt-cam*.png`).
+- Contact sheet: `out2/contact-sheet.html` (raster views vs spike-1 AI stills; a C3
+  section added side-by-side, rung-3 raster vs rung-4 path-traced at 300 samples, for
+  both required views).
 
 ## Checkpoint record
 
@@ -67,14 +68,35 @@ product's visualization mechanism?
   raster's hemisphere fill dilutes it). Neither is "wrong"; they will not match
   pixel-for-pixel.
 
-## Final decision (C3 — pending Shyam)
+## Final decision (C3, 2026-07-17)
 
-_To be recorded: go / go-with-reframe / no-go against §2, plus the implication for
-the MVP visualization question. The §2 definitions:_
-- **Go** = Tier 1 passes both views without caveats.
-- **Go-with-reframe** = Tier 1 passes, Tier 2 clearly never will → pitch becomes
-  "decide layouts and colorways confidently," not "visualize realistically."
-- **No-go** = Tier 1 fails.
+**GO-WITH-REFRAME on real-time PBR rendering as the visualization mechanism.**
+
+C3 sat down with the D6 path-traced stills side-by-side against the rung-3 raster
+renders (`out2/contact-sheet.html`, couch + reverse views, 300 samples each). Verdict:
+the path tracer's real GI mainly shifts overall tone warmer — it does not add material
+fidelity, since both renderers draw from the same procedural textures. It confirms the
+raster hemisphere-fill approximation was honest rather than closing the "color/material
+not quite there yet" gap C2 already flagged. Given that, Tier 1 lands as: layout/
+proportion — pass; brightness/mood — pass; color/material — the one sub-criterion that
+doesn't clear "without caveats," and the fix for it (real photo textures per-material,
+not a better renderer) is identified but unspent, per the D2 memo's candidate lever.
+
+That reads as Tier 1 passing on the criteria that matter most for the product's actual
+decisions (does the layout/proportion/size read correctly, is the mood honest) with one
+acknowledged, addressable gap — not a Tier 1 failure, and Tier 2 (fine texture/pile
+fidelity) was never expected to fully pass. That combination is exactly the plan's
+go-with-reframe branch, not a clean go: the product pitch reframes from "visualize
+realistically" to "decide layouts and colorways confidently," with color/material
+fidelity flagged as a known, improvable limitation rather than a blocking failure.
+
+**Implication for the product:** the real-time Three.js/WebGL pipeline (authored
+geometry + PBR materials) is the visualization mechanism going forward, replacing the
+AI-still/ControlNet path spike 1 ruled out. If a later milestone needs tighter
+color/material fidelity, the identified next lever is real CC0 photo textures
+(Poly Haven/ambientCG — reachable from a normal network, unlike this sandbox), not a
+switch to path tracing; path tracing is now de-risked (pinned versions, known gotchas)
+as a stretch option for occasional decision-grade stills, not a rendering-mode change.
 
 ## Run commands (reference)
 
