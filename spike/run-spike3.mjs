@@ -36,11 +36,12 @@ const ok = [], todo = [], skipped = [];
 const say = (s) => console.log(s);
 
 function findInput(dir, base) {
-  for (const e of EXTS) {
-    const p = path.join(SPIKE, "inputs", dir, base + e);
-    if (fs.existsSync(p)) return p;
-  }
-  return null;
+  const parent = path.join(SPIKE, "inputs", dir);
+  if (!fs.existsSync(parent)) return null;
+  // case-insensitive on both basename and extension (phones produce .JPG)
+  const want = EXTS.map(e => (base + e).toLowerCase());
+  const hit = fs.readdirSync(parent).find(f => want.includes(f.toLowerCase()));
+  return hit ? path.join(parent, hit) : null;
 }
 function run(cmd, argv, env = {}) {
   say(`  $ ${cmd} ${argv.join(" ")}`);
