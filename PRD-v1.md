@@ -51,7 +51,7 @@ of it yet.
   and the option to save named viewpoints (per spike 2/3's camera-preset pattern).
 - Run entirely in-browser, local-first for data (photos, generated GLBs, room
   definition) per the decision to ship browser-only for v1 (File System Access API
-  where available, IndexedDB/OPFS fallback).
+  where available; OPFS for binary assets, IndexedDB for autosave — see §8 Storage).
 
 ## 5. Non-goals (v1)
 
@@ -76,8 +76,9 @@ system in v1.
 
 ## 7. Core flows
 
-1. **Room setup** — define the room shell (dimensions, wall/window/door openings) via
-   a **manual, one-time Figma-MCP-session conversion** into the JSON scene schema
+1. **Room setup** — define the room shell (dimensions, wall/window/door openings)
+   **and seed furniture positions/rotations** via a **manual, one-time
+   Figma-MCP-session conversion** into the JSON scene schema
    (decided in `product-review.md`'s addendum, superseding that doc's earlier
    plugin-importer recommendation). This is explicitly a one-shot conversion, not a
    live importer — an LLM reads the existing Figma layout via an MCP session and
@@ -86,14 +87,22 @@ system in v1.
    still applies regardless of extraction method — Figma-derived numbers are a
    starting point, not ground truth; (b) any future layout change means redoing the
    session manually — acceptable given the apartment isn't moving, but worth the app
-   surfacing as a known limitation rather than silently going stale.
+   surfacing as a known limitation rather than silently going stale. **Placement
+   decision (2026-07-18):** since arrangement UI is v2, the Figma session is also how
+   furniture reaches its real position and rotation in v1 — exactly what spike 3's
+   `geometry.json` did. Imported furniture items snap to their Figma-drawn footprint;
+   there is no in-app repositioning in v1.
 2. **Shell texturing** — upload wall/floor/ceiling photos → tileable texture
    generation + calibration against a reference photo (per `spike/textures/`
-   pipeline).
+   pipeline). Calibration gets a **minimal in-app UI** (tint/repeat sliders replacing
+   the spike's hand-edited `calibration.json`) — hand-editing JSON would violate §10's
+   no-manual-steps criterion.
 3. **Furniture import** — per item: upload a photo (product-listing shot preferred,
    personal photo as fallback per OUTCOME-3's finding that catalog shots generate
    cleaner results) → Meshy generate → confirm/adjust known cm dimensions → rescale +
-   floor-snap → place in scene at a default position.
+   floor-snap → place at the item's Figma-seeded position/rotation (see flow 1; items
+   with no Figma footprint get a default position, acceptable for evaluating a
+   prospective purchase).
 4. **View** — orbit/pan/zoom the rendered room; save/recall named camera viewpoints.
 
 ## 8. Architecture
@@ -105,18 +114,32 @@ system in v1.
   is the rendering foundation, productized into this app shell.
 - **Storage:** one versioned **JSON project file** per home — File System Access API
   (Chromium) for real file read/write, plain download/upload as the cross-browser
-  fallback, autosave to IndexedDB in between. A whole-home scene is kilobytes; JSON is
-  diffable, git-friendly, and (once a command log exists, post-v1) gives history/undo
-  for free. Real folder ownership via a Tauri wrap stays available later if storage
+  fallback, autosave to IndexedDB in between. The scene *description* is kilobytes;
+  JSON is diffable, git-friendly, and (once a command log exists, post-v1) gives
+  history/undo for free. **Binary assets (source photos, generated GLBs, textures —
+  MB-scale, ~3 MB for spike 3's single room) do not live in the JSON:** they're
+  stored in **OPFS**, content-addressed, and the JSON references them by hash.
+  Portability ("the project file") is the JSON plus a **zip export** bundling the
+  referenced assets. Real folder ownership via a Tauri wrap stays available later if storage
   durability becomes a real problem (near zero-rewrite path per the SWOT comparison
   done during scoping) — not needed for v1.
 - **External dependency:** fal.ai Meshy 6 (`fal-ai/meshy/v6/image-to-3d`) for
   furniture generation — the only network call in the pipeline; everything else
-  (texturing, rendering) is local/offline.
+  (texturing, rendering) is local/offline. **API key:** pasted once into a settings
+  panel, stored locally (IndexedDB), never bundled. **First build task: verify fal.ai
+  accepts browser-origin (CORS) calls with a user key** — if it doesn't, v1 needs a
+  minimal local proxy (a `vite dev`-style helper process), which would dent but not
+  break the browser-only posture; resolve before building the import flow.
+  Generation is an async, minutes-long job: the flow must handle failure explicitly
+  (a failed job leaves no half-imported item in the scene; retry is per-item and
+  re-uses the uploaded photo). Meshy calls cost real money per generation — surface
+  that in the confirm step rather than firing on drop.
 - **Data model (v1 subset of the original spec's entities):** Room (dims, shell
-  materials), Furniture Item (source photo, generated GLB, cm dims, position,
-  rotation), Camera Position (named, v1 read-view only — no editing state to save
-  yet). **Include the `layouts: [{name, base, commands[]}]`, `current: layoutId`
+  materials), Furniture Item (source photo, generated GLB, cm dims), Camera Position
+  (named). **Position and rotation live in the layout, not on the item** — the
+  implicit v1 layout holds each item's placement (seeded from Figma, see §7.1), so
+  v2's multi-layout arrangement doesn't have to migrate placement off the item
+  later. **Include the `layouts: [{name, base, commands[]}]`, `current: layoutId`
   branch shape in the schema from v1**, even though v1 only ever populates a single
   implicit layout — per `product-review.md`'s addendum, this is what later resolves
   both arrangement-versioning (v2) and the two-user case cleanly (each person edits
@@ -175,9 +198,9 @@ generate → view), room/furniture data persists across browser sessions.
 Room-shell input, storage strategy, and UI framework (previously open here) are
 resolved — see §7 and §8. Remaining:
 
-- **Figma layer/naming conventions** for the one-time MCP conversion session — needed
-  before that session can run; not blocking for writing this PRD, but blocking for
-  the room-setup flow's first execution.
+- **Figma layer/naming conventions** for the one-time MCP conversion session —
+  **promoted to a scheduled pre-build task** (it now blocks placement seeding too,
+  per the §7.1 decision, so it gates the first end-to-end run, not just room setup).
 - **AI provider abstraction** — out of v1's critical path (v1 has no chat/command
   layer), but `product-review.md` recommends building any LLM-touching call (there
   isn't one in v1 today, unless furniture-photo handling ever adds vision extraction)
