@@ -71,7 +71,9 @@ const SHOTS = [
 for (const shot of SHOTS) {
   const url = `http://127.0.0.1:${port}/scene2.html?mode=${MODE}&cam=${shot.cam}&clean`;
   await page.goto(url, { waitUntil: "load" });
-  await page.waitForFunction(() => window.sceneReady === true, null, { timeout: 20000 });
+  // 60s: sceneReady now also waits on the import-GLB and shell-texture probes,
+  // which run serially and are slow under SwiftShader.
+  await page.waitForFunction(() => window.sceneReady === true, null, { timeout: 60000 });
   await page.waitForTimeout(400); // let shadows/env settle a few frames
   const out = path.join(OUT_DIR, shot.file);
   await page.screenshot({ path: out });

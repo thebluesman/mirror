@@ -1,0 +1,11 @@
+{
+  "name": "poc3-import",
+  "private": true,
+  "type": "module",
+  "description": "PoC 3 / W-A (D1) tooling: process-glb.mjs rescales+floor-snaps generated furniture GLBs. Run `npm install` in this directory before use.",
+  "dependencies": {
+    "@gltf-transform/core": "^4.4.1",
+    "@gltf-transform/extensions": "^4.4.1",
+    "@gltf-transform/functions": "^4.4.1"
+  }
+}

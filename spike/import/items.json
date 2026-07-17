@@ -1,0 +1,62 @@
+{
+  "_comment": "W-A (PoC 3, D1) manifest — the 3 furniture items to run through fal-ai/meshy/v6/image-to-3d. dims are the known cm truth from geometry.json/furniture-notes.md (Meshy's auto_size is a prefill only, never the source of truth). position is the AUTHORED primitive's world center (cm, y=0 at floor) so the generated GLB drops at the same spot. rotationYDeg is the IMPORTED model's world yaw: Meshy-generated GLBs face +Z at yaw 0 (the side photographed in the input image), which is NOT the authored builders' local convention -- so these values are set for the generated meshes, verified by render (chair opening SE into the room; bookshelf cubbies and cabinet compartments facing into the room, backs to the south wall). geometryName is the DATA.furniture[].name in scene2.html to hide when the GLB is shown.",
+  "items": [
+    {
+      "id": "swivel-chair",
+      "label": "West Elm Cozy swivel chair (pod)",
+      "geometryName": "swivel-chair",
+      "dims": {
+        "w": 98,
+        "d": 90,
+        "h": 76
+      },
+      "position": {
+        "x": 542,
+        "y": 0,
+        "z": 369
+      },
+      "rotationYDeg": 45,
+      "glb": "spike/import/glb/swivel-chair.glb",
+      "processedGlb": "spike/import/glb/swivel-chair.processed.glb",
+      "notes": "Worst authored-primitive cost/benefit item per the research memo (closed pod shape, hallucinated-back risk highest of the three since the pod's rear is the least photographed side of a barrel chair). Preferred input: a flat-lit product-listing/catalog photo of the West Elm Cozy swivel chair, front-3/4 angle, charcoal melange fabric visible. A second angle (rear 3/4) only if C1's back-view check fails."
+    },
+    {
+      "id": "shoe-cabinet",
+      "label": "IKEA STALL shoe cabinet",
+      "geometryName": "shoe-rack",
+      "dims": {
+        "w": 79,
+        "d": 29,
+        "h": 148
+      },
+      "position": {
+        "x": 1103.5,
+        "y": 0,
+        "z": 687.5
+      },
+      "rotationYDeg": 180,
+      "glb": "spike/import/glb/shoe-cabinet.glb",
+      "processedGlb": "spike/import/glb/shoe-cabinet.processed.glb",
+      "notes": "Voids + thin front legs are the fusion risk (memo risk: 'fused thin members'). Preferred input: the IKEA product-listing photo (https://www.ikea.com/ae/en/p/staell-shoe-cabinet-with-3-compartments-white-50530262/) straight-on or front-3/4, flat catalog lighting, showing the 3 flip-down compartment seams and the front-leg gap."
+    },
+    {
+      "id": "bookshelf",
+      "label": "Pine open bookcase (8 cubbies)",
+      "geometryName": "bookshelf",
+      "dims": {
+        "w": 72,
+        "d": 40,
+        "h": 155
+      },
+      "position": {
+        "x": 852,
+        "y": 0,
+        "z": 682
+      },
+      "rotationYDeg": 180,
+      "glb": "spike/import/glb/bookshelf.glb",
+      "processedGlb": "spike/import/glb/bookshelf.processed.glb",
+      "notes": "No catalog listing exists for this piece (furniture-notes.md: 'no model name; described from photos'). Preferred input: one of Shyam's own photos (IMG_0455 / IMG_2369 / IMG_4263), as flat-lit and front-on as available, showing the 2x4 cubby grid and dark back panels. Books currently packed into it are cosmetic filler in the photo and are expected to bias the generated texture toward 'bookshelf with books' rather than empty cubbies -- acceptable per the plan since the silhouette/voids are the thing being tested, not empty-shelf color fidelity."
+    }
+  ]
+}

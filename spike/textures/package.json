@@ -1,0 +1,14 @@
+{
+  "name": "spike-textures",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "W-B shell-texture tooling for the PoC3 rendering spike (fetch/calibrate/make-tileable).",
+  "scripts": {
+    "fetch": "node fetch-textures.mjs",
+    "tileable": "node make-tileable.mjs"
+  },
+  "dependencies": {
+    "sharp": "^0.35.3"
+  }
+}
