@@ -186,27 +186,208 @@ function std(opts) {
   return m;
 }
 
+/* ------------------------------------------------------------
+   RUNG 2 — procedural canvas textures (per D2 memo: procedural
+   clears the Tier 1 bar for every item; zero assets on disk).
+   Seeded RNG so every capture renders the identical scene.
+   ------------------------------------------------------------ */
+let _seed = 42;
+function R() { _seed = (_seed * 1664525 + 1013904223) >>> 0; return _seed / 4294967296; }
+const clamp8 = v => Math.max(0, Math.min(255, Math.round(v)));
+
+function makeCanvas(w, h, draw) {
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  draw(c.getContext("2d"), w, h);
+  return c;
+}
+function colorTex(canvas, repeat = [1, 1]) {
+  const t = new THREE.CanvasTexture(canvas);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(repeat[0], repeat[1]);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+function dataTex(canvas, repeat = [1, 1]) { // non-color (bump maps)
+  const t = new THREE.CanvasTexture(canvas);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(repeat[0], repeat[1]);
+  return t;
+}
+
+// wood: wavy grain bands along x over a base tone, optional knots (the pine tell)
+function woodCanvas({ base, streak, contrast = 0.10, knots = 0 }) {
+  return makeCanvas(512, 512, (ctx) => {
+    ctx.fillStyle = base; ctx.fillRect(0, 0, 512, 512);
+    for (let i = 0; i < 150; i++) {
+      const y = R() * 512, phase = R() * Math.PI * 2;
+      ctx.globalAlpha = 0.04 + R() * contrast;
+      ctx.strokeStyle = R() < 0.72 ? streak : "#ffffff";
+      ctx.lineWidth = 1 + R() * 3;
+      ctx.beginPath();
+      for (let x = 0; x <= 512; x += 32) {
+        const yy = y + Math.sin(x / 512 * Math.PI * 2 + phase) * 3;
+        x === 0 ? ctx.moveTo(x, yy) : ctx.lineTo(x, yy);
+      }
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    for (let k = 0; k < knots; k++) {
+      const kx = 60 + R() * 392, ky = 60 + R() * 392, kr = 8 + R() * 10;
+      for (let ring = kr; ring > 0; ring -= 2.5) {
+        ctx.globalAlpha = 0.10 + 0.05 * (kr - ring) / kr;
+        ctx.strokeStyle = streak;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.ellipse(kx, ky, ring * 1.5, ring, 0.3, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 0.35; ctx.fillStyle = "#3a2814";
+      ctx.beginPath(); ctx.ellipse(kx, ky, 4, 2.5, 0.3, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  });
+}
+
+// fabric: per-pixel noise around a base color, optional faint diagonal hatch,
+// optional bright flecks (melange)
+function fabricCanvas(baseRGB, spread, { hatch = false, flecks = 0 } = {}) {
+  return makeCanvas(256, 256, (ctx) => {
+    const img = ctx.createImageData(256, 256);
+    for (let i = 0; i < img.data.length; i += 4) {
+      const n = (R() - 0.5) * spread;
+      img.data[i]     = clamp8(baseRGB[0] + n);
+      img.data[i + 1] = clamp8(baseRGB[1] + n);
+      img.data[i + 2] = clamp8(baseRGB[2] + n);
+      img.data[i + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+    if (hatch) {
+      ctx.globalAlpha = 0.05; ctx.strokeStyle = "#000"; ctx.lineWidth = 1;
+      for (let d = -256; d < 512; d += 5) {
+        ctx.beginPath(); ctx.moveTo(d, 0); ctx.lineTo(d + 256, 256); ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+    for (let i = 0; i < flecks; i++) {
+      ctx.globalAlpha = 0.35 + R() * 0.4;
+      ctx.fillStyle = R() < 0.5 ? "#e8e8e8" : "#0a0a0a";
+      ctx.fillRect(R() * 256, R() * 256, 1 + R() * 1.5, 1);
+    }
+    ctx.globalAlpha = 1;
+  });
+}
+
+// bamboo weave: wide horizontal slats + thin vertical stitch seams. A checkered
+// H/V cell pattern was tried first but mip-filters into mosaic noise at room
+// distance; horizontal banding survives minification and still reads "woven".
+const bambooCanvas = makeCanvas(256, 256, (ctx) => {
+  const rows = 18, rh = 256 / rows;
+  for (let r = 0; r < rows; r++) {
+    const l = 0.82 + (R() - 0.5) * 0.16;
+    ctx.fillStyle = `rgb(${clamp8(201 * l)},${clamp8(168 * l)},${clamp8(107 * l)})`;
+    ctx.fillRect(0, r * rh, 256, rh);
+    ctx.fillStyle = "rgba(60,40,15,0.30)";
+    ctx.fillRect(0, r * rh, 256, 1.5);                       // slat shadow line
+    const offset = (r % 2) * 21;                             // staggered stitches
+    for (let x = offset; x < 256; x += 42) {
+      ctx.fillStyle = "rgba(60,40,15,0.22)";
+      ctx.fillRect(x, r * rh, 2.5, rh);
+    }
+  }
+});
+
+// SÖNDERÖD rug: overlapping blue watercolor blobs + heavy fine noise
+const rugCanvas = makeCanvas(512, 512, (ctx) => {
+  ctx.fillStyle = "#2e4a7d"; ctx.fillRect(0, 0, 512, 512);
+  const blues = ["#1f3a6b", "#3d5c96", "#27446f", "#4a6aa4", "#16305c"];
+  for (let i = 0; i < 6; i++) {
+    const x = R() * 512, y = R() * 512, r = 90 + R() * 160;
+    const g = ctx.createRadialGradient(x, y, 10, x, y, r);
+    g.addColorStop(0, blues[i % blues.length] + "cc");
+    g.addColorStop(1, "#00000000");
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  }
+  for (let i = 0; i < 16000; i++) {
+    ctx.globalAlpha = 0.10 + R() * 0.12;
+    ctx.fillStyle = R() < 0.5 ? "#0d1c38" : "#6a86b8";
+    ctx.fillRect(R() * 512, R() * 512, 1.5, 1.5);
+  }
+  ctx.globalAlpha = 1;
+});
+const rugBumpCanvas = fabricCanvas([128, 128, 128], 150); // pile depth noise
+
+// floor: 4x4 grid of 60 cm porcelain tiles (canvas covers 240x240 cm),
+// per-tile luminance jitter + grout lines
+const floorCanvas = makeCanvas(1024, 1024, (ctx) => {
+  for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) {
+    const l = 1 + (R() - 0.5) * 0.05;
+    ctx.fillStyle = `rgb(${clamp8(217 * l)},${clamp8(212 * l)},${clamp8(203 * l)})`;
+    ctx.fillRect(c * 256, r * 256, 256, 256);
+  }
+  ctx.strokeStyle = "#b6b0a6"; ctx.lineWidth = 3;
+  for (let i = 0; i <= 4; i++) {
+    ctx.beginPath(); ctx.moveTo(i * 256, 0); ctx.lineTo(i * 256, 1024); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, i * 256); ctx.lineTo(1024, i * 256); ctx.stroke();
+  }
+});
+
+// bookshelf front: pine frame, 2x4 dark cubbies packed with colored book spines
+const bookshelfFrontCanvas = makeCanvas(256, 512, (ctx) => {
+  ctx.fillStyle = "#d9bf94"; ctx.fillRect(0, 0, 256, 512);
+  const spineColors = ["#7d5a44", "#4a5a6a", "#8a3b34", "#b5a075", "#3c4a3a",
+                       "#8c8c94", "#5a4a6e", "#c47f4a", "#33566e", "#a89a56"];
+  const cols = 2, rows = 4, m = 10;
+  const cw = (256 - m * (cols + 1)) / cols, rh = (512 - m * (rows + 1)) / rows;
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const x0 = m + c * (cw + m), y0 = m + r * (rh + m);
+    ctx.fillStyle = "#241d16"; ctx.fillRect(x0, y0, cw, rh);        // dark cubby back
+    let x = x0 + 3;
+    while (x < x0 + cw - 6) {
+      const w = 6 + R() * 14;
+      if (R() < 0.12) { x += 10; continue; }                        // occasional gap
+      const h = rh * (0.55 + R() * 0.35);
+      ctx.fillStyle = R() < 0.9
+        ? spineColors[Math.floor(R() * spineColors.length)]
+        : "#d8483c";                                                // rare bright spine
+      ctx.fillRect(x, y0 + rh - h, Math.min(w, x0 + cw - x) - 1.5, h);
+      x += w;
+    }
+  }
+});
+
+const oakCanvas      = woodCanvas({ base: "#b08d5e", streak: "#6d4c28", contrast: 0.12 });
+const oakLightCanvas = woodCanvas({ base: "#c49a63", streak: "#8a6534", contrast: 0.10 });
+const pineCanvas     = woodCanvas({ base: "#d9bf94", streak: "#9c7c4a", contrast: 0.10, knots: 5 });
+const pecanCanvas    = woodCanvas({ base: "#7a5236", streak: "#452b16", contrast: 0.14 });
+const sofaCanvas     = fabricCanvas([185, 186, 181], 26, { hatch: true });
+const melangeCanvas  = fabricCanvas([58, 58, 62], 55, { flecks: 900 });
+
 const MAT = {
-  // room shell
-  floorTile:   std({ color: 0xd8d1c4, roughness: 0.28, metalness: 0.0 }), // light-greige porcelain, slightly reflective
+  // room shell (floor material is built per-rect in addFloor for cm-true tile repeat)
   wall:        std({ color: 0xf0e9dc, roughness: 0.92 }),                 // warm white
   ceiling:     std({ color: 0xf5f1e9, roughness: 0.95 }),
   doorLeaf:    std({ color: 0xefeae0, roughness: 0.6 }),                  // closed white interior doors
   charcoalAlu: std({ color: 0x33363a, roughness: 0.45, metalness: 0.65 }),// window/door frames
-  // furniture
-  sofaFabric:  std({ color: 0xb9bab5, roughness: 0.95 }),  // Lejde light grey
-  chairFabric: std({ color: 0x55555b, roughness: 0.97 }),  // charcoal melange, reads dark grey
-  rugBlue:     std({ color: 0x2e4a7d, roughness: 1.0 }),   // SÖNDERÖD high-pile blue
-  oak:         std({ color: 0xb0854f, roughness: 0.55 }),  // TV stand frame, GUTTANE
-  oakLight:    std({ color: 0xc49a63, roughness: 0.55 }),  // tapered light-wood legs
-  pine:        std({ color: 0xd9b988, roughness: 0.6 }),   // bookshelf
-  pecan:       std({ color: 0x7a4f2c, roughness: 0.5 }),   // dining table legs
+  // furniture — Lejde grey w/ weave hatch, charcoal melange, blue high pile
+  sofaFabric:  std({ map: colorTex(sofaCanvas, [3, 3]), bumpMap: dataTex(sofaCanvas, [3, 3]), bumpScale: 0.3, roughness: 0.95 }),
+  chairFabric: std({ map: colorTex(melangeCanvas, [2, 2]), roughness: 0.97 }),
+  rugBlue:     std({ map: colorTex(rugCanvas), bumpMap: dataTex(rugBumpCanvas, [6, 6]), bumpScale: 0.9, roughness: 1.0 }),
+  oak:         std({ map: colorTex(oakCanvas), roughness: 0.55 }),        // TV stand frame, GUTTANE
+  oakLight:    std({ map: colorTex(oakLightCanvas), roughness: 0.55 }),   // tapered light-wood legs
+  pine:        std({ map: colorTex(pineCanvas), roughness: 0.6 }),        // bookshelf carcass
+  bookFront:   std({ map: colorTex(bookshelfFrontCanvas), roughness: 0.75 }), // cubbies + spines
+  pecan:       std({ map: colorTex(pecanCanvas), roughness: 0.5 }),       // dining table legs
   whiteLacquer:std({ color: 0xf6f4ef, roughness: 0.18 }),  // dining table top
   ikeaWhite:   std({ color: 0xf1efe9, roughness: 0.55 }),  // Billy carcass, STÄLL, drawer fronts
-  bamboo:      std({ color: 0xc7a05e, roughness: 0.65 }),  // Billy woven bamboo doors (flat tone at rung 1)
+  bamboo:      std({ map: colorTex(bambooCanvas), roughness: 0.4 }),      // Billy woven doors, clear lacquer
   darkWood:    std({ color: 0x2c241c, roughness: 0.7 }),   // bookshelf legs
-  blackPlastic:std({ color: 0x141416, roughness: 0.45 }),  // water cooler body
+  recessDark:  std({ color: 0x17140f, roughness: 0.9 }),   // open-shelf shadow recess
+  blackPlastic:std({ color: 0x141416, roughness: 0.45 }),  // water cooler body, speakers
   stainless:   std({ color: 0xaeb3b5, roughness: 0.3, metalness: 1.0 }),
+  cushionMustard: std({ color: 0xa9832f, roughness: 0.95 }),
+  cushionSlate:   std({ color: 0x5f6670, roughness: 0.95 }),
   tvBezel:     std({ color: 0xf4f3f0, roughness: 0.4 }),   // Frame TV WHITE bezel
   tvScreen:    std({ color: 0x0a0a0d, roughness: 0.25 })   // dark screen, slightly glossy
 };
@@ -274,7 +455,10 @@ function reg(mesh, { cast = true, receive = true } = {}) {
 function addFloor(rect) {
   const geo = new THREE.PlaneGeometry(rect.w, rect.d);
   geo.rotateX(-Math.PI / 2);
-  const mesh = new THREE.Mesh(geo, MAT.floorTile.clone());
+  // floorCanvas covers 240x240 cm (4 tiles of 60) — repeat keeps tiles cm-true
+  const map = colorTex(floorCanvas, [rect.w / 240, rect.d / 240]);
+  map.anisotropy = renderer.capabilities.getMaxAnisotropy(); // grout shimmers otherwise
+  const mesh = new THREE.Mesh(geo, std({ map, roughness: 0.28, metalness: 0.0 }));
   mesh.material.side = THREE.DoubleSide;
   mesh.position.set(rect.x + rect.w / 2, 0, rect.z + rect.d / 2);
   reg(mesh, { cast: false });
@@ -425,17 +609,25 @@ const BUILDERS = {
     }
   },
 
-  // TV stand: oak frame + three white drawer fronts + tapered light legs
+  // TV stand: oak frame, white drawer fronts left+right, open middle shelf
+  // (dark recess + slim black media unit — the furniture-notes silhouette)
   "tv-stand"(f) {
     const bodyH = f.h - f.legHeight;
     box(f.w, bodyH, f.d, f.x + f.w / 2, f.legHeight + bodyH / 2, f.z + f.d / 2, MAT.oak);
-    // three flat white drawer fronts on the room-facing (south, +z) face
     const frontZ = f.z + f.d + 1;
     const dw = (f.w - 24) / 3;
     for (let i = 0; i < 3; i++) {
-      box(dw - 3, bodyH - 8, 2, f.x + 12 + dw * i + dw / 2, f.legHeight + bodyH / 2, frontZ, MAT.ikeaWhite);
+      const cx = f.x + 12 + dw * i + dw / 2;
+      if (i === 1) {
+        box(dw - 3, bodyH - 8, 2, cx, f.legHeight + bodyH / 2, frontZ, MAT.recessDark);
+        box(dw - 18, 7, 3, cx, f.legHeight + 9, frontZ + 1.5, MAT.blackPlastic); // media unit
+      } else {
+        box(dw - 3, bodyH - 8, 2, cx, f.legHeight + bodyH / 2, frontZ, MAT.ikeaWhite);
+      }
     }
     taperedLegs(f, MAT.oakLight, { legR: 3.5, inset: 10 });
+    // decor: one tower speaker right of the stand (left side is the pod chair)
+    box(22, 100, 25, f.x + f.w + 20, 50, f.z + 14, MAT.blackPlastic);
   },
 
   // Samsung Frame TV: WHITE bezel + dark screen, flush on the north wall
@@ -478,10 +670,14 @@ const BUILDERS = {
     box(f.w - 6, 34, 1.5, f.x + f.w / 2, f.h - 24, f.z + f.d + 0.8, MAT.stainless);
   },
 
-  // pine open bookcase on short dark legs (outline fix per furniture-notes)
+  // pine open bookcase on short dark legs; front face (north, -z: it stands
+  // against the south wall) carries the cubbies-with-book-spines texture
   "bookshelf"(f) {
     const legH = 8;
-    box(f.w, f.h - legH, f.d, f.x + f.w / 2, legH + (f.h - legH) / 2, f.z + f.d / 2, MAT.pine);
+    const faces = [MAT.pine, MAT.pine, MAT.pine, MAT.pine, MAT.pine, MAT.bookFront]; // nz = front
+    const body = new THREE.Mesh(new THREE.BoxGeometry(f.w, f.h - legH, f.d), faces);
+    body.position.set(f.x + f.w / 2, legH + (f.h - legH) / 2, f.z + f.d / 2);
+    reg(body);
     [[f.x + 5, f.z + 5], [f.x + f.w - 5, f.z + 5], [f.x + 5, f.z + f.d - 5], [f.x + f.w - 5, f.z + f.d - 5]]
       .forEach(([lx, lz]) => box(6, legH, 6, lx, legH / 2, lz, MAT.darkWood));
   },
@@ -537,6 +733,16 @@ const BUILDERS = {
     b(armWidth, armH, main.d, main.x + main.w - armWidth / 2, armH / 2, main.z + main.d / 2);
     b(armWidth, armH, chaise.d, chaise.x + armWidth / 2, armH / 2, chaise.z + chaise.d / 2);
     b(chaise.w, armH, armWidth, chaise.x + chaise.w / 2, armH / 2, chaise.z + armWidth / 2);
+
+    // two throw cushions leaning on the back (decor: renders read empty without)
+    for (const [cx, mat, tilt] of [
+      [main.x + 110, MAT.cushionMustard, 0.08],
+      [main.x + 205, MAT.cushionSlate, -0.06]
+    ]) {
+      const cu = box(40, 40, 12, cx, seatH + 16, main.z + mainSeatD - 10, mat, group);
+      cu.rotation.x = -0.30;
+      cu.rotation.z = tilt;
+    }
 
     scene.add(group);
     group.traverse(o => { if (o.isMesh) litMeshes.push(o); });
@@ -767,7 +973,7 @@ function animate() {
 animate();
 
 // debugging hooks for headless capture sessions
-window.__dbg = { scene, renderer, camera, MAT, sun, THREE };
+window.__dbg = { scene, renderer, camera, controls, MAT, sun, THREE };
 </script>
 </body>
 </html>
