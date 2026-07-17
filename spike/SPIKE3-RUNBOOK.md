@@ -1,11 +1,34 @@
 # Spike 3 runbook — what Shyam runs, in order
 
 Everything in `poc3-plan.md` that is *code* is built and verified (as far as this
-sandbox allows — see "what's untested" at the bottom). This is the one-page sequence
-to execute the spike on your machine. Detailed docs: `import/README.md` (W-A) and
-`textures/README.md` (W-B).
+sandbox allows — see "what's untested" at the bottom). Detailed docs:
+`import/README.md` (W-A) and `textures/README.md` (W-B).
 
-## 0. One-time setup
+## The short version (recommended): drop files, run one command
+
+```bash
+git pull && git checkout claude/pr5-c3-spike-completion-aff0vy
+pip install fal-client        # the only manual dep; npm deps auto-install on first run
+
+# 1. drop your photos into spike/inputs/ (exact names — see spike/inputs/README.md):
+#      items/swivel-chair.jpg  items/shoe-cabinet.jpg  items/bookshelf.jpg
+#      surfaces/wall.jpg  surfaces/floor.jpg  surfaces/ceiling.jpg   (or skip → --cc0)
+#      reference/couch.jpg  reference/reverse.jpg                    (mandatory for C2)
+
+node spike/run-spike3.mjs --status      # see what it would do, runs nothing
+FAL_KEY=<key> node spike/run-spike3.mjs # generate + process + texture + render
+```
+
+The driver is idempotent — re-run it any time; it only does work whose input exists
+and whose output doesn't (so it never re-spends fal.ai credits), and it ends with a
+checklist of exactly what's still missing. Add `--cc0` to fetch stock CC0 textures
+for any surface you didn't photograph. When it finishes, it prints the three
+judgment steps (C1 side-by-side URL, C2 contact sheet, OUTCOME-3 record).
+
+Everything below is the same flow broken into manual steps, if you want to run or
+re-run a single stage by hand.
+
+## 0. One-time setup (manual path)
 
 ```bash
 cd spike/import   && npm install    # gltf-transform for process-glb.mjs
@@ -30,7 +53,7 @@ FAL_KEY=<key> python spike/import/generate-item.py --image shelf.jpg    --item b
 # rescale to true cm + floor-snap (dims per item are in spike/import/items.json):
 node spike/import/process-glb.mjs spike/import/glb/swivel-chair.glb --dims 98x90x76  --out spike/import/glb/swivel-chair.processed.glb
 node spike/import/process-glb.mjs spike/import/glb/shoe-cabinet.glb --dims 79x29x148 --out spike/import/glb/shoe-cabinet.processed.glb
-node spike/import/process-glb.mjs spike/import/glb/bookshelf.glb    --dims 160x30x149 --out spike/import/glb/bookshelf.processed.glb
+node spike/import/process-glb.mjs spike/import/glb/bookshelf.glb    --dims 72x40x155 --out spike/import/glb/bookshelf.processed.glb
 ```
 
 Note: the fal call in `generate-item.py` is the one piece of code that could not be
@@ -48,8 +71,8 @@ Either path, or both (your own photos win where you have a good straight-on shot
 node spike/textures/fetch-textures.mjs
 
 # Path B: your own surface photos → tileable:
-node spike/textures/make-tileable.mjs wall-photo.jpg  --surface wall
-node spike/textures/make-tileable.mjs floor-photo.jpg --surface floor
+node spike/textures/make-tileable.mjs --input wall-photo.jpg  --surface wall
+node spike/textures/make-tileable.mjs --input floor-photo.jpg --surface floor
 ```
 
 Then calibrate against your reference photos: open the scene (step 3), compare with
