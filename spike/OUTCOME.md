@@ -53,19 +53,59 @@ default strength.
 - Blue high-pile rug reads correctly in all reverse views; tower speakers usually
   present; balcony door with charcoal frames holds; room geometry still solid 10/10.
 
-**Still drifting (appearance-level, not geometry):**
+**Still drifting — appearance-level:**
 - Frame TV bezel: black in most, literal oak picture frame once; "white bezel" never
   landed.
+- West glazing often widens into a full glass wall; occasional phantom white cabinet
+  near the kitchen.
+
+**Still drifting — later re-attributed to geometry (see review note below):**
 - Swivel chair: right position/fabric, shape wanders (office chair / barrel / drum) —
   never quite the Cozy pod.
 - Shoe cabinet (reverse foreground): rendered as bookcase/sideboard, not a slim shoe
   cabinet.
-- West glazing often widens into a full glass wall; occasional phantom white cabinet
-  near the kitchen.
 
 Read: identity drift is essentially solved by silhouette geometry; the remaining
 misses are fine-grained appearance details that text prompting alone struggles to
 force.
+
+## Review note (2026-07-17, post-decision): two "drift" items were geometry bugs
+
+Cross-checking the run-2 images against reference photos of the actual West Elm Cozy
+Swivel Chair (AptDeco listing, same colorway) showed the chair failure was
+misclassified above:
+
+- **The real chair** is one continuous closed pod — upholstery runs to the floor over
+  a concealed swivel base, back and arms form a single ring sloping down toward the
+  front, total height ~76 cm.
+- **The modeled silhouette** (`scene.html` `buildSwivelChair`) is an office-chair
+  archetype: exposed foot disk + pedestal column, flat seat cylinder floating at
+  45 cm, thin open-shell backrest rising to 100 cm — 24 cm taller than the whole real
+  chair.
+- The generator followed that depth map *faithfully*: office chairs, drums, barrels —
+  and in 3 of 5 couch views the overhanging seat rim was split off and rendered as a
+  phantom round side table. The model never had a chance to draw a pod, because it was
+  never shown one. Same failure mode as run 1's dining-table-as-kitchen-island; the
+  silhouette-over-prompt fix that repaired the table and TV stand was never applied to
+  the chair. The shoe cabinet (still a plain box in `geometry.json`) is the same bug.
+
+**Cutouts are (mostly) not needed.** The media console is the control case: its
+geometry has no cutout for the open middle shelf — just a slab on legs — yet the open
+shelf with AV gear rendered correctly 5/5 from the prompt alone. Pattern across both
+runs: geometry must be right where it changes the *outline and voids* (legs,
+under-gaps, overall mass); interior detail (shelf openings, drawer fronts, weave) is
+prompt-recoverable once the mass reads as the right object. So: no cutouts for the
+bookshelf/console; a rounded pod profile for the chair would have been worth ~20 lines
+of Three.js.
+
+**Impact on the decision:** the NO-GO stands, but on narrower evidence than first
+written. The chair and shoe cabinet don't count as appearance-layer failures — the
+genuinely prompt-resistant misses (white Frame TV bezel, west glazing widening into a
+glass wall, phantom cabinets, decision-grade material/color fidelity) carry the no-go
+on their own, and those alone fail the "would I buy this rug" bar. Correcting the
+attribution actually *strengthens* the pivot: nearly every identity failure across all
+21 images traces to a silhouette shortcut, i.e. depth-conditioned geometry is even
+more load-bearing than the first write-up credited.
 
 ## Final decision (2026-07-17)
 
@@ -79,7 +119,10 @@ did not close the gap, which rules out "needs more prompting" as the explanation
 the heavy lifting across both runs — room shell 10/10, sofa/chair recognizable 5/5 in
 run 1, dining table + TV stand identity fixed 5/5 in run 2 once given proper
 silhouettes. The failure is specifically in the AI-still *appearance* layer (photoreal
-materials/color/detail), not in geometry-from-depth-map as a technique.
+materials/color/detail), not in geometry-from-depth-map as a technique. (The review
+note above narrows this: the run-2 swivel chair and shoe cabinet misses were geometry
+bugs, not appearance failures — the appearance-layer verdict rests on the bezel,
+glazing, and material-fidelity misses, which suffice on their own.)
 
 **Implication for the product:** this reframes the MVP question from "can an AI still
 look like a real photo" (no) to "what's the best *real-time rendered* (non-photoreal)
