@@ -1,0 +1,94 @@
+{
+  "item": "shoe-cabinet",
+  "endpoint": "fal-ai/meshy/v6/image-to-3d",
+  "request_args": {
+    "should_texture": true,
+    "enable_pbr": true,
+    "topology": "triangle",
+    "target_polycount": 15000,
+    "auto_size": true,
+    "origin_at": "bottom"
+  },
+  "response_meta": {
+    "animation_glb": null,
+    "animation_fbx": null,
+    "model_glb": {
+      "url": "https://v3b.fal.media/files/b/0aa29ef5/tAQ7HE-ntTIYCuvrW0gyR_model.glb",
+      "content_type": "model/gltf-binary",
+      "file_name": "model.glb",
+      "file_size": 7402444
+    },
+    "thumbnail": {
+      "url": "https://v3b.fal.media/files/b/0aa29ef6/dJlQbv94pC66A0pusbOkV_preview.png",
+      "content_type": "image/png",
+      "file_name": "preview.png",
+      "file_size": 40310
+    },
+    "model_urls": {
+      "glb": {
+        "url": "https://v3b.fal.media/files/b/0aa29ef5/tAQ7HE-ntTIYCuvrW0gyR_model.glb",
+        "content_type": "model/gltf-binary",
+        "file_name": "model.glb",
+        "file_size": 7402444
+      },
+      "fbx": {
+        "url": "https://v3b.fal.media/files/b/0aa29ef5/ZK5UqqnmvH7vspOw2J3v9_model.fbx",
+        "content_type": "application/octet-stream",
+        "file_name": "model.fbx",
+        "file_size": 7588156
+      },
+      "obj": {
+        "url": "https://v3b.fal.media/files/b/0aa29ef5/whvXQkCAGxRJDCChesZtI_model.obj",
+        "content_type": "text/plain",
+        "file_name": "model.obj",
+        "file_size": 1063791
+      },
+      "usdz": {
+        "url": "https://v3b.fal.media/files/b/0aa29ef5/-xfiyGg9mpQyk830YhdC8_model.usdz",
+        "content_type": "model/vnd.usdz+zip",
+        "file_name": "model.usdz",
+        "file_size": 7690795
+      },
+      "blend": null,
+      "stl": {
+        "url": "https://v3b.fal.media/files/b/0aa29ef5/cgUK4tNkf88ki5b9AzVGc_model.stl",
+        "content_type": "application/octet-stream",
+        "file_name": "model.stl",
+        "file_size": 729184
+      }
+    },
+    "texture_urls": [
+      {
+        "base_color": {
+          "url": "https://v3b.fal.media/files/b/0aa29ef6/eEpSveiRPbCrknu1UDwS4_texture_0.png",
+          "content_type": "image/png",
+          "file_name": "texture_0.png",
+          "file_size": 3721296
+        },
+        "metallic": {
+          "url": "https://v3b.fal.media/files/b/0aa29ef6/WfBv2G90D9vsvy_ql_INT_texture_0_metallic.png",
+          "content_type": "image/png",
+          "file_name": "texture_0_metallic.png",
+          "file_size": 4188
+        },
+        "normal": {
+          "url": "https://v3b.fal.media/files/b/0aa29ef6/2u1iv6-85hwEp6nLwlT24_texture_0_normal.png",
+          "content_type": "image/png",
+          "file_name": "texture_0_normal.png",
+          "file_size": 5050198
+        },
+        "roughness": {
+          "url": "https://v3b.fal.media/files/b/0aa29ef6/FpV4P9XFn5TtZHjRpf7kT_texture_0_roughness.png",
+          "content_type": "image/png",
+          "file_name": "texture_0_roughness.png",
+          "file_size": 404993
+        }
+      }
+    ],
+    "seed": 1346768247,
+    "rigged_character_glb": null,
+    "rigged_character_fbx": null,
+    "basic_animations": null,
+    "rig_task_id": null
+  }
+}
