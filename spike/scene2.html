@@ -63,6 +63,8 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { GTAOPass } from "three/addons/postprocessing/GTAOPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { applyShellTextures } from "./textures/shell-textures.mjs";
 
 /* ============================================================
    PoC 2 scene — fork of spike/scene.html (spike-1 record stays
@@ -826,10 +828,17 @@ const BUILDERS = {
   }
 };
 
+// D1 (PoC 3 / W-A) import hookup keys off DATA.furniture[].name via
+// items.json's "geometryName" -- record which litMeshes belong to which
+// furniture entry so an imported GLB can hide exactly (and only) the
+// authored primitive it replaces.
+const furnitureMeshesByName = {};
 DATA.furniture.forEach(f => {
+  const before = litMeshes.length;
   const build = BUILDERS[f.shape];
   if (build) build(f);
   else box(f.w, f.h, f.d, f.x + f.w / 2, f.h / 2, f.z + f.d / 2, MAT.ikeaWhite);
+  furnitureMeshesByName[f.name] = litMeshes.slice(before);
 });
 
 /* ============================================================
@@ -837,6 +846,7 @@ DATA.furniture.forEach(f => {
    ============================================================ */
 const edgesGroup = new THREE.Group();
 edgesGroup.visible = false;
+const meshToEdgeLine = new WeakMap(); // so hiding an authored mesh (import replace) also hides its edge outline
 litMeshes.forEach(mesh => {
   const eg = new THREE.EdgesGeometry(mesh.geometry, 20);
   const line = new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: 0xffffff }));
@@ -845,6 +855,7 @@ litMeshes.forEach(mesh => {
   line.matrix.decompose(line.position, line.quaternion, line.scale);
   line.matrixAutoUpdate = true;
   edgesGroup.add(line);
+  meshToEdgeLine.set(mesh, line);
 });
 scene.add(edgesGroup);
 
@@ -997,7 +1008,94 @@ composer.addPass(bloom);
 composer.addPass(new OutputPass());
 
 /* ============================================================
-   RENDER LOOP + URL params (?mode=1|2|3&cam=0|7|8|9&clean)
+   D1 (PoC 3 / W-A) IMPORTS — load generated GLBs from
+   spike/import/items.json in place of authored primitives.
+   ?imports=off  -> skip entirely, authored primitives only (current
+                    behavior, zero regression; also the safe fallback
+                    when items.json/GLBs are absent, same as the default).
+   ?imports=on   -> (default) replace: hide the authored primitive,
+                    show the GLB at the authored position/rotation.
+   ?imports=side -> beside: keep the authored primitive, show the GLB
+                    offset +120cm in X (the C1 side-by-side gate, per
+                    poc3-plan.md sec.2/sec.4).
+   Any item whose processed GLB isn't reachable (fetch 404/error) keeps
+   its authored primitive untouched -- generation happens later (Shyam
+   supplies images + FAL_KEY per poc3-plan.md sec.5), so this must be a
+   silent, per-item fallback, not a hard failure.
+   ============================================================ */
+const IMPORTS_SIDE_OFFSET_X = 120; // cm, per poc3-plan.md sec.4 (C1 side-by-side gate)
+
+async function loadImports(mode) {
+  if (mode === "off") return;
+
+  let manifest;
+  try {
+    const res = await fetch("import/items.json");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    manifest = await res.json();
+  } catch (e) {
+    console.warn("[imports] items.json not available, keeping all authored primitives:", e);
+    return;
+  }
+
+  const loader = new GLTFLoader();
+
+  await Promise.all((manifest.items || []).map(async (item) => {
+    if (!item.processedGlb) return;
+    const glbPath = item.processedGlb.replace(/^spike\//, ""); // items.json paths are repo-root-relative; server root is spike/
+
+    let ok = false;
+    try {
+      const headRes = await fetch(glbPath);
+      ok = headRes.ok;
+    } catch {
+      ok = false;
+    }
+    if (!ok) {
+      console.log(`[imports] no processed GLB for '${item.id}' at ${glbPath} -- keeping authored primitive.`);
+      return;
+    }
+
+    let gltf;
+    try {
+      gltf = await loader.loadAsync(glbPath);
+    } catch (e) {
+      console.warn(`[imports] failed to load/parse GLB for '${item.id}', keeping authored primitive:`, e);
+      return;
+    }
+
+    const importedRoot = gltf.scene;
+    importedRoot.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+
+    // glTF's unit convention is meters; this whole scene's world units are cm
+    // (see DATA/geometry.json), so the processed GLB (rescaled to the item's
+    // cm dims but written in meters, per process-glb.mjs) needs a x100 bump.
+    importedRoot.scale.setScalar(100);
+
+    const pos = item.position || { x: 0, y: 0, z: 0 };
+    const rotY = THREE.MathUtils.degToRad(item.rotationYDeg || 0);
+    importedRoot.rotation.y = rotY;
+
+    if (mode === "side") {
+      importedRoot.position.set(pos.x + IMPORTS_SIDE_OFFSET_X, pos.y, pos.z);
+      scene.add(importedRoot);
+      // authored primitive stays visible for direct comparison (C1 gate).
+    } else {
+      importedRoot.position.set(pos.x, pos.y, pos.z);
+      scene.add(importedRoot);
+      const authoredMeshes = furnitureMeshesByName[item.geometryName] || [];
+      authoredMeshes.forEach(m => {
+        m.visible = false;
+        const line = meshToEdgeLine.get(m);
+        if (line) line.visible = false;
+      });
+    }
+    console.log(`[imports] placed '${item.id}' (mode=${mode})`);
+  }));
+}
+
+/* ============================================================
+   RENDER LOOP + URL params (?mode=1|2|3&cam=0|7|8|9&clean&imports=on|off|side)
    ============================================================ */
 const qp = new URLSearchParams(location.search);
 if (qp.has("clean")) {
@@ -1008,6 +1106,23 @@ const camParam = Number(qp.get("cam"));
 applyCameraPreset(CAMERA_PRESETS[camParam] ? camParam : 0);
 setMode([1, 2, 3].includes(Number(qp.get("mode"))) ? Number(qp.get("mode")) : 1);
 
+const importsParam = ["off", "on", "side"].includes(qp.get("imports")) ? qp.get("imports") : "on";
+let importsReady = importsParam === "off";
+loadImports(importsParam)
+  .catch(e => console.error("[imports] unexpected error:", e))
+  .finally(() => { importsReady = true; });
+
+// W-B shell photo textures (poc3-plan §4 D2): photo-derived wall/floor/ceiling
+// materials when texture sets exist on disk, silent procedural fallback otherwise.
+// ?shell=off forces the procedural materials for A/B comparison.
+let shellReady = qp.get("shell") === "off";
+if (!shellReady) {
+  applyShellTextures(scene, THREE, { MAT, renderer })
+    .then(r => console.info("[shell]", r))
+    .catch(e => console.error("[shell] unexpected error:", e))
+    .finally(() => { shellReady = true; });
+}
+
 let framesRendered = 0;
 function animate() {
   requestAnimationFrame(animate);
@@ -1015,7 +1130,8 @@ function animate() {
   updateHUD();
   if (mode === 1) composer.render();
   else renderer.render(scene, camera);
-  if (++framesRendered === 3) window.sceneReady = true; // for headless capture
+  framesRendered++;
+  if (importsReady && shellReady && framesRendered >= 3) window.sceneReady = true; // for headless capture
 }
 animate();
 
