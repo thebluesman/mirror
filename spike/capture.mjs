@@ -63,7 +63,9 @@ page.on("console", m => { if (m.type() === "error") console.error("[console]", m
 
 const SHOTS = [
   { cam: "0", file: "scene2-couch.png" },
-  { cam: "9", file: "scene2-reverse.png" }
+  { cam: "9", file: "scene2-reverse.png" },
+  { cam: "8", file: "scene2-dining.png" },
+  { cam: "7", file: "scene2-overview.png" }
 ];
 
 for (const shot of SHOTS) {

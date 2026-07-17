@@ -58,6 +58,11 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { GTAOPass } from "three/addons/postprocessing/GTAOPass.js";
+import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 
 /* ============================================================
    PoC 2 scene — fork of spike/scene.html (spike-1 record stays
@@ -160,6 +165,17 @@ const CAMERA_PRESETS = {
     eye: new THREE.Vector3(1400, 150, 630),
     lookAt: new THREE.Vector3(660, 60, 590),
     depthNear: 40, depthFar: 1000
+  },
+  // key 8 — dining view: from the sofa corner toward the dining table + kitchen
+  8: {
+    eye: new THREE.Vector3(620, 140, 640),
+    lookAt: new THREE.Vector3(1010, 70, 420)
+  },
+  // key 7 — high overview from the main door, whole living room in frame
+  7: {
+    eye: new THREE.Vector3(1470, 210, 480),
+    lookAt: new THREE.Vector3(680, 50, 540),
+    depthNear: 40, depthFar: 1100
   }
 };
 
@@ -893,7 +909,8 @@ function setMode(m) {
    EXPORT (PNG download of current canvas)
    ============================================================ */
 function exportPNG() {
-  renderer.render(scene, camera);
+  if (mode === 1) composer.render();
+  else renderer.render(scene, camera);
   const names = { 1: "shaded.png", 2: "depth.png", 3: "edge.png" };
   renderer.domElement.toBlob(blob => {
     const a = document.createElement("a");
@@ -916,6 +933,8 @@ window.addEventListener("keydown", (e) => {
     case "3": setMode(3); break;
     case "0": applyCameraPreset(0); break;
     case "9": applyCameraPreset(9); break;
+    case "8": applyCameraPreset(8); break;
+    case "7": applyCameraPreset(7); break;
     case "e": case "E": exportPNG(); break;
     case "[": depthUniforms.uNear.value = Math.max(1, depthUniforms.uNear.value - 5); updateHUD(); break;
     case "]": depthUniforms.uNear.value += 5; updateHUD(); break;
@@ -940,7 +959,7 @@ function updateHUD() {
 `<b>mode: ${modeNames[mode]}</b>  (1 shaded / 2 depth / 3 edges)
 camera: ${p.x.toFixed(0)}, ${p.y.toFixed(0)}, ${p.z.toFixed(0)}  fov ${camera.fov.toFixed(0)}  exposure ${renderer.toneMappingExposure.toFixed(2)} (x/c)
 depth near/far: ${depthUniforms.uNear.value.toFixed(0)}cm / ${depthUniforms.uFar.value.toFixed(0)}cm  ( [ ] near, - = far )
-<b>0</b> couch view   <b>9</b> reverse view (sofa)   <b>E</b> export PNG   drag/scroll: orbit`;
+<b>0</b> couch   <b>9</b> reverse   <b>8</b> dining   <b>7</b> overview   <b>E</b> export PNG   drag/scroll: orbit`;
 }
 
 function showToast(msg) {
@@ -952,14 +971,35 @@ function showToast(msg) {
 }
 
 /* ============================================================
-   RENDER LOOP + URL params (?mode=1|2|3&cam=0|9&clean)
+   POST-PROCESSING (rung 3) — GTAO contact shadows + subtle
+   bloom. Composer runs only in shaded mode; depth/edge modes
+   keep the raw renderer output spike 1's pipeline expects.
+   ============================================================ */
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+
+const gtao = new GTAOPass(scene, camera, CANVAS_W, CANVAS_H);
+gtao.output = GTAOPass.OUTPUT.Default;
+gtao.updateGtaoMaterial({    // world units are cm — defaults assume meters
+  radius: 45, thickness: 15, distanceExponent: 1, distanceFallOff: 1,
+  scale: 2.2, samples: 16, screenSpaceRadius: false
+});
+composer.addPass(gtao);
+
+const bloom = new UnrealBloomPass(new THREE.Vector2(CANVAS_W, CANVAS_H), 0.12, 0.4, 0.85);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+
+/* ============================================================
+   RENDER LOOP + URL params (?mode=1|2|3&cam=0|7|8|9&clean)
    ============================================================ */
 const qp = new URLSearchParams(location.search);
 if (qp.has("clean")) {
   hud.style.display = "none";
   document.getElementById("canvas-wrap").style.boxShadow = "none";
 }
-applyCameraPreset(qp.get("cam") === "9" ? 9 : 0);
+const camParam = Number(qp.get("cam"));
+applyCameraPreset(CAMERA_PRESETS[camParam] ? camParam : 0);
 setMode([1, 2, 3].includes(Number(qp.get("mode"))) ? Number(qp.get("mode")) : 1);
 
 let framesRendered = 0;
@@ -967,13 +1007,14 @@ function animate() {
   requestAnimationFrame(animate);
   controls.update();
   updateHUD();
-  renderer.render(scene, camera);
+  if (mode === 1) composer.render();
+  else renderer.render(scene, camera);
   if (++framesRendered === 3) window.sceneReady = true; // for headless capture
 }
 animate();
 
 // debugging hooks for headless capture sessions
-window.__dbg = { scene, renderer, camera, controls, MAT, sun, THREE };
+window.__dbg = { scene, renderer, camera, controls, MAT, sun, THREE, composer, gtao, bloom, GTAOPass };
 </script>
 </body>
 </html>

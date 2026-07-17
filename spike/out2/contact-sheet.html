@@ -2,17 +2,19 @@
 <html>
 <head>
 <meta charset="utf-8" />
-<title>PoC 2 — contact sheet (rungs 0–2)</title>
+<title>PoC 2 — checkpoint 2 contact sheet (rungs 0–3)</title>
 </head>
 <body style="background:#111;color:#eee;font-family:sans-serif;margin:0;padding:24px;">
-  <h1 style="font-size:20px;">PoC 2 — real-time PBR pass (rungs 0–2: C1 passed, textures in)</h1>
+  <h1 style="font-size:20px;">PoC 2 checkpoint 2 — real-time render pass (rungs 0–3 complete)</h1>
   <p style="font-size:13px;color:#999;max-width:820px;">
-    Judge against poc2-plan.md &sect;2 <b>Tier 1</b>: can you decide layout / proportion /
-    color questions from these renders? Rung 2 added procedural textures (wood grain,
-    bamboo weave, melange speckle, rug, cm-true 60 cm floor tiles), bookshelf cubbies
-    with book spines, the TV stand's open media shelf, a tower speaker and throw
-    cushions. Right column: spike-1 run-2 AI stills of the same views, for reference on
-    what the rejected path looked like.
+    <b>This is the C2 sheet.</b> Judge against poc2-plan.md &sect;2 <b>Tier 1, both
+    views, side-by-side with the reference photos</b>: can you decide layout /
+    proportion / color questions from these renders, without caveats you have to talk
+    yourself out of? Rung 2 added procedural textures (wood grain, bamboo weave,
+    melange speckle, rug, cm-true 60 cm floor tiles), bookshelf book spines, the open
+    media shelf, a speaker and cushions. Rung 3 added GTAO contact shadows + subtle
+    bloom and two extra viewpoints. Right column: spike-1 run-2 AI stills, for
+    reference on what the rejected path looked like.
   </p>
 
   <h2 style="font-size:16px;color:#aaa;">Couch view</h2>
@@ -39,12 +41,23 @@
     </div>
   </div>
 
-  <h2 style="font-size:16px;color:#aaa;">Known gaps at this rung (deliberate, not bugs)</h2>
+  <h2 style="font-size:16px;color:#aaa;">Additional viewpoints (rung 3)</h2>
+  <div style="display:flex;flex-wrap:wrap;">
+    <div style="margin:4px;">
+      <div style="font-size:12px;color:#999;margin-bottom:4px;">dining view (key 8)</div>
+      <a href="scene2-dining.png" target="_blank"><img src="scene2-dining.png" style="width:480px;border:1px solid #444;" /></a>
+    </div>
+    <div style="margin:4px;">
+      <div style="font-size:12px;color:#999;margin-bottom:4px;">overview from the main door (key 7)</div>
+      <a href="scene2-overview.png" target="_blank"><img src="scene2-overview.png" style="width:480px;border:1px solid #444;" /></a>
+    </div>
+  </div>
+
+  <h2 style="font-size:16px;color:#aaa;">Known remaining gaps (deliberate, not bugs)</h2>
   <ul style="font-size:13px;color:#999;max-width:820px;">
-    <li>No contact shadows / ambient occlusion, so furniture can look slightly floaty — rung 3 (SSAO).</li>
-    <li>Lighting/camera polish (tuned sun per reference photos, extra viewpoints) — rung 3.</li>
     <li>Water cooler and Billy interiors stay simple masses per the "outline and voids" rule.</li>
-    <li>Rug pile depth is bump-faked; true pile is a Tier 2 (path-traced stills) question.</li>
+    <li>Rug pile depth is bump-faked; true pile fidelity is a Tier 2 (path-traced stills, rung 4) question.</li>
+    <li>No baked GI — indirect light is a hemisphere-fill approximation, so shading is softer/flatter than a photo.</li>
   </ul>
 </body>
 </html>
