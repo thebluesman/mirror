@@ -1,0 +1,1026 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>PoC 2 — real-time render pass (rungs 0–1)</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: #222; color: #ddd;
+    font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    overflow: hidden;
+  }
+  #stage {
+    position: fixed; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #canvas-wrap {
+    width: 1024px; height: 768px;
+    box-shadow: 0 0 0 1px #444, 0 20px 60px rgba(0,0,0,0.6);
+    background: #000;
+  }
+  canvas { display: block; width: 1024px; height: 768px; }
+  #hud {
+    position: fixed; top: 10px; left: 10px;
+    background: rgba(0,0,0,0.6); border: 1px solid #444;
+    padding: 10px 14px; font-size: 12px; line-height: 1.5;
+    border-radius: 6px; pointer-events: none;
+    white-space: pre;
+  }
+  #hud b { color: #fff; }
+  #toast {
+    position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);
+    background: rgba(0,0,0,0.75); border: 1px solid #555;
+    padding: 6px 14px; border-radius: 5px; font-size: 12px;
+    opacity: 0; transition: opacity 0.2s;
+    pointer-events: none;
+  }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<div id="stage"><div id="canvas-wrap"></div></div>
+
+<div id="hud"></div>
+<div id="toast"></div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three/build/three.module.js",
+    "three/addons/": "./vendor/three/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { GTAOPass } from "three/addons/postprocessing/GTAOPass.js";
+import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+
+/* ============================================================
+   PoC 2 scene — fork of spike/scene.html (spike-1 record stays
+   untouched). Rung 0: swivel chair rebuilt as the closed Cozy
+   pod (per spike/reference/cozy-swivel-chair.md), STÄLL shoe
+   cabinet given its real silhouette, bookshelf on dark legs,
+   Billy unit on castor drawers. Rung 1: PBR materials from
+   furniture-notes.md, sRGB + ACES tone mapping, sun through the
+   west glazing + RoomEnvironment IBL, soft shadows.
+
+   Three.js r160 is vendored at spike/vendor/three (unpkg/CDNs
+   are blocked from this environment). Serve over a local static
+   server (e.g. `python3 -m http.server` in spike/) — ES module
+   imports don't load over plain file://.
+
+   GEOMETRY DATA — embedded verbatim (same layout as spike 1's
+   geometry.json) so the file needs no fetch of geometry.json.
+   ============================================================ */
+const DATA = {
+  "meta": {
+    "source": "Figma 'Living Room' page (Emerald Residence 107), frame 0:2, scale 1px = 1cm — updated layout pulled 2026-07-17",
+    "units": "cm",
+    "coords": "x = Figma x, z = Figma y (plan view), y = up. All footprints are [x, z] of top-left corner in plan + [width, depth].",
+    "assumed": "Ceiling 240 confirmed by photo measurement (door-to-wall pixel ratio; ±5). Window sill 90 / height 120 assumed; balcony door is full-height glass (opening to 210). Billy+Hogadal 160x30x149 user-confirmed. TV stand uses label dims 188x39 (Figma drew 180x39). Bookshelf h ~155 from photos; shoe rack is STALL, h 148. Balcony door assigned to the NORTH west-wall opening (sofa chaise blocks the southern one) — unconfirmed."
+  },
+  "ceilingHeight": 240,
+  "floor": [
+    { "name": "living-room", "x": 474, "z": 324, "w": 656, "d": 378 },
+    { "name": "kitchen-and-passage", "x": 1130, "z": 274, "w": 369, "d": 428 }
+  ],
+  "walls": [
+    { "name": "north-tv-wall", "from": [474, 324], "to": [1130, 324] },
+    { "name": "kitchen-west-stub", "from": [1130, 324], "to": [1130, 274] },
+    { "name": "kitchen-north-wall", "from": [1130, 274], "to": [1499, 274] },
+    { "name": "east-wall", "from": [1499, 274], "to": [1499, 702], "openings": [ { "name": "main-door", "along": "z", "start": 562, "size": 140, "type": "door" } ] },
+    { "name": "south-wall", "from": [474, 702], "to": [1499, 702], "openings": [ { "name": "bedroom-door", "along": "x", "start": 892, "size": 108, "type": "door" }, { "name": "powder-room-door", "along": "x", "start": 1290, "size": 87, "type": "door" } ] },
+    { "name": "west-wall", "from": [474, 324], "to": [474, 702], "openings": [ { "name": "balcony-door", "along": "z", "start": 393, "size": 110, "type": "glass-door" }, { "name": "window", "along": "z", "start": 533, "size": 110, "type": "window" } ] }
+  ],
+  "furniture": [
+    { "name": "swivel-chair", "shape": "cozy-pod", "x": 493, "z": 324, "w": 98, "d": 90 },
+    { "name": "tv-stand", "shape": "tv-stand", "x": 593, "z": 324, "w": 188, "d": 39, "h": 50, "legHeight": 20 },
+    { "name": "tv-samsung-frame", "shape": "frame-tv", "x": 610, "z": 324, "w": 146, "d": 8, "h": 85, "elevation": 95 },
+    { "name": "billy-hogadal-shelving", "shape": "billy-hogadal", "x": 876, "z": 324, "w": 160, "d": 30, "h": 149 },
+    { "name": "water-cooler", "shape": "water-cooler", "x": 1096, "z": 324, "w": 34, "d": 30, "h": 105 },
+    { "name": "dining-table", "shape": "box-on-legs", "x": 880, "z": 397, "w": 153, "d": 92, "h": 75, "legHeight": 69 },
+    { "name": "sonderod-rug", "shape": "rug", "x": 567, "z": 532, "w": 240, "d": 170, "h": 2 },
+    { "name": "coffee-table", "shape": "box-on-legs", "x": 629, "z": 535, "w": 116, "d": 39, "h": 32, "legHeight": 26 },
+    { "name": "applaryd-sofa", "shape": "compound-sofa", "main": { "x": 494, "z": 609, "w": 322, "d": 93 }, "chaise": { "x": 494, "z": 540, "w": 91, "d": 162 }, "seatHeight": 47, "backHeight": 82, "armHeight": 65 },
+    { "name": "bookshelf", "shape": "bookshelf", "x": 816, "z": 662, "w": 72, "d": 40, "h": 155 },
+    { "name": "shoe-rack", "shape": "stall-cabinet", "x": 1064, "z": 673, "w": 79, "d": 29, "h": 148 }
+  ],
+  "camera": {
+    "name": "couch-view",
+    "eye": [660, 115, 640],
+    "lookAt": [683, 120, 324],
+    "fovDeg": 60
+  }
+};
+
+/* ============================================================
+   CONSTANTS
+   ============================================================ */
+const WALL_THICKNESS = 10;
+const WALL_HEIGHT = DATA.ceilingHeight; // 240
+const CANVAS_W = 1024, CANVAS_H = 768;
+const ENV_INTENSITY = 0.55; // IBL contribution per material (sun is the key light)
+
+/* ============================================================
+   RENDERER / SCENE / CAMERA — rung 1: sRGB + ACES + shadows
+   ============================================================ */
+const wrap = document.getElementById("canvas-wrap");
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1); // keep exports at exactly 1024x768 px, no DPR scaling
+renderer.setSize(CANVAS_W, CANVAS_H, false);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+wrap.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xbfccd6); // pale sky, visible only through glazing gaps
+
+// Image-based ambient: Three's RoomEnvironment (local, no network needed).
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
+// 38° vertical ≈ a 35mm lens on full frame — human-POV per C2 feedback
+// (geometry.json's 60° reads as an 18mm ultra-wide). Preset fov overrides.
+const HUMAN_FOV = 38;
+const camera = new THREE.PerspectiveCamera(HUMAN_FOV, CANVAS_W / CANVAS_H, 5, 3000);
+
+const CAMERA_PRESETS = {
+  // key 0 — couch view; eye pulled back to the sofa backrest so the 35mm-equiv
+  // lens still frames chair + stand (geometry.json's eye assumed the 60° wide)
+  0: {
+    eye: new THREE.Vector3(660, 115, 690),
+    lookAt: new THREE.Vector3(660, 110, 324)
+  },
+  // key 9 — reverse view from the main-door/kitchen passage looking at the
+  // sofa + swivel chair
+  9: {
+    eye: new THREE.Vector3(1400, 150, 630),
+    lookAt: new THREE.Vector3(660, 60, 590),
+    depthNear: 40, depthFar: 1000
+  },
+  // key 8 — dining view: from the sofa corner toward the dining table + kitchen
+  8: {
+    eye: new THREE.Vector3(620, 140, 640),
+    lookAt: new THREE.Vector3(1010, 70, 420)
+  },
+  // key 7 — high overview from the main door, whole living room in frame
+  7: {
+    eye: new THREE.Vector3(1470, 210, 480),
+    lookAt: new THREE.Vector3(680, 50, 540),
+    depthNear: 40, depthFar: 1100
+  }
+};
+
+function applyCameraPreset(which = 0) {
+  const p = CAMERA_PRESETS[which];
+  camera.fov = p.fov ?? HUMAN_FOV;
+  camera.updateProjectionMatrix();
+  camera.position.copy(p.eye);
+  camera.up.set(0, 1, 0);
+  camera.lookAt(p.lookAt);
+  controls.target.copy(p.lookAt);
+  controls.update();
+  depthUniforms.uNear.value = p.depthNear ?? 30;
+  depthUniforms.uFar.value = p.depthFar ?? 600;
+}
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.screenSpacePanning = true;
+
+/* ============================================================
+   MATERIALS — per-item PBR from furniture-notes.md
+   ============================================================ */
+function std(opts) {
+  const m = new THREE.MeshStandardMaterial(opts);
+  m.envMapIntensity = ENV_INTENSITY;
+  return m;
+}
+
+/* ------------------------------------------------------------
+   RUNG 2 — procedural canvas textures (per D2 memo: procedural
+   clears the Tier 1 bar for every item; zero assets on disk).
+   Seeded RNG so every capture renders the identical scene.
+   ------------------------------------------------------------ */
+let _seed = 42;
+function R() { _seed = (_seed * 1664525 + 1013904223) >>> 0; return _seed / 4294967296; }
+const clamp8 = v => Math.max(0, Math.min(255, Math.round(v)));
+
+function makeCanvas(w, h, draw) {
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  draw(c.getContext("2d"), w, h);
+  return c;
+}
+function colorTex(canvas, repeat = [1, 1]) {
+  const t = new THREE.CanvasTexture(canvas);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(repeat[0], repeat[1]);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+function dataTex(canvas, repeat = [1, 1]) { // non-color (bump maps)
+  const t = new THREE.CanvasTexture(canvas);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(repeat[0], repeat[1]);
+  return t;
+}
+
+// wood: wavy grain bands along x over a base tone, optional knots (the pine tell)
+function woodCanvas({ base, streak, contrast = 0.10, knots = 0 }) {
+  return makeCanvas(512, 512, (ctx) => {
+    ctx.fillStyle = base; ctx.fillRect(0, 0, 512, 512);
+    for (let i = 0; i < 150; i++) {
+      const y = R() * 512, phase = R() * Math.PI * 2;
+      ctx.globalAlpha = 0.04 + R() * contrast;
+      ctx.strokeStyle = R() < 0.72 ? streak : "#ffffff";
+      ctx.lineWidth = 1 + R() * 3;
+      ctx.beginPath();
+      for (let x = 0; x <= 512; x += 32) {
+        const yy = y + Math.sin(x / 512 * Math.PI * 2 + phase) * 3;
+        x === 0 ? ctx.moveTo(x, yy) : ctx.lineTo(x, yy);
+      }
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    for (let k = 0; k < knots; k++) {
+      const kx = 60 + R() * 392, ky = 60 + R() * 392, kr = 8 + R() * 10;
+      for (let ring = kr; ring > 0; ring -= 2.5) {
+        ctx.globalAlpha = 0.10 + 0.05 * (kr - ring) / kr;
+        ctx.strokeStyle = streak;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.ellipse(kx, ky, ring * 1.5, ring, 0.3, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 0.35; ctx.fillStyle = "#3a2814";
+      ctx.beginPath(); ctx.ellipse(kx, ky, 4, 2.5, 0.3, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  });
+}
+
+// fabric: per-pixel noise around a base color, optional faint diagonal hatch,
+// optional bright flecks (melange)
+function fabricCanvas(baseRGB, spread, { hatch = false, flecks = 0 } = {}) {
+  return makeCanvas(256, 256, (ctx) => {
+    const img = ctx.createImageData(256, 256);
+    for (let i = 0; i < img.data.length; i += 4) {
+      const n = (R() - 0.5) * spread;
+      img.data[i]     = clamp8(baseRGB[0] + n);
+      img.data[i + 1] = clamp8(baseRGB[1] + n);
+      img.data[i + 2] = clamp8(baseRGB[2] + n);
+      img.data[i + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+    if (hatch) {
+      ctx.globalAlpha = 0.05; ctx.strokeStyle = "#000"; ctx.lineWidth = 1;
+      for (let d = -256; d < 512; d += 5) {
+        ctx.beginPath(); ctx.moveTo(d, 0); ctx.lineTo(d + 256, 256); ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+    for (let i = 0; i < flecks; i++) {
+      ctx.globalAlpha = 0.35 + R() * 0.4;
+      ctx.fillStyle = R() < 0.5 ? "#e8e8e8" : "#0a0a0a";
+      ctx.fillRect(R() * 256, R() * 256, 1 + R() * 1.5, 1);
+    }
+    ctx.globalAlpha = 1;
+  });
+}
+
+// bamboo weave: wide horizontal slats + thin vertical stitch seams. A checkered
+// H/V cell pattern was tried first but mip-filters into mosaic noise at room
+// distance; horizontal banding survives minification and still reads "woven".
+const bambooCanvas = makeCanvas(256, 256, (ctx) => {
+  const rows = 18, rh = 256 / rows;
+  for (let r = 0; r < rows; r++) {
+    const l = 0.82 + (R() - 0.5) * 0.16;
+    ctx.fillStyle = `rgb(${clamp8(201 * l)},${clamp8(168 * l)},${clamp8(107 * l)})`;
+    ctx.fillRect(0, r * rh, 256, rh);
+    ctx.fillStyle = "rgba(60,40,15,0.30)";
+    ctx.fillRect(0, r * rh, 256, 1.5);                       // slat shadow line
+    const offset = (r % 2) * 21;                             // staggered stitches
+    for (let x = offset; x < 256; x += 42) {
+      ctx.fillStyle = "rgba(60,40,15,0.22)";
+      ctx.fillRect(x, r * rh, 2.5, rh);
+    }
+  }
+});
+
+// SÖNDERÖD rug: overlapping blue watercolor blobs + heavy fine noise
+const rugCanvas = makeCanvas(512, 512, (ctx) => {
+  ctx.fillStyle = "#2e4a7d"; ctx.fillRect(0, 0, 512, 512);
+  const blues = ["#1f3a6b", "#3d5c96", "#27446f", "#4a6aa4", "#16305c"];
+  for (let i = 0; i < 6; i++) {
+    const x = R() * 512, y = R() * 512, r = 90 + R() * 160;
+    const g = ctx.createRadialGradient(x, y, 10, x, y, r);
+    g.addColorStop(0, blues[i % blues.length] + "cc");
+    g.addColorStop(1, "#00000000");
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  }
+  for (let i = 0; i < 16000; i++) {
+    ctx.globalAlpha = 0.10 + R() * 0.12;
+    ctx.fillStyle = R() < 0.5 ? "#0d1c38" : "#6a86b8";
+    ctx.fillRect(R() * 512, R() * 512, 1.5, 1.5);
+  }
+  ctx.globalAlpha = 1;
+});
+const rugBumpCanvas = fabricCanvas([128, 128, 128], 150); // pile depth noise
+
+// floor: 4x4 grid of 60 cm porcelain tiles (canvas covers 240x240 cm),
+// per-tile luminance jitter + grout lines
+const floorCanvas = makeCanvas(1024, 1024, (ctx) => {
+  for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) {
+    const l = 1 + (R() - 0.5) * 0.05;
+    ctx.fillStyle = `rgb(${clamp8(217 * l)},${clamp8(212 * l)},${clamp8(203 * l)})`;
+    ctx.fillRect(c * 256, r * 256, 256, 256);
+  }
+  ctx.strokeStyle = "#b6b0a6"; ctx.lineWidth = 3;
+  for (let i = 0; i <= 4; i++) {
+    ctx.beginPath(); ctx.moveTo(i * 256, 0); ctx.lineTo(i * 256, 1024); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, i * 256); ctx.lineTo(1024, i * 256); ctx.stroke();
+  }
+});
+
+// bookshelf front: pine frame, 2x4 dark cubbies packed with colored book spines
+const bookshelfFrontCanvas = makeCanvas(256, 512, (ctx) => {
+  ctx.fillStyle = "#d9bf94"; ctx.fillRect(0, 0, 256, 512);
+  const spineColors = ["#7d5a44", "#4a5a6a", "#8a3b34", "#b5a075", "#3c4a3a",
+                       "#8c8c94", "#5a4a6e", "#c47f4a", "#33566e", "#a89a56"];
+  const cols = 2, rows = 4, m = 10;
+  const cw = (256 - m * (cols + 1)) / cols, rh = (512 - m * (rows + 1)) / rows;
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const x0 = m + c * (cw + m), y0 = m + r * (rh + m);
+    ctx.fillStyle = "#241d16"; ctx.fillRect(x0, y0, cw, rh);        // dark cubby back
+    let x = x0 + 3;
+    while (x < x0 + cw - 6) {
+      const w = 6 + R() * 14;
+      if (R() < 0.12) { x += 10; continue; }                        // occasional gap
+      const h = rh * (0.55 + R() * 0.35);
+      ctx.fillStyle = R() < 0.9
+        ? spineColors[Math.floor(R() * spineColors.length)]
+        : "#d8483c";                                                // rare bright spine
+      ctx.fillRect(x, y0 + rh - h, Math.min(w, x0 + cw - x) - 1.5, h);
+      x += w;
+    }
+  }
+});
+
+const oakCanvas      = woodCanvas({ base: "#b08d5e", streak: "#6d4c28", contrast: 0.12 });
+const oakLightCanvas = woodCanvas({ base: "#c49a63", streak: "#8a6534", contrast: 0.10 });
+const pineCanvas     = woodCanvas({ base: "#d9bf94", streak: "#9c7c4a", contrast: 0.10, knots: 5 });
+const pecanCanvas    = woodCanvas({ base: "#7a5236", streak: "#452b16", contrast: 0.14 });
+const sofaCanvas     = fabricCanvas([185, 186, 181], 26, { hatch: true });
+const melangeCanvas  = fabricCanvas([58, 58, 62], 55, { flecks: 900 });
+
+const MAT = {
+  // room shell (floor material is built per-rect in addFloor for cm-true tile repeat)
+  wall:        std({ color: 0xf0e9dc, roughness: 0.92 }),                 // warm white
+  ceiling:     std({ color: 0xf5f1e9, roughness: 0.95 }),
+  doorLeaf:    std({ color: 0xefeae0, roughness: 0.6 }),                  // closed white interior doors
+  charcoalAlu: std({ color: 0x33363a, roughness: 0.45, metalness: 0.65 }),// window/door frames
+  // furniture — Lejde grey w/ weave hatch, charcoal melange, blue high pile
+  sofaFabric:  std({ map: colorTex(sofaCanvas, [3, 3]), bumpMap: dataTex(sofaCanvas, [3, 3]), bumpScale: 0.3, roughness: 0.95 }),
+  chairFabric: std({ map: colorTex(melangeCanvas, [2, 2]), roughness: 0.97 }),
+  rugBlue:     std({ map: colorTex(rugCanvas), bumpMap: dataTex(rugBumpCanvas, [6, 6]), bumpScale: 0.9, roughness: 1.0 }),
+  oak:         std({ map: colorTex(oakCanvas), roughness: 0.55 }),        // TV stand frame, GUTTANE
+  oakLight:    std({ map: colorTex(oakLightCanvas), roughness: 0.55 }),   // tapered light-wood legs
+  pine:        std({ map: colorTex(pineCanvas), roughness: 0.6 }),        // bookshelf carcass
+  bookFront:   std({ map: colorTex(bookshelfFrontCanvas), roughness: 0.75 }), // cubbies + spines
+  pecan:       std({ map: colorTex(pecanCanvas), roughness: 0.5 }),       // dining table legs
+  whiteLacquer:std({ color: 0xf6f4ef, roughness: 0.18 }),  // dining table top
+  ikeaWhite:   std({ color: 0xf1efe9, roughness: 0.55 }),  // Billy carcass, STÄLL, drawer fronts
+  bamboo:      std({ map: colorTex(bambooCanvas), roughness: 0.4 }),      // Billy woven doors, clear lacquer
+  darkWood:    std({ color: 0x2c241c, roughness: 0.7 }),   // bookshelf legs
+  recessDark:  std({ color: 0x17140f, roughness: 0.9 }),   // open-shelf shadow recess
+  blackPlastic:std({ color: 0x141416, roughness: 0.45 }),  // water cooler body, speakers
+  stainless:   std({ color: 0xaeb3b5, roughness: 0.3, metalness: 1.0 }),
+  cushionMustard: std({ color: 0xa9832f, roughness: 0.95 }),
+  cushionSlate:   std({ color: 0x5f6670, roughness: 0.95 }),
+  tvBezel:     std({ color: 0xf4f3f0, roughness: 0.4 }),   // Frame TV WHITE bezel
+  tvScreen:    std({ color: 0x0a0a0d, roughness: 0.25 })   // dark screen, slightly glossy
+};
+MAT.chairFabric.side = THREE.DoubleSide; // pod interior visible through the mouth
+
+const glassMat = new THREE.MeshPhysicalMaterial({
+  color: 0xffffff, roughness: 0.05, metalness: 0,
+  transmission: 0.92, thickness: 0.5, transparent: true
+});
+glassMat.envMapIntensity = ENV_INTENSITY;
+
+/* ============================================================
+   LIGHTS — one warm afternoon sun from the WEST (-x) through
+   the balcony door + window, plus the IBL environment above.
+   ============================================================ */
+const sun = new THREE.DirectionalLight(0xffdcae, 2.6);
+sun.position.set(60, 330, 420);          // west of the west wall (x=474), afternoon height
+sun.target.position.set(820, 0, 560);    // aims east-southeast across the room
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.near = 10;
+sun.shadow.camera.far = 2500;
+sun.shadow.camera.left = -700;
+sun.shadow.camera.right = 700;
+sun.shadow.camera.top = 500;
+sun.shadow.camera.bottom = -500;
+sun.shadow.bias = -0.0002;
+sun.shadow.normalBias = 2.5; // world units are cm
+scene.add(sun, sun.target);
+
+// Floor-bounce fill: rasterization has no GI, so the one light path that
+// lights a ceiling — sun hits floor, floor bounces up — must be faked.
+// Ground color = floor tile tint, sky kept dim so it doesn't fight the IBL.
+const bounce = new THREE.HemisphereLight(0xcfd8e0, 0xece6da, 1.05);
+scene.add(bounce);
+
+// Backdrop "exterior" plane west of the glazing so windows read bright/warm,
+// and so the couch view isn't looking into empty sky color.
+(function addBackdrop() {
+  const geo = new THREE.PlaneGeometry(1200, 600);
+  geo.rotateY(Math.PI / 2); // face +x (into the room)
+  const mat = new THREE.MeshBasicMaterial({ color: 0xf7e8cd });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(240, 250, 520);
+  scene.add(mesh);
+})();
+
+/* ============================================================
+   MESH BOOKKEEPING
+   ============================================================ */
+const litMeshes = [];   // everything visible in shaded mode + gets edges
+const glassMeshes = []; // hidden in depth/edge modes (openings were holes in spike 1)
+
+function reg(mesh, { cast = true, receive = true } = {}) {
+  mesh.castShadow = cast;
+  mesh.receiveShadow = receive;
+  scene.add(mesh);
+  litMeshes.push(mesh);
+  return mesh;
+}
+
+/* ============================================================
+   FLOOR + CEILING
+   ============================================================ */
+function addFloor(rect) {
+  const geo = new THREE.PlaneGeometry(rect.w, rect.d);
+  geo.rotateX(-Math.PI / 2);
+  // floorCanvas covers 240x240 cm (4 tiles of 60) — repeat keeps tiles cm-true
+  const map = colorTex(floorCanvas, [rect.w / 240, rect.d / 240]);
+  map.anisotropy = renderer.capabilities.getMaxAnisotropy(); // grout shimmers otherwise
+  const mesh = new THREE.Mesh(geo, std({ map, roughness: 0.28, metalness: 0.0 }));
+  mesh.material.side = THREE.DoubleSide;
+  mesh.position.set(rect.x + rect.w / 2, 0, rect.z + rect.d / 2);
+  reg(mesh, { cast: false });
+}
+
+function addCeiling(rect) {
+  const geo = new THREE.PlaneGeometry(rect.w, rect.d);
+  geo.rotateX(Math.PI / 2); // normal DOWN — the face seen from inside the room
+  const mesh = new THREE.Mesh(geo, MAT.ceiling.clone());
+  mesh.material.side = THREE.DoubleSide;
+  mesh.position.set(rect.x + rect.w / 2, WALL_HEIGHT, rect.z + rect.d / 2);
+  reg(mesh, { cast: false });
+}
+
+DATA.floor.forEach(rect => { addFloor(rect); addCeiling(rect); });
+
+/* ============================================================
+   WALLS — same opening-cut logic as spike 1, plus glazing panes
+   + charcoal aluminum frames in the west openings and white
+   door leaves closing the interior doorways.
+   ============================================================ */
+function addWall(wallDef) {
+  const [x0, z0] = wallDef.from;
+  const [x1, z1] = wallDef.to;
+  const dx = x1 - x0, dz = z1 - z0;
+  const horizontal = Math.abs(dx) >= Math.abs(dz); // wall runs along world X
+  const length = horizontal ? Math.abs(dx) : Math.abs(dz);
+  const s0 = horizontal ? Math.min(x0, x1) : Math.min(z0, z1);
+
+  // opening "start"/"size" are ABSOLUTE plan coordinates along the wall axis
+  const openings = (wallDef.openings || [])
+    .map(o => ({ start: o.start - s0, end: o.start + o.size - s0, type: o.type, name: o.name }))
+    .sort((a, b) => a.start - b.start);
+
+  let cursor = 0;
+  const fullSolid = [];
+  openings.forEach(o => {
+    if (o.start > cursor) fullSolid.push({ a: cursor, b: o.start });
+    cursor = Math.max(cursor, o.end);
+  });
+  if (cursor < length) fullSolid.push({ a: cursor, b: length });
+
+  function place(mesh, aLocal, bLocal, yBottom, h, thickness, opts) {
+    const midLocal = (aLocal + bLocal) / 2;
+    const cx = horizontal ? s0 + midLocal : x0;
+    const cz = horizontal ? z0 : s0 + midLocal;
+    mesh.position.set(cx, yBottom + h / 2, cz);
+    return mesh;
+  }
+
+  function addSegment(aLocal, bLocal, yBottom, yTop, mat = MAT.wall) {
+    const segLen = bLocal - aLocal;
+    if (segLen <= 0.001) return;
+    const h = yTop - yBottom;
+    const geo = horizontal
+      ? new THREE.BoxGeometry(segLen, h, WALL_THICKNESS)
+      : new THREE.BoxGeometry(WALL_THICKNESS, h, segLen);
+    reg(place(new THREE.Mesh(geo, mat), aLocal, bLocal, yBottom, h));
+  }
+
+  // thin slab centered in the wall plane (glass panes, frame bars, door leaves)
+  function addInWallSlab(aLocal, bLocal, yBottom, yTop, thickness, mat, isGlass = false) {
+    const segLen = bLocal - aLocal;
+    if (segLen <= 0.001 || yTop - yBottom <= 0.001) return;
+    const h = yTop - yBottom;
+    const geo = horizontal
+      ? new THREE.BoxGeometry(segLen, h, thickness)
+      : new THREE.BoxGeometry(thickness, h, segLen);
+    const mesh = place(new THREE.Mesh(geo, mat), aLocal, bLocal, yBottom, h);
+    if (isGlass) {
+      mesh.castShadow = false;      // sun must come through the glazing
+      mesh.receiveShadow = false;
+      scene.add(mesh);
+      glassMeshes.push(mesh);
+    } else {
+      reg(mesh);
+    }
+  }
+
+  fullSolid.forEach(seg => addSegment(seg.a, seg.b, 0, WALL_HEIGHT));
+
+  openings.forEach(o => {
+    const F = 6; // frame bar width
+    if (o.type === "door") {
+      addSegment(o.start, o.end, 210, WALL_HEIGHT); // lintel
+      // closed white door leaf (interior doors — bedroom, powder room, main door)
+      addInWallSlab(o.start + 2, o.end - 2, 0, 208, 4, MAT.doorLeaf);
+    } else if (o.type === "glass-door") {
+      addSegment(o.start, o.end, 210, WALL_HEIGHT); // lintel
+      // full-height glass balcony door, charcoal aluminum frame
+      addInWallSlab(o.start, o.start + F, 0, 210, 8, MAT.charcoalAlu);
+      addInWallSlab(o.end - F, o.end, 0, 210, 8, MAT.charcoalAlu);
+      addInWallSlab(o.start + F, o.end - F, 204, 210, 8, MAT.charcoalAlu);
+      addInWallSlab(o.start + F, o.end - F, 0, 6, 8, MAT.charcoalAlu);
+      addInWallSlab(o.start + F, o.end - F, 6, 204, 2, glassMat, true);
+    } else if (o.type === "window") {
+      addSegment(o.start, o.end, 0, 90);            // sill wall below
+      addSegment(o.start, o.end, 210, WALL_HEIGHT); // lintel above
+      // framed window, charcoal aluminum, center mullion
+      addInWallSlab(o.start, o.start + F, 90, 210, 8, MAT.charcoalAlu);
+      addInWallSlab(o.end - F, o.end, 90, 210, 8, MAT.charcoalAlu);
+      addInWallSlab(o.start + F, o.end - F, 90, 96, 8, MAT.charcoalAlu);
+      addInWallSlab(o.start + F, o.end - F, 204, 210, 8, MAT.charcoalAlu);
+      const mid = (o.start + o.end) / 2;
+      addInWallSlab(mid - 2, mid + 2, 96, 204, 8, MAT.charcoalAlu);
+      addInWallSlab(o.start + F, mid - 2, 96, 204, 2, glassMat, true);
+      addInWallSlab(mid + 2, o.end - F, 96, 204, 2, glassMat, true);
+    }
+  });
+}
+
+DATA.walls.forEach(addWall);
+
+/* ============================================================
+   FURNITURE HELPERS
+   ============================================================ */
+function box(w, h, d, x, y, z, mat, group = null) {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  mesh.position.set(x, y, z);
+  if (group) { mesh.castShadow = true; mesh.receiveShadow = true; group.add(mesh); }
+  else reg(mesh);
+  return mesh;
+}
+
+function taperedLegs(f, legMat, { legR = 4, inset = 12 } = {}) {
+  [[f.x + inset, f.z + inset], [f.x + f.w - inset, f.z + inset],
+   [f.x + inset, f.z + f.d - inset], [f.x + f.w - inset, f.z + f.d - inset]]
+    .forEach(([lx, lz]) => {
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(legR - 1, legR, f.legHeight, 12), legMat);
+      leg.position.set(lx, f.legHeight / 2, lz);
+      reg(leg);
+    });
+}
+
+/* ============================================================
+   FURNITURE BUILDERS
+   ============================================================ */
+const BUILDERS = {
+
+  // West Elm Modern Expandable dining table: white lacquer top, pecan legs
+  "box-on-legs"(f) {
+    if (f.name === "dining-table") {
+      box(f.w, f.h - f.legHeight, f.d, f.x + f.w / 2, f.legHeight + (f.h - f.legHeight) / 2, f.z + f.d / 2, MAT.whiteLacquer);
+      taperedLegs(f, MAT.pecan, { legR: 4.5 });
+    } else { // GUTTANE coffee table: all oak
+      box(f.w, f.h - f.legHeight, f.d, f.x + f.w / 2, f.legHeight + (f.h - f.legHeight) / 2, f.z + f.d / 2, MAT.oak);
+      taperedLegs(f, MAT.oak, { legR: 3.5, inset: 8 });
+    }
+  },
+
+  // TV stand: oak frame, white drawer fronts left+right, open middle shelf
+  // (dark recess + slim black media unit — the furniture-notes silhouette)
+  "tv-stand"(f) {
+    const bodyH = f.h - f.legHeight;
+    box(f.w, bodyH, f.d, f.x + f.w / 2, f.legHeight + bodyH / 2, f.z + f.d / 2, MAT.oak);
+    const frontZ = f.z + f.d + 1;
+    const dw = (f.w - 24) / 3;
+    for (let i = 0; i < 3; i++) {
+      const cx = f.x + 12 + dw * i + dw / 2;
+      if (i === 1) {
+        box(dw - 3, bodyH - 8, 2, cx, f.legHeight + bodyH / 2, frontZ, MAT.recessDark);
+        box(dw - 18, 7, 3, cx, f.legHeight + 9, frontZ + 1.5, MAT.blackPlastic); // media unit
+      } else {
+        box(dw - 3, bodyH - 8, 2, cx, f.legHeight + bodyH / 2, frontZ, MAT.ikeaWhite);
+      }
+    }
+    taperedLegs(f, MAT.oakLight, { legR: 3.5, inset: 10 });
+    // decor: one tower speaker right of the stand (left side is the pod chair)
+    box(22, 100, 25, f.x + f.w + 20, 50, f.z + 14, MAT.blackPlastic);
+  },
+
+  // Samsung Frame TV: WHITE bezel + dark screen, flush on the north wall
+  "frame-tv"(f) {
+    const faceZ = 324 + WALL_THICKNESS / 2;
+    const B = 4; // bezel width
+    box(f.w, f.h, 4, f.x + f.w / 2, f.elevation + f.h / 2, faceZ + 2, MAT.tvBezel);
+    box(f.w - B * 2, f.h - B * 2, 1.5, f.x + f.w / 2, f.elevation + f.h / 2, faceZ + 4.2, MAT.tvScreen);
+  },
+
+  // Billy+Högadal: white bookcases w/ bamboo doors ON white castor drawers
+  "billy-hogadal"(f) {
+    const castorH = 6, drawerH = 37, caseY = castorH + drawerH; // 43 → cases 43..149
+    const cx = f.x + f.w / 2, cz = f.z + f.d / 2;
+    // two rolling drawers on castors (slight inset, visible under-gap)
+    const dw = f.w / 2 - 4;
+    box(dw, drawerH, f.d - 4, f.x + 2 + dw / 2, castorH + drawerH / 2, cz + 1, MAT.ikeaWhite);
+    box(dw, drawerH, f.d - 4, f.x + f.w - 2 - dw / 2, castorH + drawerH / 2, cz + 1, MAT.ikeaWhite);
+    for (const lx of [f.x + 10, f.x + f.w / 2 - 6, f.x + f.w / 2 + 6, f.x + f.w - 10]) {
+      for (const lz of [f.z + 7, f.z + f.d - 7]) {
+        const c = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 2.5, castorH, 10), MAT.blackPlastic);
+        c.position.set(lx, castorH / 2, lz);
+        reg(c);
+      }
+    }
+    // white carcass
+    const caseH = f.h - caseY;
+    box(f.w, caseH, f.d, cx, caseY + caseH / 2, cz, MAT.ikeaWhite);
+    // woven bamboo door fronts (flat tone at this rung), 4 doors
+    const frontZ = f.z + f.d + 1;
+    const doorW = f.w / 4 - 3;
+    for (let i = 0; i < 4; i++) {
+      box(doorW, caseH - 4, 2, f.x + (f.w / 4) * i + f.w / 8, caseY + caseH / 2, frontZ, MAT.bamboo);
+    }
+  },
+
+  // Panasonic bottom-load water cooler: black body, stainless tap panel
+  "water-cooler"(f) {
+    box(f.w, f.h, f.d, f.x + f.w / 2, f.h / 2, f.z + f.d / 2, MAT.blackPlastic);
+    box(f.w - 6, 34, 1.5, f.x + f.w / 2, f.h - 24, f.z + f.d + 0.8, MAT.stainless);
+  },
+
+  // pine open bookcase on short dark legs; front face (north, -z: it stands
+  // against the south wall) carries the cubbies-with-book-spines texture
+  "bookshelf"(f) {
+    const legH = 8;
+    const faces = [MAT.pine, MAT.pine, MAT.pine, MAT.pine, MAT.pine, MAT.bookFront]; // nz = front
+    const body = new THREE.Mesh(new THREE.BoxGeometry(f.w, f.h - legH, f.d), faces);
+    body.position.set(f.x + f.w / 2, legH + (f.h - legH) / 2, f.z + f.d / 2);
+    reg(body);
+    [[f.x + 5, f.z + 5], [f.x + f.w - 5, f.z + 5], [f.x + 5, f.z + f.d - 5], [f.x + f.w - 5, f.z + f.d - 5]]
+      .forEach(([lx, lz]) => box(6, legH, 6, lx, legH / 2, lz, MAT.darkWood));
+  },
+
+  // IKEA STÄLL: slim wall-leaning cabinet, thin body raised off the floor,
+  // FRONT legs only (back rests against the south wall)
+  "stall-cabinet"(f) {
+    const legH = 12;
+    const bodyH = f.h - legH;
+    // thin cabinet mass — full footprint depth is already only 29
+    box(f.w, bodyH, f.d, f.x + f.w / 2, legH + bodyH / 2, f.z + f.d / 2, MAT.ikeaWhite);
+    // two front legs (front faces north, into the room)
+    for (const lx of [f.x + 6, f.x + f.w - 6]) {
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(1.8, 2.2, legH, 10), MAT.charcoalAlu);
+      leg.position.set(lx, legH / 2, f.z + 4);
+      reg(leg);
+    }
+    // three faint compartment seams on the front face (material detail)
+    for (let i = 1; i <= 2; i++) {
+      box(f.w - 6, 1.2, 0.8, f.x + f.w / 2, legH + (bodyH / 3) * i, f.z - 0.5, MAT.charcoalAlu);
+    }
+  },
+
+  // blue high-pile rug — box with a hair of height, no cast shadow needed
+  "rug"(f) {
+    const mesh = box(f.w, f.h, f.d, f.x + f.w / 2, f.h / 2, f.z + f.d / 2, MAT.rugBlue);
+    mesh.castShadow = false;
+  },
+
+  /* --------------------------------------------------------
+     ÄPPLARYD SOFA — same compound silhouette as spike 1,
+     now in Lejde light grey PBR fabric
+     -------------------------------------------------------- */
+  "compound-sofa"(f) {
+    const main = f.main, chaise = f.chaise;
+    const seatH = f.seatHeight, backH = f.backHeight, armH = f.armHeight;
+    const backThickness = 25, armWidth = 15;
+    const group = new THREE.Group();
+
+    const b = (w, h, d, x, y, z) => box(w, h, d, x, y, z, MAT.sofaFabric, group);
+
+    const backMesh = b(main.w, backH, backThickness,
+      main.x + main.w / 2, backH / 2, main.z + main.d - backThickness / 2);
+    backMesh.rotation.x = THREE.MathUtils.degToRad(-8);
+    backMesh.position.z += 4;
+
+    const mainSeatD = main.d - backThickness;
+    b(main.w, seatH, mainSeatD, main.x + main.w / 2, seatH / 2, main.z + mainSeatD / 2);
+
+    const chaiseSeatD = chaise.d - backThickness;
+    b(chaise.w, seatH, chaiseSeatD, chaise.x + chaise.w / 2, seatH / 2, chaise.z + chaiseSeatD / 2);
+
+    b(armWidth, armH, main.d, main.x + main.w - armWidth / 2, armH / 2, main.z + main.d / 2);
+    b(armWidth, armH, chaise.d, chaise.x + armWidth / 2, armH / 2, chaise.z + chaise.d / 2);
+    b(chaise.w, armH, armWidth, chaise.x + chaise.w / 2, armH / 2, chaise.z + armWidth / 2);
+
+    // two throw cushions leaning on the back (decor: renders read empty without)
+    for (const [cx, mat, tilt] of [
+      [main.x + 110, MAT.cushionMustard, 0.08],
+      [main.x + 205, MAT.cushionSlate, -0.06]
+    ]) {
+      const cu = box(40, 40, 12, cx, seatH + 16, main.z + mainSeatD - 10, mat, group);
+      cu.rotation.x = -0.30;
+      cu.rotation.z = tilt;
+    }
+
+    scene.add(group);
+    group.traverse(o => { if (o.isMesh) litMeshes.push(o); });
+  },
+
+  /* --------------------------------------------------------
+     SWIVEL CHAIR — West Elm Cozy pod, rebuilt per
+     spike/reference/cozy-swivel-chair.md "Modeling directive":
+     - lathe pod body, floor r≈30 → max r≈49 at y 35-45 →
+       tapering to the rim top (~50); upholstery to the floor,
+       NO foot disk / column / pedestal
+     - loose seat cushion, top ~40
+     - back+arms one tilted torus ring: apex ~76 at the rear,
+       sweeping down to ~45-48 at the front ends; outer face
+       roughly flush with the pod body; front ~120° open
+     - 98 wide × 90 deep × 76 total; open front faces SE,
+       apex to the NW corner
+     -------------------------------------------------------- */
+  "cozy-pod"(f) {
+    const group = new THREE.Group();
+    group.position.set(f.x + f.w / 2, 0, f.z + f.d / 2);
+    group.scale.z = f.d / f.w; // 90/98 — pod slightly shallower than wide
+    const mat = MAT.chairFabric;
+
+    // pod body: lathe profile, widest below mid-height, tucks in at the floor
+    const profile = [
+      [30.0, 0], [38.0, 3], [44.0, 9], [47.5, 18],
+      [49.0, 30], [49.0, 40], [47.0, 45], [44.0, 48], [42.0, 50]
+    ].map(([r, y]) => new THREE.Vector2(r, y));
+    const pod = new THREE.Mesh(new THREE.LatheGeometry(profile, 48), mat);
+    pod.castShadow = true; pod.receiveShadow = true;
+    group.add(pod);
+
+    // seat cushion: thick rounded disc inside the pod, top ~40
+    const cushion = new THREE.Mesh(new THREE.CylinderGeometry(31, 33, 14, 32), mat);
+    cushion.position.y = 33; // 26..40
+    cushion.castShadow = true; cushion.receiveShadow = true;
+    group.add(cushion);
+
+    // back+arm ring: tilted torus segment, apex 76 rear → ~47 at front ends.
+    // Torus in XY: gap centered at local -Z after rotateX; arc 300° leaves a
+    // 60° mouth at the front. Tilt raises the rear, dips the front ends into
+    // the pod body so ring and pod read as one surface.
+    const R = 37, TUBE = 12, ARC = Math.PI * 5 / 3; // 300°
+    const ringGeo = new THREE.TorusGeometry(R, TUBE, 18, 60, ARC);
+    ringGeo.rotateZ(Math.PI / 2 + (Math.PI * 2 - ARC) / 2); // center the gap on +Y (pre-flip)
+    ringGeo.rotateX(-Math.PI / 2);          // lay flat: gap now at -Z (front), rear at +Z
+    ringGeo.rotateX(-0.40);                 // tilt ~23°: rear up, front down
+    const ring = new THREE.Mesh(ringGeo, mat);
+    ring.position.y = 49.5;                 // rear tube top ≈ 76, front ends ≈ 47
+    ring.castShadow = true; ring.receiveShadow = true;
+    group.add(ring);
+
+    // orient: open front (local -Z) faces SE (+x,+z); apex to the NW corner
+    group.rotation.y = THREE.MathUtils.degToRad(-135);
+
+    scene.add(group);
+    group.traverse(o => { if (o.isMesh) litMeshes.push(o); });
+  }
+};
+
+DATA.furniture.forEach(f => {
+  const build = BUILDERS[f.shape];
+  if (build) build(f);
+  else box(f.w, f.h, f.d, f.x + f.w / 2, f.h / 2, f.z + f.d / 2, MAT.ikeaWhite);
+});
+
+/* ============================================================
+   EDGE / WIREFRAME MODE — precomputed once from all lit meshes
+   ============================================================ */
+const edgesGroup = new THREE.Group();
+edgesGroup.visible = false;
+litMeshes.forEach(mesh => {
+  const eg = new THREE.EdgesGeometry(mesh.geometry, 20);
+  const line = new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: 0xffffff }));
+  mesh.updateWorldMatrix(true, false);
+  line.matrix.copy(mesh.matrixWorld);
+  line.matrix.decompose(line.position, line.quaternion, line.scale);
+  line.matrixAutoUpdate = true;
+  edgesGroup.add(line);
+});
+scene.add(edgesGroup);
+
+/* ============================================================
+   DEPTH MODE — linear eye-space depth, WHITE = NEAR (unchanged
+   from spike 1; glazing panes are hidden so openings stay holes)
+   ============================================================ */
+const depthUniforms = {
+  uNear: { value: 30 },
+  uFar: { value: 900 }
+};
+
+const depthMaterial = new THREE.ShaderMaterial({
+  uniforms: depthUniforms,
+  side: THREE.DoubleSide,
+  vertexShader: `
+    varying float vViewZ;
+    void main() {
+      vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+      vViewZ = -mvPosition.z;
+      gl_Position = projectionMatrix * mvPosition;
+    }
+  `,
+  fragmentShader: `
+    uniform float uNear;
+    uniform float uFar;
+    varying float vViewZ;
+    void main() {
+      float d = clamp((vViewZ - uNear) / (uFar - uNear), 0.0, 1.0);
+      gl_FragColor = vec4(vec3(1.0 - d), 1.0);
+    }
+  `
+});
+
+/* ============================================================
+   MODE SWITCHING — 1 shaded (the deliverable), 2 depth, 3 edges
+   ============================================================ */
+let mode = 1;
+
+function setMode(m) {
+  mode = m;
+  if (m === 1) {
+    scene.overrideMaterial = null;
+    scene.background = new THREE.Color(0xbfccd6);
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    litMeshes.forEach(o => o.visible = true);
+    glassMeshes.forEach(o => o.visible = true);
+    edgesGroup.visible = false;
+  } else if (m === 2) {
+    scene.overrideMaterial = depthMaterial;
+    scene.background = new THREE.Color(0x000000);
+    renderer.toneMapping = THREE.NoToneMapping;
+    litMeshes.forEach(o => o.visible = true);
+    glassMeshes.forEach(o => o.visible = false);
+    edgesGroup.visible = false;
+  } else if (m === 3) {
+    scene.overrideMaterial = null;
+    scene.background = new THREE.Color(0x000000);
+    renderer.toneMapping = THREE.NoToneMapping;
+    litMeshes.forEach(o => o.visible = false);
+    glassMeshes.forEach(o => o.visible = false);
+    edgesGroup.visible = true;
+  }
+  updateHUD();
+}
+
+/* ============================================================
+   EXPORT (PNG download of current canvas)
+   ============================================================ */
+function exportPNG() {
+  if (mode === 1) composer.render();
+  else renderer.render(scene, camera);
+  const names = { 1: "shaded.png", 2: "depth.png", 3: "edge.png" };
+  renderer.domElement.toBlob(blob => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = names[mode];
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    showToast("Exported " + names[mode]);
+  }, "image/png");
+}
+
+/* ============================================================
+   KEYBOARD
+   ============================================================ */
+window.addEventListener("keydown", (e) => {
+  switch (e.key) {
+    case "1": setMode(1); break;
+    case "2": setMode(2); break;
+    case "3": setMode(3); break;
+    case "0": applyCameraPreset(0); break;
+    case "9": applyCameraPreset(9); break;
+    case "8": applyCameraPreset(8); break;
+    case "7": applyCameraPreset(7); break;
+    case "e": case "E": exportPNG(); break;
+    case "[": depthUniforms.uNear.value = Math.max(1, depthUniforms.uNear.value - 5); updateHUD(); break;
+    case "]": depthUniforms.uNear.value += 5; updateHUD(); break;
+    case "-": case "_": depthUniforms.uFar.value = Math.max(depthUniforms.uNear.value + 10, depthUniforms.uFar.value - 25); updateHUD(); break;
+    case "=": case "+": depthUniforms.uFar.value += 25; updateHUD(); break;
+    case "x": case "X": renderer.toneMappingExposure = Math.max(0.2, renderer.toneMappingExposure - 0.05); updateHUD(); break;
+    case "c": case "C": renderer.toneMappingExposure += 0.05; updateHUD(); break;
+    default: return;
+  }
+  e.preventDefault();
+});
+
+/* ============================================================
+   HUD
+   ============================================================ */
+const hud = document.getElementById("hud");
+const modeNames = { 1: "SHADED (PBR)", 2: "DEPTH", 3: "EDGES" };
+
+function updateHUD() {
+  const p = camera.position;
+  hud.innerHTML =
+`<b>mode: ${modeNames[mode]}</b>  (1 shaded / 2 depth / 3 edges)
+camera: ${p.x.toFixed(0)}, ${p.y.toFixed(0)}, ${p.z.toFixed(0)}  fov ${camera.fov.toFixed(0)}  exposure ${renderer.toneMappingExposure.toFixed(2)} (x/c)
+depth near/far: ${depthUniforms.uNear.value.toFixed(0)}cm / ${depthUniforms.uFar.value.toFixed(0)}cm  ( [ ] near, - = far )
+<b>0</b> couch   <b>9</b> reverse   <b>8</b> dining   <b>7</b> overview   <b>E</b> export PNG   drag/scroll: orbit`;
+}
+
+function showToast(msg) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => t.classList.remove("show"), 1500);
+}
+
+/* ============================================================
+   POST-PROCESSING (rung 3) — GTAO contact shadows + subtle
+   bloom. Composer runs only in shaded mode; depth/edge modes
+   keep the raw renderer output spike 1's pipeline expects.
+   ============================================================ */
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+
+const gtao = new GTAOPass(scene, camera, CANVAS_W, CANVAS_H);
+gtao.output = GTAOPass.OUTPUT.Default;
+gtao.updateGtaoMaterial({    // world units are cm — defaults assume meters
+  radius: 45, thickness: 15, distanceExponent: 1, distanceFallOff: 1,
+  scale: 2.2, samples: 16, screenSpaceRadius: false
+});
+composer.addPass(gtao);
+
+const bloom = new UnrealBloomPass(new THREE.Vector2(CANVAS_W, CANVAS_H), 0.12, 0.4, 0.85);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+
+/* ============================================================
+   RENDER LOOP + URL params (?mode=1|2|3&cam=0|7|8|9&clean)
+   ============================================================ */
+const qp = new URLSearchParams(location.search);
+if (qp.has("clean")) {
+  hud.style.display = "none";
+  document.getElementById("canvas-wrap").style.boxShadow = "none";
+}
+const camParam = Number(qp.get("cam"));
+applyCameraPreset(CAMERA_PRESETS[camParam] ? camParam : 0);
+setMode([1, 2, 3].includes(Number(qp.get("mode"))) ? Number(qp.get("mode")) : 1);
+
+let framesRendered = 0;
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  updateHUD();
+  if (mode === 1) composer.render();
+  else renderer.render(scene, camera);
+  if (++framesRendered === 3) window.sceneReady = true; // for headless capture
+}
+animate();
+
+// debugging hooks for headless capture sessions
+window.__dbg = { scene, renderer, camera, controls, MAT, sun, THREE, composer, gtao, bloom, GTAOPass };
+</script>
+</body>
+</html>

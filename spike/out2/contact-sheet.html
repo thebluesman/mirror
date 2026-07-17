@@ -1,0 +1,98 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>PoC 2 — checkpoint 2 contact sheet (rungs 0–3)</title>
+</head>
+<body style="background:#111;color:#eee;font-family:sans-serif;margin:0;padding:24px;">
+  <h1 style="font-size:20px;">PoC 2 checkpoint 2 — real-time render pass (rungs 0–3 complete)</h1>
+  <p style="font-size:13px;color:#999;max-width:820px;">
+    <b>This is the C2 sheet.</b> Judge against poc2-plan.md &sect;2 <b>Tier 1, both
+    views, side-by-side with the reference photos</b>: can you decide layout /
+    proportion / color questions from these renders, without caveats you have to talk
+    yourself out of? Rung 2 added procedural textures (wood grain, bamboo weave,
+    melange speckle, rug, cm-true 60 cm floor tiles), bookshelf book spines, the open
+    media shelf, a speaker and cushions. Rung 3 added GTAO contact shadows + subtle
+    bloom and two extra viewpoints. Right column: spike-1 run-2 AI stills, for
+    reference on what the rejected path looked like.
+  </p>
+
+  <h2 style="font-size:16px;color:#aaa;">Couch view</h2>
+  <div style="display:flex;flex-wrap:wrap;">
+    <div style="margin:4px;">
+      <div style="font-size:12px;color:#999;margin-bottom:4px;">scene2 real-time PBR (this checkpoint)</div>
+      <a href="scene2-couch.png" target="_blank"><img src="scene2-couch.png" style="width:480px;border:1px solid #444;" /></a>
+    </div>
+    <div style="margin:4px;">
+      <div style="font-size:12px;color:#999;margin-bottom:4px;">spike-1 run-2 AI still (rejected path, for reference)</div>
+      <a href="../out/run-20260717-112149-1.png" target="_blank"><img src="../out/run-20260717-112149-1.png" style="width:480px;border:1px solid #444;" /></a>
+    </div>
+  </div>
+
+  <h2 style="font-size:16px;color:#aaa;">Reverse view (from entry/kitchen passage)</h2>
+  <div style="display:flex;flex-wrap:wrap;">
+    <div style="margin:4px;">
+      <div style="font-size:12px;color:#999;margin-bottom:4px;">scene2 real-time PBR (this checkpoint)</div>
+      <a href="scene2-reverse.png" target="_blank"><img src="scene2-reverse.png" style="width:480px;border:1px solid #444;" /></a>
+    </div>
+    <div style="margin:4px;">
+      <div style="font-size:12px;color:#999;margin-bottom:4px;">spike-1 run-2 AI still (rejected path, for reference)</div>
+      <a href="../out/run-20260717-112228-1.png" target="_blank"><img src="../out/run-20260717-112228-1.png" style="width:480px;border:1px solid #444;" /></a>
+    </div>
+  </div>
+
+  <h2 style="font-size:16px;color:#aaa;">Additional viewpoints (rung 3)</h2>
+  <div style="display:flex;flex-wrap:wrap;">
+    <div style="margin:4px;">
+      <div style="font-size:12px;color:#999;margin-bottom:4px;">dining view (key 8)</div>
+      <a href="scene2-dining.png" target="_blank"><img src="scene2-dining.png" style="width:480px;border:1px solid #444;" /></a>
+    </div>
+    <div style="margin:4px;">
+      <div style="font-size:12px;color:#999;margin-bottom:4px;">overview from the main door (key 7)</div>
+      <a href="scene2-overview.png" target="_blank"><img src="scene2-overview.png" style="width:480px;border:1px solid #444;" /></a>
+    </div>
+  </div>
+
+  <h2 style="font-size:20px;color:#eee;margin-top:36px;border-top:1px solid #333;padding-top:20px;">C3 — Tier 2 experiment (rung 4, path-traced)</h2>
+  <p style="font-size:13px;color:#999;max-width:820px;">
+    <b>This is the C3 sheet.</b> D6 ran: same scene/materials under
+    <code>three-gpu-pathtracer</code> (real GI, 300 samples, ~10 min/still) via
+    <code>spike/pathtrace.html</code> + <code>pathtrace-run.mjs</code>. Judge whether
+    real light transport (vs. the rasterizer's hemisphere-fill approximation) closes
+    any of the Tier 1 "color/material not quite there yet" gap from C2, or whether it
+    only shifts overall tone (path-traced runs warmer — real GI propagates the sun's
+    warmth) without improving material fidelity itself.
+  </p>
+
+  <h3 style="font-size:15px;color:#aaa;">Couch view (cam 0)</h3>
+  <div style="display:flex;flex-wrap:wrap;">
+    <div style="margin:4px;">
+      <div style="font-size:12px;color:#999;margin-bottom:4px;">rung 3 raster (this checkpoint's C2 render)</div>
+      <a href="scene2-couch.png" target="_blank"><img src="scene2-couch.png" style="width:480px;border:1px solid #444;" /></a>
+    </div>
+    <div style="margin:4px;">
+      <div style="font-size:12px;color:#999;margin-bottom:4px;">rung 4 path-traced (300 samples)</div>
+      <a href="pt-cam0-s300.png" target="_blank"><img src="pt-cam0-s300.png" style="width:480px;border:1px solid #444;" /></a>
+    </div>
+  </div>
+
+  <h3 style="font-size:15px;color:#aaa;">Reverse view (cam 9)</h3>
+  <div style="display:flex;flex-wrap:wrap;">
+    <div style="margin:4px;">
+      <div style="font-size:12px;color:#999;margin-bottom:4px;">rung 3 raster (this checkpoint's C2 render)</div>
+      <a href="scene2-reverse.png" target="_blank"><img src="scene2-reverse.png" style="width:480px;border:1px solid #444;" /></a>
+    </div>
+    <div style="margin:4px;">
+      <div style="font-size:12px;color:#999;margin-bottom:4px;">rung 4 path-traced (300 samples)</div>
+      <a href="pt-cam9-s300.png" target="_blank"><img src="pt-cam9-s300.png" style="width:480px;border:1px solid #444;" /></a>
+    </div>
+  </div>
+
+  <h2 style="font-size:16px;color:#aaa;">Known remaining gaps (deliberate, not bugs)</h2>
+  <ul style="font-size:13px;color:#999;max-width:820px;">
+    <li>Water cooler and Billy interiors stay simple masses per the "outline and voids" rule.</li>
+    <li>Rug pile depth is bump-faked; true pile fidelity is a Tier 2 (path-traced stills, rung 4) question.</li>
+    <li>No baked GI — indirect light is a hemisphere-fill approximation, so shading is softer/flatter than a photo.</li>
+  </ul>
+</body>
+</html>
