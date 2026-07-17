@@ -151,13 +151,17 @@ scene.background = new THREE.Color(0xbfccd6); // pale sky, visible only through 
 const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 
-const camera = new THREE.PerspectiveCamera(DATA.camera.fovDeg, CANVAS_W / CANVAS_H, 5, 3000);
+// 38° vertical ≈ a 35mm lens on full frame — human-POV per C2 feedback
+// (geometry.json's 60° reads as an 18mm ultra-wide). Preset fov overrides.
+const HUMAN_FOV = 38;
+const camera = new THREE.PerspectiveCamera(HUMAN_FOV, CANVAS_W / CANVAS_H, 5, 3000);
 
 const CAMERA_PRESETS = {
-  // key 0 — couch view from geometry.json
+  // key 0 — couch view; eye pulled back to the sofa backrest so the 35mm-equiv
+  // lens still frames chair + stand (geometry.json's eye assumed the 60° wide)
   0: {
-    eye: new THREE.Vector3(...DATA.camera.eye),
-    lookAt: new THREE.Vector3(...DATA.camera.lookAt)
+    eye: new THREE.Vector3(660, 115, 690),
+    lookAt: new THREE.Vector3(660, 110, 324)
   },
   // key 9 — reverse view from the main-door/kitchen passage looking at the
   // sofa + swivel chair
@@ -181,6 +185,8 @@ const CAMERA_PRESETS = {
 
 function applyCameraPreset(which = 0) {
   const p = CAMERA_PRESETS[which];
+  camera.fov = p.fov ?? HUMAN_FOV;
+  camera.updateProjectionMatrix();
   camera.position.copy(p.eye);
   camera.up.set(0, 1, 0);
   camera.lookAt(p.lookAt);
