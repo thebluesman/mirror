@@ -17,7 +17,16 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 let playwright;
 try { playwright = require("playwright"); }
-catch { playwright = require("/opt/node22/lib/node_modules/playwright"); }
+catch {
+  const fallbacks = [
+    "/opt/node22/lib/node_modules/playwright",           // cloud session env
+    process.env.PLAYWRIGHT_DIR                            // local override
+  ].filter(Boolean);
+  let loaded = null;
+  for (const p of fallbacks) { try { loaded = require(p); break; } catch {} }
+  if (!loaded) throw new Error("playwright not found; npm install it or set PLAYWRIGHT_DIR");
+  playwright = loaded;
+}
 
 const SPIKE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);

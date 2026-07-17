@@ -134,7 +134,7 @@ renderer.setPixelRatio(1); // keep exports at exactly 1024x768 px, no DPR scalin
 renderer.setSize(CANVAS_W, CANVAS_H, false);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.15;
+renderer.toneMappingExposure = 1.0;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 wrap.appendChild(renderer.domElement);
@@ -236,6 +236,12 @@ sun.shadow.camera.bottom = -500;
 sun.shadow.bias = -0.0002;
 sun.shadow.normalBias = 2.5; // world units are cm
 scene.add(sun, sun.target);
+
+// Floor-bounce fill: rasterization has no GI, so the one light path that
+// lights a ceiling — sun hits floor, floor bounces up — must be faked.
+// Ground color = floor tile tint, sky kept dim so it doesn't fight the IBL.
+const bounce = new THREE.HemisphereLight(0xcfd8e0, 0xece6da, 1.05);
+scene.add(bounce);
 
 // Backdrop "exterior" plane west of the glazing so windows read bright/warm,
 // and so the couch view isn't looking into empty sky color.
@@ -759,6 +765,9 @@ function animate() {
   if (++framesRendered === 3) window.sceneReady = true; // for headless capture
 }
 animate();
+
+// debugging hooks for headless capture sessions
+window.__dbg = { scene, renderer, camera, MAT, sun, THREE };
 </script>
 </body>
 </html>
