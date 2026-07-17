@@ -16,6 +16,7 @@ do not pull them forward without Shyam re-opening scope.
 | Doc | Holds |
 |---|---|
 | `PRD-v1.md` | v1 scope, flows, architecture decisions, success criteria |
+| `plan-v1.md` | v1 build plan — phases, agent/model assignments, resume protocol |
 | `DESIGN.md` | Visual language (adapted Cohere system) — tokens, components |
 | `product-review.md` | Pre-spike scoping review + addendum (platform/storage/schema rationale) |
 | `spike/OUTCOME*.md` | R&D evidence for what v1 builds on |
