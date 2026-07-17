@@ -1,3 +1,13 @@
 .venv/
 __pycache__/
 .vendor/
+
+# W-B (poc3-plan.md §4) shell-texture tooling lives in textures/ — the code
+# (*.mjs), calibration.json, README.md, and package.json/package-lock.json
+# ARE committed. Only the downloaded/generated payloads below are ignored:
+# CC0 zips are large, license-bearing binaries Shyam fetches locally, and
+# node_modules is reproducible via `npm install` in spike/textures/.
+textures/node_modules/
+textures/wall/
+textures/floor/
+textures/ceiling/

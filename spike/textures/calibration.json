@@ -1,0 +1,25 @@
+{
+  "//": "Calibration nudges applied ON TOP of whatever texture (photo or procedural) shell-textures.mjs loads for each surface. Values are multiplicative/additive tweaks, not replacements — edit, reload scene2.html, compare against the reference photo for that surface, repeat. Delete a key (or set it to null) to fall back to the raw texture with no adjustment. Never re-download textures just to fix a shade — fix it here.",
+
+  "wall": {
+    "tint": "#ffffff",
+    "repeat": [1, 1],
+    "roughnessScale": 1.0
+  },
+  "floor": {
+    "tint": "#ffffff",
+    "repeat": [1, 1],
+    "roughnessScale": 1.0
+  },
+  "ceiling": {
+    "tint": "#ffffff",
+    "repeat": [1, 1],
+    "roughnessScale": 1.0
+  },
+
+  "_fields": {
+    "tint": "hex color multiplied into the texture's base color (material.color). '#ffffff' = no change. Use this to warm/cool or lighten/darken base albedo against the reference photo, e.g. '#f2e9d8' to warm a too-cool plaster scan.",
+    "repeat": "[x, y] multiplier applied ON TOP of shell-textures.mjs's computed real-world repeat (cm-true 60cm floor tiles, meters-scale walls). [1,1] = no change. [2,2] would tile the same texture twice as densely (useful if the downloaded set's native tile size doesn't match 60cm).",
+    "roughnessScale": "multiplier on the material's roughness (post map). 1.0 = no change. >1 flattens specular (more matte), <1 adds sheen."
+  }
+}
