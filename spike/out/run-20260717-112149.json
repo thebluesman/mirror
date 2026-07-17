@@ -1,0 +1,156 @@
+{
+  "timestamp": "20260717-112149",
+  "model": "flux",
+  "endpoint": "fal-ai/flux-control-lora-depth",
+  "prompt": "A photo of a real lived-in living room in a modern apartment, view from the sofa toward the TV wall. Samsung Frame TV with a thin white bezel mounted completely flush against the warm white wall. Directly below it a mid-century TV stand with a warm oak wood top and frame, flat white drawer fronts, an open middle shelf holding a DVD player and a game console, on tapered round wooden legs; a woven seagrass basket and a small dark stone on a grey tray sit on top. Two tall slim black tower speakers flank the TV stand, with a black subwoofer to the right. In the left corner a round swivel armchair in charcoal black-and-white flecked melange fabric. To the right of the TV a white IKEA cabinet with woven bamboo doors on white rolling drawers, about 1.5m tall. Further right a black and stainless steel bottom-load water dispenser near the open kitchen. A dining table with a white lacquer top and pecan wood tapered legs, with chairs. Large light greige porcelain floor tiles with matching skirting. Natural daylight from a glass balcony door and window with charcoal grey aluminum frames on the left, soft afternoon light. Realistic interior photography, natural colors, no people.",
+  "scale": 1.0,
+  "size": {
+    "width": 1024,
+    "height": 768
+  },
+  "n": 5,
+  "base_seed": null,
+  "estimated_cost_usd": 0.2,
+  "batches": [
+    {
+      "endpoint": "fal-ai/flux-control-lora-depth",
+      "request_args": {
+        "prompt": "A photo of a real lived-in living room in a modern apartment, view from the sofa toward the TV wall. Samsung Frame TV with a thin white bezel mounted completely flush against the warm white wall. Directly below it a mid-century TV stand with a warm oak wood top and frame, flat white drawer fronts, an open middle shelf holding a DVD player and a game console, on tapered round wooden legs; a woven seagrass basket and a small dark stone on a grey tray sit on top. Two tall slim black tower speakers flank the TV stand, with a black subwoofer to the right. In the left corner a round swivel armchair in charcoal black-and-white flecked melange fabric. To the right of the TV a white IKEA cabinet with woven bamboo doors on white rolling drawers, about 1.5m tall. Further right a black and stainless steel bottom-load water dispenser near the open kitchen. A dining table with a white lacquer top and pecan wood tapered legs, with chairs. Large light greige porcelain floor tiles with matching skirting. Natural daylight from a glass balcony door and window with charcoal grey aluminum frames on the left, soft afternoon light. Realistic interior photography, natural colors, no people.",
+        "control_lora_image_url": "https://v3b.fal.media/files/b/0aa2959a/g-i74Em1rtA17lyLTN3Nf_depth.png",
+        "control_lora_strength": 1.0,
+        "image_size": {
+          "width": 1024,
+          "height": 768
+        },
+        "num_images": 1
+      },
+      "seed": 14356292890528415254,
+      "prompt": "A photo of a real lived-in living room in a modern apartment, view from the sofa toward the TV wall. Samsung Frame TV with a thin white bezel mounted completely flush against the warm white wall. Directly below it a mid-century TV stand with a warm oak wood top and frame, flat white drawer fronts, an open middle shelf holding a DVD player and a game console, on tapered round wooden legs; a woven seagrass basket and a small dark stone on a grey tray sit on top. Two tall slim black tower speakers flank the TV stand, with a black subwoofer to the right. In the left corner a round swivel armchair in charcoal black-and-white flecked melange fabric. To the right of the TV a white IKEA cabinet with woven bamboo doors on white rolling drawers, about 1.5m tall. Further right a black and stainless steel bottom-load water dispenser near the open kitchen. A dining table with a white lacquer top and pecan wood tapered legs, with chairs. Large light greige porcelain floor tiles with matching skirting. Natural daylight from a glass balcony door and window with charcoal grey aluminum frames on the left, soft afternoon light. Realistic interior photography, natural colors, no people.",
+      "image_files": [
+        "run-20260717-112149-1.png"
+      ],
+      "response_meta": {
+        "timings": {
+          "inference": 3.817626061849296
+        },
+        "seed": 14356292890528415254,
+        "has_nsfw_concepts": [
+          false
+        ],
+        "prompt": "A photo of a real lived-in living room in a modern apartment, view from the sofa toward the TV wall. Samsung Frame TV with a thin white bezel mounted completely flush against the warm white wall. Directly below it a mid-century TV stand with a warm oak wood top and frame, flat white drawer fronts, an open middle shelf holding a DVD player and a game console, on tapered round wooden legs; a woven seagrass basket and a small dark stone on a grey tray sit on top. Two tall slim black tower speakers flank the TV stand, with a black subwoofer to the right. In the left corner a round swivel armchair in charcoal black-and-white flecked melange fabric. To the right of the TV a white IKEA cabinet with woven bamboo doors on white rolling drawers, about 1.5m tall. Further right a black and stainless steel bottom-load water dispenser near the open kitchen. A dining table with a white lacquer top and pecan wood tapered legs, with chairs. Large light greige porcelain floor tiles with matching skirting. Natural daylight from a glass balcony door and window with charcoal grey aluminum frames on the left, soft afternoon light. Realistic interior photography, natural colors, no people."
+      }
+    },
+    {
+      "endpoint": "fal-ai/flux-control-lora-depth",
+      "request_args": {
+        "prompt": "A photo of a real lived-in living room in a modern apartment, view from the sofa toward the TV wall. Samsung Frame TV with a thin white bezel mounted completely flush against the warm white wall. Directly below it a mid-century TV stand with a warm oak wood top and frame, flat white drawer fronts, an open middle shelf holding a DVD player and a game console, on tapered round wooden legs; a woven seagrass basket and a small dark stone on a grey tray sit on top. Two tall slim black tower speakers flank the TV stand, with a black subwoofer to the right. In the left corner a round swivel armchair in charcoal black-and-white flecked melange fabric. To the right of the TV a white IKEA cabinet with woven bamboo doors on white rolling drawers, about 1.5m tall. Further right a black and stainless steel bottom-load water dispenser near the open kitchen. A dining table with a white lacquer top and pecan wood tapered legs, with chairs. Large light greige porcelain floor tiles with matching skirting. Natural daylight from a glass balcony door and window with charcoal grey aluminum frames on the left, soft afternoon light. Realistic interior photography, natural colors, no people.",
+        "control_lora_image_url": "https://v3b.fal.media/files/b/0aa2959a/g-i74Em1rtA17lyLTN3Nf_depth.png",
+        "control_lora_strength": 1.0,
+        "image_size": {
+          "width": 1024,
+          "height": 768
+        },
+        "num_images": 1
+      },
+      "seed": 1539798144281414325,
+      "prompt": "A photo of a real lived-in living room in a modern apartment, view from the sofa toward the TV wall. Samsung Frame TV with a thin white bezel mounted completely flush against the warm white wall. Directly below it a mid-century TV stand with a warm oak wood top and frame, flat white drawer fronts, an open middle shelf holding a DVD player and a game console, on tapered round wooden legs; a woven seagrass basket and a small dark stone on a grey tray sit on top. Two tall slim black tower speakers flank the TV stand, with a black subwoofer to the right. In the left corner a round swivel armchair in charcoal black-and-white flecked melange fabric. To the right of the TV a white IKEA cabinet with woven bamboo doors on white rolling drawers, about 1.5m tall. Further right a black and stainless steel bottom-load water dispenser near the open kitchen. A dining table with a white lacquer top and pecan wood tapered legs, with chairs. Large light greige porcelain floor tiles with matching skirting. Natural daylight from a glass balcony door and window with charcoal grey aluminum frames on the left, soft afternoon light. Realistic interior photography, natural colors, no people.",
+      "image_files": [
+        "run-20260717-112149-2.png"
+      ],
+      "response_meta": {
+        "timings": {
+          "inference": 4.10742624476552
+        },
+        "seed": 1539798144281414325,
+        "has_nsfw_concepts": [
+          false
+        ],
+        "prompt": "A photo of a real lived-in living room in a modern apartment, view from the sofa toward the TV wall. Samsung Frame TV with a thin white bezel mounted completely flush against the warm white wall. Directly below it a mid-century TV stand with a warm oak wood top and frame, flat white drawer fronts, an open middle shelf holding a DVD player and a game console, on tapered round wooden legs; a woven seagrass basket and a small dark stone on a grey tray sit on top. Two tall slim black tower speakers flank the TV stand, with a black subwoofer to the right. In the left corner a round swivel armchair in charcoal black-and-white flecked melange fabric. To the right of the TV a white IKEA cabinet with woven bamboo doors on white rolling drawers, about 1.5m tall. Further right a black and stainless steel bottom-load water dispenser near the open kitchen. A dining table with a white lacquer top and pecan wood tapered legs, with chairs. Large light greige porcelain floor tiles with matching skirting. Natural daylight from a glass balcony door and window with charcoal grey aluminum frames on the left, soft afternoon light. Realistic interior photography, natural colors, no people."
+      }
+    },
+    {
+      "endpoint": "fal-ai/flux-control-lora-depth",
+      "request_args": {
+        "prompt": "A photo of a real lived-in living room in a modern apartment, view from the sofa toward the TV wall. Samsung Frame TV with a thin white bezel mounted completely flush against the warm white wall. Directly below it a mid-century TV stand with a warm oak wood top and frame, flat white drawer fronts, an open middle shelf holding a DVD player and a game console, on tapered round wooden legs; a woven seagrass basket and a small dark stone on a grey tray sit on top. Two tall slim black tower speakers flank the TV stand, with a black subwoofer to the right. In the left corner a round swivel armchair in charcoal black-and-white flecked melange fabric. To the right of the TV a white IKEA cabinet with woven bamboo doors on white rolling drawers, about 1.5m tall. Further right a black and stainless steel bottom-load water dispenser near the open kitchen. A dining table with a white lacquer top and pecan wood tapered legs, with chairs. Large light greige porcelain floor tiles with matching skirting. Natural daylight from a glass balcony door and window with charcoal grey aluminum frames on the left, soft afternoon light. Realistic interior photography, natural colors, no people.",
+        "control_lora_image_url": "https://v3b.fal.media/files/b/0aa2959a/g-i74Em1rtA17lyLTN3Nf_depth.png",
+        "control_lora_strength": 1.0,
+        "image_size": {
+          "width": 1024,
+          "height": 768
+        },
+        "num_images": 1
+      },
+      "seed": 7836652574038671204,
+      "prompt": "A photo of a real lived-in living room in a modern apartment, view from the sofa toward the TV wall. Samsung Frame TV with a thin white bezel mounted completely flush against the warm white wall. Directly below it a mid-century TV stand with a warm oak wood top and frame, flat white drawer fronts, an open middle shelf holding a DVD player and a game console, on tapered round wooden legs; a woven seagrass basket and a small dark stone on a grey tray sit on top. Two tall slim black tower speakers flank the TV stand, with a black subwoofer to the right. In the left corner a round swivel armchair in charcoal black-and-white flecked melange fabric. To the right of the TV a white IKEA cabinet with woven bamboo doors on white rolling drawers, about 1.5m tall. Further right a black and stainless steel bottom-load water dispenser near the open kitchen. A dining table with a white lacquer top and pecan wood tapered legs, with chairs. Large light greige porcelain floor tiles with matching skirting. Natural daylight from a glass balcony door and window with charcoal grey aluminum frames on the left, soft afternoon light. Realistic interior photography, natural colors, no people.",
+      "image_files": [
+        "run-20260717-112149-3.png"
+      ],
+      "response_meta": {
+        "timings": {
+          "inference": 4.03114445367828
+        },
+        "seed": 7836652574038671204,
+        "has_nsfw_concepts": [
+          false
+        ],
+        "prompt": "A photo of a real lived-in living room in a modern apartment, view from the sofa toward the TV wall. Samsung Frame TV with a thin white bezel mounted completely flush against the warm white wall. Directly below it a mid-century TV stand with a warm oak wood top and frame, flat white drawer fronts, an open middle shelf holding a DVD player and a game console, on tapered round wooden legs; a woven seagrass basket and a small dark stone on a grey tray sit on top. Two tall slim black tower speakers flank the TV stand, with a black subwoofer to the right. In the left corner a round swivel armchair in charcoal black-and-white flecked melange fabric. To the right of the TV a white IKEA cabinet with woven bamboo doors on white rolling drawers, about 1.5m tall. Further right a black and stainless steel bottom-load water dispenser near the open kitchen. A dining table with a white lacquer top and pecan wood tapered legs, with chairs. Large light greige porcelain floor tiles with matching skirting. Natural daylight from a glass balcony door and window with charcoal grey aluminum frames on the left, soft afternoon light. Realistic interior photography, natural colors, no people."
+      }
+    },
+    {
+      "endpoint": "fal-ai/flux-control-lora-depth",
+      "request_args": {
+        "prompt": "A photo of a real lived-in living room in a modern apartment, view from the sofa toward the TV wall. Samsung Frame TV with a thin white bezel mounted completely flush against the warm white wall. Directly below it a mid-century TV stand with a warm oak wood top and frame, flat white drawer fronts, an open middle shelf holding a DVD player and a game console, on tapered round wooden legs; a woven seagrass basket and a small dark stone on a grey tray sit on top. Two tall slim black tower speakers flank the TV stand, with a black subwoofer to the right. In the left corner a round swivel armchair in charcoal black-and-white flecked melange fabric. To the right of the TV a white IKEA cabinet with woven bamboo doors on white rolling drawers, about 1.5m tall. Further right a black and stainless steel bottom-load water dispenser near the open kitchen. A dining table with a white lacquer top and pecan wood tapered legs, with chairs. Large light greige porcelain floor tiles with matching skirting. Natural daylight from a glass balcony door and window with charcoal grey aluminum frames on the left, soft afternoon light. Realistic interior photography, natural colors, no people.",
+        "control_lora_image_url": "https://v3b.fal.media/files/b/0aa2959a/g-i74Em1rtA17lyLTN3Nf_depth.png",
+        "control_lora_strength": 1.0,
+        "image_size": {
+          "width": 1024,
+          "height": 768
+        },
+        "num_images": 1
+      },
+      "seed": 2609504445844576254,
+      "prompt": "A photo of a real lived-in living room in a modern apartment, view from the sofa toward the TV wall. Samsung Frame TV with a thin white bezel mounted completely flush against the warm white wall. Directly below it a mid-century TV stand with a warm oak wood top and frame, flat white drawer fronts, an open middle shelf holding a DVD player and a game console, on tapered round wooden legs; a woven seagrass basket and a small dark stone on a grey tray sit on top. Two tall slim black tower speakers flank the TV stand, with a black subwoofer to the right. In the left corner a round swivel armchair in charcoal black-and-white flecked melange fabric. To the right of the TV a white IKEA cabinet with woven bamboo doors on white rolling drawers, about 1.5m tall. Further right a black and stainless steel bottom-load water dispenser near the open kitchen. A dining table with a white lacquer top and pecan wood tapered legs, with chairs. Large light greige porcelain floor tiles with matching skirting. Natural daylight from a glass balcony door and window with charcoal grey aluminum frames on the left, soft afternoon light. Realistic interior photography, natural colors, no people.",
+      "image_files": [
+        "run-20260717-112149-4.png"
+      ],
+      "response_meta": {
+        "timings": {
+          "inference": 3.801699081901461
+        },
+        "seed": 2609504445844576254,
+        "has_nsfw_concepts": [
+          false
+        ],
+        "prompt": "A photo of a real lived-in living room in a modern apartment, view from the sofa toward the TV wall. Samsung Frame TV with a thin white bezel mounted completely flush against the warm white wall. Directly below it a mid-century TV stand with a warm oak wood top and frame, flat white drawer fronts, an open middle shelf holding a DVD player and a game console, on tapered round wooden legs; a woven seagrass basket and a small dark stone on a grey tray sit on top. Two tall slim black tower speakers flank the TV stand, with a black subwoofer to the right. In the left corner a round swivel armchair in charcoal black-and-white flecked melange fabric. To the right of the TV a white IKEA cabinet with woven bamboo doors on white rolling drawers, about 1.5m tall. Further right a black and stainless steel bottom-load water dispenser near the open kitchen. A dining table with a white lacquer top and pecan wood tapered legs, with chairs. Large light greige porcelain floor tiles with matching skirting. Natural daylight from a glass balcony door and window with charcoal grey aluminum frames on the left, soft afternoon light. Realistic interior photography, natural colors, no people."
+      }
+    },
+    {
+      "endpoint": "fal-ai/flux-control-lora-depth",
+      "request_args": {
+        "prompt": "A photo of a real lived-in living room in a modern apartment, view from the sofa toward the TV wall. Samsung Frame TV with a thin white bezel mounted completely flush against the warm white wall. Directly below it a mid-century TV stand with a warm oak wood top and frame, flat white drawer fronts, an open middle shelf holding a DVD player and a game console, on tapered round wooden legs; a woven seagrass basket and a small dark stone on a grey tray sit on top. Two tall slim black tower speakers flank the TV stand, with a black subwoofer to the right. In the left corner a round swivel armchair in charcoal black-and-white flecked melange fabric. To the right of the TV a white IKEA cabinet with woven bamboo doors on white rolling drawers, about 1.5m tall. Further right a black and stainless steel bottom-load water dispenser near the open kitchen. A dining table with a white lacquer top and pecan wood tapered legs, with chairs. Large light greige porcelain floor tiles with matching skirting. Natural daylight from a glass balcony door and window with charcoal grey aluminum frames on the left, soft afternoon light. Realistic interior photography, natural colors, no people.",
+        "control_lora_image_url": "https://v3b.fal.media/files/b/0aa2959a/g-i74Em1rtA17lyLTN3Nf_depth.png",
+        "control_lora_strength": 1.0,
+        "image_size": {
+          "width": 1024,
+          "height": 768
+        },
+        "num_images": 1
+      },
+      "seed": 18166481326498469968,
+      "prompt": "A photo of a real lived-in living room in a modern apartment, view from the sofa toward the TV wall. Samsung Frame TV with a thin white bezel mounted completely flush against the warm white wall. Directly below it a mid-century TV stand with a warm oak wood top and frame, flat white drawer fronts, an open middle shelf holding a DVD player and a game console, on tapered round wooden legs; a woven seagrass basket and a small dark stone on a grey tray sit on top. Two tall slim black tower speakers flank the TV stand, with a black subwoofer to the right. In the left corner a round swivel armchair in charcoal black-and-white flecked melange fabric. To the right of the TV a white IKEA cabinet with woven bamboo doors on white rolling drawers, about 1.5m tall. Further right a black and stainless steel bottom-load water dispenser near the open kitchen. A dining table with a white lacquer top and pecan wood tapered legs, with chairs. Large light greige porcelain floor tiles with matching skirting. Natural daylight from a glass balcony door and window with charcoal grey aluminum frames on the left, soft afternoon light. Realistic interior photography, natural colors, no people.",
+      "image_files": [
+        "run-20260717-112149-5.png"
+      ],
+      "response_meta": {
+        "timings": {
+          "inference": 4.109144175890833
+        },
+        "seed": 18166481326498469968,
+        "has_nsfw_concepts": [
+          false
+        ],
+        "prompt": "A photo of a real lived-in living room in a modern apartment, view from the sofa toward the TV wall. Samsung Frame TV with a thin white bezel mounted completely flush against the warm white wall. Directly below it a mid-century TV stand with a warm oak wood top and frame, flat white drawer fronts, an open middle shelf holding a DVD player and a game console, on tapered round wooden legs; a woven seagrass basket and a small dark stone on a grey tray sit on top. Two tall slim black tower speakers flank the TV stand, with a black subwoofer to the right. In the left corner a round swivel armchair in charcoal black-and-white flecked melange fabric. To the right of the TV a white IKEA cabinet with woven bamboo doors on white rolling drawers, about 1.5m tall. Further right a black and stainless steel bottom-load water dispenser near the open kitchen. A dining table with a white lacquer top and pecan wood tapered legs, with chairs. Large light greige porcelain floor tiles with matching skirting. Natural daylight from a glass balcony door and window with charcoal grey aluminum frames on the left, soft afternoon light. Realistic interior photography, natural colors, no people."
+      }
+    }
+  ]
+}
