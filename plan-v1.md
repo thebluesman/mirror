@@ -41,19 +41,29 @@ worktrees once 1 merges; everything else is sequential.
 Two blockers PRD §8/§12 explicitly schedule before building:
 
 - [ ] **G1 — fal.ai CORS verification.** Minimal throwaway HTML page (scratch, not
-      committed as product code) calling `fal-ai/meshy/v6/image-to-3d` browser-side
-      with a pasted key. Outcome recorded as an ADR: browser-direct works, or v1
-      grows a minimal local proxy helper. *Agent: Haiku for docs research, then
-      hands-on run needs Shyam's fal.ai key — human-in-the-loop.*
-- [ ] **G2 — Figma conversion session.** Agree layer/naming conventions, then the
-      one-time MCP session converting the Figma room layout → seed scene JSON
-      (room dims, openings, per-item position/rotation — spike 3's `geometry.json`
-      successor, but in the v1 schema shape from Phase 2's draft). Hand-in-the-loop
-      with Shyam; numbers are a starting point, calibration comes later. Seed JSON
-      committed to the repo. *Agent: primary session (Fable) — this is the
-      judgment-heavy conversion the PRD describes.*
+      committed as product code) exercising the **full round trip** browser-side
+      with a pasted key: photo upload (`fal_client.upload_file`'s HTTP equivalent),
+      the `fal-ai/meshy/v6/image-to-3d` job, and the result-GLB download. Each leg
+      can fail CORS independently — a generate-only probe can pass while the flow
+      still breaks in Phase 4. Outcome recorded as an ADR: browser-direct works, or
+      v1 grows a minimal local proxy helper — **if proxy, building it becomes the
+      first task of Phase 4** (it's on the import flow's critical path and nothing
+      else needs it). *Agent: Haiku for docs research, then hands-on run needs
+      Shyam's fal.ai key — human-in-the-loop.*
+- [ ] **G2 — Figma conversion session.** First, **draft the scene-schema subset**
+      (room dims/openings, furniture item placement, the `layouts[]`/`current`
+      branch shape) so the seed JSON has a real target shape — Phase 2 formalizes
+      this draft with validation/migration/tests, it doesn't invent the schema
+      from scratch. (Without this, G2 would depend on Phase 2's output while
+      running two phases earlier — the original ordering was circular.) Then:
+      agree layer/naming conventions, and run the one-time MCP session converting
+      the Figma room layout → seed scene JSON (room dims, openings, per-item
+      position/rotation — spike 3's `geometry.json` successor, in the drafted
+      shape). Hand-in-the-loop with Shyam; numbers are a starting point,
+      calibration comes later. Seed JSON committed to the repo. *Agent: primary
+      session (Fable) — this is the judgment-heavy conversion the PRD describes.*
 
-**Exit:** ADR for G1 outcome; committed seed scene JSON; journal entry.
+**Exit:** ADR for G1 outcome; committed schema draft + seed scene JSON; journal entry.
 *Both gates need Shyam present — schedule them for an interactive session; they're
 small and front-loaded precisely so later phases can run more autonomously.*
 
@@ -73,9 +83,11 @@ Merged, reviewed, journaled.
 
 ### Phase 2 — Storage layer (`v1/storage`, parallel with 3)
 
-- [ ] Versioned JSON project schema — Room, Furniture Item, Camera Position, and
-      the `layouts: [{name, base, commands[]}]` / `current` branch shape from day
-      one (PRD §8). Schema module + validation + migration stub. *Agent: Opus.*
+- [ ] Versioned JSON project schema — formalize the Phase 0 (G2) draft: Room,
+      Furniture Item, Camera Position, and the `layouts: [{name, base,
+      commands[]}]` / `current` branch shape from day one (PRD §8). Schema module
+      + validation + migration stub; the committed seed JSON must validate
+      against it (or ship with a migration from the draft shape). *Agent: Opus.*
 - [ ] OPFS content-addressed asset store (hash → blob), IndexedDB autosave,
       File System Access API save/load with download/upload fallback, zip export.
       *Agent: Opus (store design), Sonnet (zip/fallback plumbing).*
@@ -87,9 +99,16 @@ instead of the static file.
 
 ### Phase 3 — Shell texturing flow (`v1/texturing`, parallel with 2)
 
-- [ ] Port `spike/textures/` tileable-texture pipeline to run in-browser (local,
-      no network). *Agent: Sonnet; Opus only if the port hits real architectural
-      friction.*
+- [ ] **Reimplement** (not port) `spike/textures/`'s tileable-texture pipeline
+      in-browser (local, no network). Scoped honestly: `make-tileable.mjs` is
+      built on **sharp**, a native Node library that cannot run in a browser —
+      the quadrant-swap + cross-fade logic must be rewritten on Canvas/
+      OffscreenCanvas, and the spike's no-visible-seams check re-verified against
+      the new implementation. `shell-textures.mjs`'s mesh-targeting is also
+      coupled to `scene2.html`'s specific material structure and needs redoing
+      against Phase 1's viewport component. The *algorithms* are proven; the
+      *code* is not reusable as-is. *Agent: Sonnet; Opus only if the rewrite hits
+      real architectural friction.*
 - [ ] Upload UI (wall/floor/ceiling photos) + calibration panel — tint/repeat
       sliders replacing the spike's hand-edited `calibration.json` (PRD §7.2).
       Upload/processing states designed ad-hoc from `DESIGN.md` tokens; flag to
@@ -101,14 +120,22 @@ sliders, persisted (rebase onto Phase 2's store at merge).
 
 ### Phase 4 — Furniture import flow (`v1/import`)
 
-Depends on 2 + 3 merged and G1's answer.
+Depends on **2 merged and G1's answer** — not on 3: import and shell texturing
+touch different parts of the scene, so a slow texturing phase must not block
+the riskiest flow in v1. Whichever of 3/4 merges second rebases.
 
+- [ ] *(Only if G1's ADR says browser-direct fails)* Build the minimal local
+      proxy helper G1 scoped, before the flow work below. *Agent: Sonnet.*
 - [ ] Settings panel: fal.ai key paste, stored in IndexedDB, never bundled.
       *Agent: Sonnet.*
 - [ ] Meshy job flow: photo upload → cost-surfacing confirm step → async
       generation with progress → GLB into OPFS. Failure leaves no half-imported
-      item; per-item retry reuses the uploaded photo. *Agent: Opus — the async/
-      failure semantics are the risky part.*
+      item; per-item retry reuses the uploaded photo. Consider passing the photo
+      as a base64 data URI in the generate request instead of a separate upload
+      call — fal.ai accepts data URIs for image inputs, which drops one network
+      call and one CORS failure point, at ~33% larger payload (watch request-size
+      limits on large phone photos). *Agent: Opus — the async/failure semantics
+      are the risky part.*
 - [ ] Post-generation: confirm/adjust cm dimensions → rescale + floor-snap →
       place at Figma-seeded position/rotation (default position if no footprint).
       *Agent: Sonnet, against spike 3's proven scaling/snapping logic.*
@@ -120,6 +147,11 @@ room, in-app, with a paid generation Shyam approved.
 
 - [ ] Named camera viewpoints (save/recall), viewport chrome per PRD §9
       (near-black floating control bar, pill buttons). *Agent: Sonnet.*
+- [ ] Surface the Figma-seeding staleness limitation in-app (PRD §7.1b: layout
+      changes require redoing the MCP session manually — the app should say so,
+      e.g. a note near the room/placement info, rather than silently going
+      stale). *Agent: Sonnet — small, but the PRD assigns it and no phase owned
+      it.*
 - [ ] Acceptance run: Shyam sets up his actual room shell, imports his actual
       furniture, judges against OUTCOME-3's "that's my room" bar. Fix-forward on
       whatever it surfaces. *Human-in-the-loop.*
