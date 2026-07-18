@@ -130,8 +130,12 @@ the riskiest flow in v1. Whichever of 3/4 merges second rebases.
       *Agent: Sonnet.*
 - [ ] Meshy job flow: photo upload → cost-surfacing confirm step → async
       generation with progress → GLB into OPFS. Failure leaves no half-imported
-      item; per-item retry reuses the uploaded photo. *Agent: Opus — the async/
-      failure semantics are the risky part.*
+      item; per-item retry reuses the uploaded photo. Consider passing the photo
+      as a base64 data URI in the generate request instead of a separate upload
+      call — fal.ai accepts data URIs for image inputs, which drops one network
+      call and one CORS failure point, at ~33% larger payload (watch request-size
+      limits on large phone photos). *Agent: Opus — the async/failure semantics
+      are the risky part.*
 - [ ] Post-generation: confirm/adjust cm dimensions → rescale + floor-snap →
       place at Figma-seeded position/rotation (default position if no footprint).
       *Agent: Sonnet, against spike 3's proven scaling/snapping logic.*
