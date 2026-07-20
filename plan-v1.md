@@ -40,7 +40,7 @@ worktrees once 1 merges; everything else is sequential.
 
 Two blockers PRD §8/§12 explicitly schedule before building:
 
-- [ ] **G1 — fal.ai CORS verification.** Minimal throwaway HTML page (scratch, not
+- [x] **G1 — fal.ai CORS verification.** Minimal throwaway HTML page (scratch, not
       committed as product code) exercising the **full round trip** browser-side
       with a pasted key: photo upload (`fal_client.upload_file`'s HTTP equivalent),
       the `fal-ai/meshy/v6/image-to-3d` job, and the result-GLB download. Each leg
@@ -50,6 +50,8 @@ Two blockers PRD §8/§12 explicitly schedule before building:
       first task of Phase 4** (it's on the import flow's critical path and nothing
       else needs it). *Agent: Haiku for docs research, then hands-on run needs
       Shyam's fal.ai key — human-in-the-loop.*
+      **Resolved 2026-07-20:** all three legs passed with no CORS errors —
+      browser-direct, no proxy. See [ADR-0001](docs/adr/0001-fal-browser-direct.md).
 - [ ] **G2 — Figma conversion session.** First, **draft the scene-schema subset**
       (room dims/openings, furniture item placement, the `layouts[]`/`current`
       branch shape) so the seed JSON has a real target shape — Phase 2 formalizes

@@ -25,5 +25,6 @@ What follows — costs accepted, doors closed, doors deliberately left open.
 
 ## Index
 
-(none yet — decisions made pre-ADR live in `PRD-v1.md` §8 and
-`product-review.md`; new decisions from here on get ADRs)
+- [ADR-0001](0001-fal-browser-direct.md) — fal.ai calls go browser-direct, no proxy
+
+(decisions made pre-ADR live in `PRD-v1.md` §8 and `product-review.md`)
