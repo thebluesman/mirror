@@ -73,14 +73,23 @@ small and front-loaded precisely so later phases can run more autonomously.*
 
 ### Phase 1 — Scaffold + render core (`v1/scaffold`)
 
-- [ ] Vite + React + Three.js scaffold; `DESIGN.md` tokens as CSS custom
+- [x] Vite + React + Three.js scaffold; `DESIGN.md` tokens as CSS custom
       properties; light-canvas app shell (header, viewport, side panel skeleton).
       *Agent: Haiku (scaffold/tokens), Sonnet (shell components).*
-- [ ] Port `spike/scene2.html`'s Three.js core into a React-managed viewport
+- [x] Port `spike/scene2.html`'s Three.js core into a React-managed viewport
       component: PBR renderer, lighting, orbit/pan/zoom. Loads the Phase 0 seed
       JSON statically (no storage layer yet) and renders the untextured shell +
       any spike GLBs available. *Agent: Opus, worktree. Spike code is read-only
       reference — productize, don't edit `spike/`.*
+
+**Resolved 2026-07-20:** `src/scene/buildScene.ts` generalizes scene2.html's
+wall/opening-cutting logic to any wall run; furniture renders as generic
+`dimsCm` boxes (no GLBs exist yet — that's Phase 4) with a compound-sofa
+special case for the seed's main/chaise sub-footprints. Verified in-browser
+via Playwright: renders room + furniture from `seed/living-room.json` with no
+console errors, orbit-drag repositions the camera. No `/code-review` run yet
+(user hasn't triggered it) — flagged for Shyam to run before Phase 2/3 start
+if wanted.
 
 **Exit:** `npm run dev` shows the room shell from seed data with camera control.
 Merged, reviewed, journaled.
