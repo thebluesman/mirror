@@ -1,0 +1,74 @@
+{
+  "meta": {
+    "source": "Figma 'Living Room' page (Emerald Residence 107), frame 0:2, scale 1px = 1cm — G2 conversion session, 2026-07-20. Successor to spike/geometry.json; positions below reflect the current Figma layout, not the spike-era one.",
+    "units": "cm",
+    "schemaVersion": "v1-draft",
+    "coords": "position = [x, y, z] of each item's plan-view CENTER (not top-left, unlike geometry.json); x = Figma x, z = Figma y, y = up/floor-snap height. rotationDeg is yaw around the vertical axis.",
+    "assumed": "Ceiling 240 confirmed (spike 3, door-to-wall pixel ratio). Window sill 90 / height 120 assumed; balcony door full-height glass (opening to 210), carried from geometry.json — not re-derivable from the 2D Figma plan.",
+    "changedSinceSpike3": [
+      "Kitchen enclosure removed from the Figma layout (grey block gone); floor segment renamed kitchen-and-passage -> entrance-hallway, geometry unchanged, main-door position unchanged.",
+      "Rug (SONDEROD) moved ~77cm north — now only partly under the sofa, more under the swivel-chair/coffee-table zone.",
+      "Bookshelf: laid on its side (new height 72cm = old width), legs removed, relocated from the south wall near the sofa to standing near Billy+Hogadal/dining table. Back particle-board panel removed — open both sides, books accessible from either face, spines facing outward.",
+      "Billy+Hogadal shelving shifted ~53cm east, now close against the water cooler.",
+      "Dining table rotated 90deg in place (intrinsic dims unchanged, 153x92) and shifted slightly east/north.",
+      "Sofa and coffee table shifted a small amount (~7-16cm) — treated as redraw noise, not confirmed as intentional.",
+      "Two new items added: floor lamp, table lamp (table lamp rests on top of the now-horizontal bookshelf)."
+    ]
+  },
+  "room": {
+    "ceilingHeightCm": 240,
+    "floor": [
+      { "name": "living-room", "x": 474, "z": 324, "w": 656, "d": 378 },
+      { "name": "entrance-hallway", "x": 1130, "z": 274, "w": 369, "d": 428 }
+    ],
+    "walls": [
+      { "name": "north-tv-wall", "from": [474, 324], "to": [1130, 324], "note": "TV wall; interior face" },
+      { "name": "hallway-west-stub", "from": [1130, 324], "to": [1130, 274], "note": "connects TV wall to hallway back wall" },
+      { "name": "hallway-north-wall", "from": [1130, 274], "to": [1499, 274] },
+      { "name": "east-wall", "from": [1499, 274], "to": [1499, 702], "openings": [ { "name": "main-door", "along": "z", "start": 562, "size": 140, "type": "door" } ] },
+      { "name": "south-wall", "from": [474, 702], "to": [1499, 702], "openings": [ { "name": "bedroom-door", "along": "x", "start": 892, "size": 108, "type": "door" }, { "name": "powder-room-door", "along": "x", "start": 1290, "size": 87, "type": "door" } ] },
+      { "name": "west-wall", "from": [474, 324], "to": [474, 702], "openings": [ { "name": "balcony-door", "along": "z", "start": 393, "size": 110, "type": "door", "sillHeightCm": 0, "headHeightCm": 210, "note": "full-height glass balcony door, charcoal aluminum frame" }, { "name": "window", "along": "z", "start": 533, "size": 110, "type": "window", "sillHeightCm": 90, "headHeightCm": 120, "note": "framed window, charcoal aluminum frame" } ] }
+    ]
+  },
+  "items": [
+    { "id": "swivel-chair", "name": "West Elm Cozy Swivel Chair", "dimsCm": { "w": 98, "d": 90, "h": 72.9 }, "notes": "Round barrel-style swivel armchair, charcoal melange fabric. Product page: 38.6\"w x 35.4\"d x 28.7\"h, seat height 16.5\"." },
+    { "id": "tv-stand", "name": "TV Stand", "dimsCm": { "w": 188, "d": 39, "h": 50 }, "legHeightCm": 20, "notes": "Mid-century oak/ash media unit, white drawer fronts, open middle shelf, tapered legs." },
+    { "id": "tv-samsung-frame", "name": "Samsung Frame TV", "dimsCm": { "w": 145.8, "d": 2.5, "h": 83.3 }, "elevationCm": 70, "notes": "65\" Samsung The Frame (QN65LS03B, purchased 2023), Beveled-style customizable bezel in White (angled/mitered profile, not the flat Modern style), mounted flush on north wall above TV stand via included slim-fit wall mount. Dims from official Samsung spec (57.4 x 32.8 x 1 in, without stand)." },
+    { "id": "billy-hogadal-shelving", "name": "Billy + Hogadal Unit", "dimsCm": { "w": 160, "d": 30, "h": 149 }, "notes": "2x BILLY/HOGADAL bookcases with woven bamboo doors on 2x BILLY rolling drawers." },
+    { "id": "water-cooler", "name": "Water Cooler", "dimsCm": { "w": 34, "d": 30, "h": 105 }, "notes": "Panasonic bottom-load dispenser, black + stainless." },
+    { "id": "dining-table", "name": "Dining Table", "dimsCm": { "w": 153, "d": 92, "h": 75 }, "legHeightCm": 69, "notes": "West Elm Modern Expandable, unexpanded; white lacquer top, pecan legs." },
+    { "id": "sonderod-rug", "name": "SONDEROD Rug", "dimsCm": { "w": 240, "d": 170, "h": 2 }, "notes": "IKEA SONDEROD high-pile rug, blue." },
+    { "id": "coffee-table", "name": "Coffee Table", "dimsCm": { "w": 116, "d": 39, "h": 32 }, "legHeightCm": 26, "notes": "IKEA GUTTANE, solid oak, long/narrow/low." },
+    { "id": "applaryd-sofa", "name": "APPLARYD Sofa", "shape": "compound-sofa", "notes": "L-shape, faces north (toward TV wall). Chaise on WEST end. Dims from IKEA product page — main width 290 corrects the Figma-drawn 322 (drawn footprint included chaise overlap), matching the tv-stand precedent of trusting product specs over the drawn box.", "main": { "w": 290, "d": 93 }, "chaise": { "w": 91, "d": 162 }, "seatHeightCm": 47, "backHeightCm": 82, "backrestHeightCm": 70, "armHeightCm": 72, "freeHeightUnderFurnitureCm": 20 },
+    { "id": "bookshelf", "name": "Bookshelf", "dimsCm": { "w": 40, "d": 143.5, "h": 72 }, "notes": "Pine open bookcase, laid on its side, legs removed. Back particle-board panel removed — open both sides, books (spines out) accessible from either face." },
+    { "id": "shoe-rack", "name": "IKEA STALL Shoe Cabinet", "dimsCm": { "w": 79, "d": 29, "h": 148 }, "notes": "White, 3 flip-down compartments, front legs only." },
+    { "id": "floor-lamp", "name": "Floor Lamp", "dimsCm": { "w": 28, "d": 28, "h": 182 }, "notes": "New since spike 3. Footprint is base diameter." },
+    { "id": "table-lamp", "name": "Table Lamp", "dimsCm": { "w": 29, "d": 29, "h": 32 }, "notes": "New since spike 3. Footprint is base diameter. Rests on top of the now-horizontal bookshelf." }
+  ],
+  "cameras": [
+    { "id": "couch-view", "name": "couch-view", "eye": [660, 115, 640], "lookAt": [683, 120, 324], "fovDeg": 60, "note": "seated on the sofa main seat, looking north at the TV wall" }
+  ],
+  "layouts": [
+    {
+      "id": "current",
+      "name": "current",
+      "base": null,
+      "commands": [
+        { "type": "place", "itemId": "swivel-chair", "position": [542, 0, 369], "rotationDeg": 0, "note": "NW corner by TV wall; backrest toward the corner, open front facing SE into the room. rotationDeg not meaningful yet (circular footprint, no facing convention defined) — orientation is qualitative until Phase 4 calibration." },
+        { "type": "place", "itemId": "tv-stand", "position": [683, 0, 343.5], "rotationDeg": 0 },
+        { "type": "place", "itemId": "tv-samsung-frame", "position": [683, 70, 324.5], "rotationDeg": 0 },
+        { "type": "place", "itemId": "billy-hogadal-shelving", "position": [1009, 0, 339], "rotationDeg": 0 },
+        { "type": "place", "itemId": "water-cooler", "position": [1113, 0, 339], "rotationDeg": 0 },
+        { "type": "place", "itemId": "dining-table", "position": [1009, 0, 453.5], "rotationDeg": 90, "note": "rotated 90deg since spike 3; intrinsic dims unchanged (153x92)" },
+        { "type": "place", "itemId": "sonderod-rug", "position": [683, 0, 540], "rotationDeg": 0 },
+        { "type": "place", "itemId": "coffee-table", "position": [713, 0, 561.5], "rotationDeg": 0 },
+        { "type": "place", "itemId": "applaryd-sofa", "position": [671, 0, 655.5], "rotationDeg": 0, "note": "main body center (Figma main rect x510 z609 322x93); chaise extends from the west end per item's own main/chaise sub-footprints" },
+        { "type": "place", "itemId": "bookshelf", "position": [897, 0, 425.75], "rotationDeg": 0 },
+        { "type": "place", "itemId": "shoe-rack", "position": [1103.5, 0, 687.5], "rotationDeg": 0 },
+        { "type": "place", "itemId": "floor-lamp", "position": [492, 0, 684], "rotationDeg": 0, "note": "by the sofa's west end" },
+        { "type": "place", "itemId": "table-lamp", "position": [896.5, 72, 375.5], "rotationDeg": 0, "note": "elevationCm 72 = resting on top of the horizontal bookshelf" }
+      ]
+    }
+  ],
+  "current": "current"
+}
