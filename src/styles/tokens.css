@@ -1,0 +1,57 @@
+/* Design tokens from DESIGN.md — adapted Cohere system. Keep in sync by hand;
+   DESIGN.md is the source of truth. */
+:root {
+  /* Brand & accent */
+  --color-primary: #17171c;
+  --color-deep-green: #003c33;
+  --color-dark-navy: #071829;
+  --color-action-blue: #1863dc;
+  --color-coral: #ff7759;
+
+  /* Surface & text */
+  --color-canvas: #ffffff;
+  --color-soft-stone: #eeece7;
+  --color-ink: #212121;
+  --color-hairline: #d9d9dd;
+  --color-muted-slate: #93939f;
+  --color-body-muted: #616161;
+  --color-border-light: #e5e7eb;
+  --color-card-border: #f2f2f2;
+
+  /* Form/state */
+  --color-focus-blue: #4c6ee6;
+  --color-form-focus: #9b60aa;
+  --color-error: #b30000;
+
+  /* Typography */
+  --font-display: "Space Grotesk", -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-mono: "Space Mono", ui-monospace, monospace;
+
+  --text-hero-display: 400 96px/1 var(--font-display);
+  --text-product-display: 400 72px/1 var(--font-display);
+  --text-section-heading: 400 48px/1.2 var(--font-display);
+  --text-card-heading: 400 32px/1.2 var(--font-display);
+  --text-feature-heading: 400 24px/1.3 var(--font-display);
+  --text-body-large: 400 18px/1.4 var(--font-display);
+  --text-body: 400 16px/1.5 var(--font-display);
+  --text-button: 500 14px/1.71 var(--font-display);
+  --text-mono-label: 400 14px/1.4 var(--font-mono);
+
+  /* Spacing scale */
+  --space-2: 2px;
+  --space-6: 6px;
+  --space-8: 8px;
+  --space-12: 12px;
+  --space-16: 16px;
+  --space-24: 24px;
+  --space-32: 32px;
+  --space-80: 80px;
+
+  /* Radius scale */
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 16px;
+  --radius-lg: 22px;
+  --radius-xl: 30px;
+  --radius-pill: 32px;
+}

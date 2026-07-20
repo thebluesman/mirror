@@ -1,0 +1,37 @@
+.app-shell {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-header {
+  height: 56px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  padding: 0 var(--space-24);
+  background: var(--color-primary);
+  border-bottom: 1px solid var(--color-hairline);
+}
+
+.app-title {
+  font: var(--text-feature-heading);
+  color: var(--color-canvas);
+}
+
+.app-body {
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+}
+
+.app-viewport {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.app-panel {
+  flex: 0 0 280px;
+  border-left: 1px solid var(--color-hairline);
+  background: var(--color-soft-stone);
+}

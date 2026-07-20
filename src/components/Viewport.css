@@ -1,0 +1,11 @@
+.viewport {
+  width: 100%;
+  height: 100%;
+  background: #000;
+}
+
+.viewport canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
