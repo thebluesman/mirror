@@ -192,6 +192,15 @@ generate → view), room/furniture data persists across browser sessions.
 - Longer-term architecture from the original spec (chat-driven structured commands,
   AI intent interpretation layer, full command history/undo, multi-room) stays the
   eventual shape but isn't scheduled yet.
+- **Per-lamp lighting.** v1 treats lamps as ordinary Meshy-imported geometry — no
+  emissive/light-source behavior. Post-v1, a feasibility study on treating individual
+  lamps as real light sources in the render (not scheduled to a version yet).
+- **Multi-state furniture.** v1 imports one Meshy mesh per item — a single fixed
+  pose (e.g. a bendable-arm floor lamp imports in whatever position it was
+  photographed in). Not a v1 problem. For v2, worth exploring importing multiple
+  photos of the same physical item in different configurations/poses as separate
+  states of one object — needs its own design (how states are stored, switched,
+  whether Meshy handles the multi-photo case at all) before it's more than an idea.
 
 ## 12. Open questions
 
