@@ -52,7 +52,7 @@ Two blockers PRD §8/§12 explicitly schedule before building:
       Shyam's fal.ai key — human-in-the-loop.*
       **Resolved 2026-07-20:** all three legs passed with no CORS errors —
       browser-direct, no proxy. See [ADR-0001](docs/adr/0001-fal-browser-direct.md).
-- [ ] **G2 — Figma conversion session.** First, **draft the scene-schema subset**
+- [x] **G2 — Figma conversion session.** First, **draft the scene-schema subset**
       (room dims/openings, furniture item placement, the `layouts[]`/`current`
       branch shape) so the seed JSON has a real target shape — Phase 2 formalizes
       this draft with validation/migration/tests, it doesn't invent the schema
@@ -64,6 +64,8 @@ Two blockers PRD §8/§12 explicitly schedule before building:
       shape). Hand-in-the-loop with Shyam; numbers are a starting point,
       calibration comes later. Seed JSON committed to the repo. *Agent: primary
       session (Fable) — this is the judgment-heavy conversion the PRD describes.*
+      **Resolved 2026-07-20:** schema draft at `schema/scene-schema-draft.md`;
+      seed scene JSON at `seed/living-room.json`.
 
 **Exit:** ADR for G1 outcome; committed schema draft + seed scene JSON; journal entry.
 *Both gates need Shyam present — schedule them for an interactive session; they're
