@@ -6,3 +6,9 @@ dist/
 .claude/.historian-last-seen
 .claude/settings.local.json
 .claude/worktrees/
+
+# v2 spike D5: real GLB binaries (Meshy pre-existing + Hunyuan-generated) are
+# regenerable/re-exportable and large; only the source photos and rendered
+# evidence (contact sheets) are committed. See spike-v2/OUTCOME.md D5 section.
+spike-v2/d5-assets/existing-assets/*.glb
+spike-v2/d5-assets/generated/
