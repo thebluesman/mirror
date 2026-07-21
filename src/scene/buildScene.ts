@@ -197,9 +197,17 @@ function furnitureFootprint(item: FurnitureItem): Array<{ w: number; d: number; 
     // Compound sofa: main + chaise sub-footprints, chaise on the west end.
     const { main, chaise } = item;
     const h = item.dimsCm?.h ?? item.backHeightCm ?? 80;
+    // item.position is main's center (per seed authoring convention, same as
+    // every plain-box item's position = its own center), so main's own
+    // offset is 0. The chaise shares main's west edge rather than sitting
+    // further west of it (confirmed against Figma: the drawn main and
+    // chaise rects share the same west x-coordinate) - the L-shape comes
+    // from the chaise's greater depth (protruding into the room), not from
+    // extending the footprint sideways. offsetX = (chaise.w - main.w) / 2
+    // centers the chaise on that shared west edge.
     return [
-      { w: main.w, d: main.d, h, offsetX: main.w / 2, offsetZ: 0 },
-      { w: chaise.w, d: chaise.d, h, offsetX: -(chaise.w / 2), offsetZ: (main.d - chaise.d) / 2 },
+      { w: main.w, d: main.d, h, offsetX: 0, offsetZ: 0 },
+      { w: chaise.w, d: chaise.d, h, offsetX: (chaise.w - main.w) / 2, offsetZ: (main.d - chaise.d) / 2 },
     ];
   }
   return [{ w: item.dimsCm.w, d: item.dimsCm.d, h: item.dimsCm.h, offsetX: 0, offsetZ: 0 }];

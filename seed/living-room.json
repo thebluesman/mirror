@@ -62,7 +62,7 @@
         { "type": "place", "itemId": "dining-table", "position": [1009, 0, 453.5], "rotationDeg": 90, "note": "rotated 90deg since spike 3; intrinsic dims unchanged (153x92)" },
         { "type": "place", "itemId": "sonderod-rug", "position": [683, 0, 540], "rotationDeg": 0 },
         { "type": "place", "itemId": "coffee-table", "position": [713, 0, 561.5], "rotationDeg": 0 },
-        { "type": "place", "itemId": "applaryd-sofa", "position": [671, 0, 655.5], "rotationDeg": 0, "note": "main body center (Figma main rect x510 z609 322x93); chaise extends from the west end per item's own main/chaise sub-footprints" },
+        { "type": "place", "itemId": "applaryd-sofa", "position": [655, 0, 655.5], "rotationDeg": 0, "note": "corrected main body center: Figma's drawn main rect (x510 z609 322x93) has its west edge at x510, shared with the chaise's own drawn west edge - shrinking main.w from the drawn 322 to the real 290 while preserving that shared west edge moves the center from 671 to 655 (671 - (322-290)/2). Confirmed against Figma: chaise sits 36cm from the west wall (x510 - x474)." },
         { "type": "place", "itemId": "bookshelf", "position": [897, 0, 425.75], "rotationDeg": 0 },
         { "type": "place", "itemId": "shoe-rack", "position": [1103.5, 0, 687.5], "rotationDeg": 0 },
         { "type": "place", "itemId": "floor-lamp", "position": [492, 0, 684], "rotationDeg": 0, "note": "by the sofa's west end" },

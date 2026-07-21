@@ -332,16 +332,34 @@ Meshy generation via his own fal.ai key, confirmed cm dims, placed at the
 Figma-seeded position. GLB downloaded and rendering in-scene; Shyam judged
 it "looks good... good enough to move forward." Phase 4 exit criterion met.
 Two things flagged during the run, not blocking:
-- **Sofa/floor-lamp/bedroom-door positioning — fixed 2026-07-21.**
-  Cross-checked `seed/living-room.json` against the source Figma file
-  directly: the swivel-chair and floor-lamp seed positions match Figma
-  exactly, so this wasn't a seed/conversion error — it was the already-
-  flagged compound-sofa chaise-offset bug above. `buildScene.ts`'s chaise
-  `offsetX` was `-(main.w / 2) - chaise.w / 2`, double-subtracting main's
-  half-width (already accounted for by main's own `offsetX`); fixed to
-  `-(chaise.w / 2)`, which abuts the chaise to main's west edge with no
-  overlap and gives the expected 381cm overall width (290 + 91) instead of
-  the buggy 526cm. `npm run build`/`test` (48/48) clean.
+- **Sofa/floor-lamp/bedroom-door positioning — fixed 2026-07-21, took two
+  passes.** Cross-checked `seed/living-room.json` against the source Figma
+  file directly: the swivel-chair and floor-lamp seed positions match Figma
+  exactly, so this was never a seed/conversion error, purely a rendering
+  bug. First pass fixed the sofa's overall *shape* (chaise `offsetX` was
+  `-(main.w / 2) - chaise.w / 2`, double-subtracting main's half-width) but
+  missed that `main`'s own offset (`main.w / 2`) put the whole group's
+  anchor at main's west edge instead of its center, silently shifting the
+  entire sofa 145cm east — into the bedroom door's clearance. Second pass,
+  after Shyam caught the sofa sitting flush against the west wall instead
+  of Figma's ~36cm gap: `main`'s offset is now `0` (position = main's
+  center, same convention every plain-box item already uses), and the
+  chaise shares main's *west edge* rather than abutting further west of
+  it — confirmed against Figma, main and chaise's drawn rects share the
+  same west x-coordinate; the L-shape comes from the chaise's greater
+  depth (protruding into the room), not a sideways extension. New formula:
+  `chaiseOffsetX = (chaise.w - main.w) / 2`. Also required updating the
+  seed's `position` itself, from 671 (Figma's *uncorrected* drawn-main
+  center) to 655 (the corrected-main center once `main.w` shrinks from
+  Figma's drawn 322 to the real 290 while preserving the shared west edge
+  at x510). Result: main spans world x[510,800] — 36cm clear of the west
+  wall, matching Shyam's Figma read exactly — and ~92cm clear of the
+  bedroom door. `npm run build`/`test` (48/48) clean after each pass.
+  **Lesson for future geometry bugs on this item:** verify against actual
+  Figma coordinates before trusting a formula that merely produces a
+  plausible-looking number (the first pass's "expected ~381cm" from the
+  original code-review finding was never itself checked against Figma —
+  it happened to get the width right while the anchor was still wrong).
 - **West-wall window sizing — fixed 2026-07-21.** Not a Figma/seed
   mismatch (Figma's 2D plan shows both west-wall openings at the same
   110cm width, matching the seed exactly, and carries no sill/head-height
@@ -361,6 +379,18 @@ Two things flagged during the run, not blocking:
   bar per PRD §9) rather than a real gap, but flagged for a deliberate check
   once Phase 5's chrome work lands rather than assumed benign. Still
   realladygrey's to check per the Phase 5 handoff note below.
+
+**Dev-workflow gotcha surfaced while verifying the two fixes above:**
+`App.tsx` restores from IndexedDB autosave whenever one exists and only
+reads `seed/living-room.json` on a database's first-ever load — so a seed
+data fix (like the window/sofa fixes above) silently doesn't show up in an
+already-seeded browser profile until the autosave is cleared (DevTools ->
+Application -> IndexedDB -> delete the `mirror` database -> reload).
+Clearing it also wipes any in-progress import state (Shyam had to redo the
+lamp import after clearing). This is the same gap Phase 2's code review
+already flagged (`clearProject()` exists but nothing calls it from the UI)
+— still Phase 5's to wire up a real recovery/reset affordance, now with a
+second concrete case motivating it.
 
 **`/code-review` pass, 2026-07-21:** 8 findings (6 CONFIRMED, 2 PLAUSIBLE), 3
 fixed directly on the branch — `ImportPanel.tsx`'s confirm-dims form accepted
