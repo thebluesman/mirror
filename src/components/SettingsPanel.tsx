@@ -1,13 +1,26 @@
 import { useEffect, useRef, useState } from "react";
 import { clearFalKey, loadFalKey, saveFalKey } from "../storage/settings";
+import { exportProjectZip } from "../storage/zipExport";
+import type { SceneFile } from "../schema/scene";
 import "./SettingsPanel.css";
 
 /** Settings panel (Phase 4, PRD §8): fal.ai key paste, stored in IndexedDB,
  *  never bundled or sent anywhere but fal.ai (see ADR-0001 — browser-direct
  *  calls, key visible in this browser's own network requests, acceptable for
  *  a solo/local PoC). Exposes hasKey so ImportPanel can gate the import flow
- *  on a key being present. */
-export function SettingsPanel({ onKeyChange }: { onKeyChange?: (hasKey: boolean) => void }) {
+ *  on a key being present.
+ *
+ *  Project export (v2 spike, D5 prep): exportProjectZip (Phase 2) had no UI
+ *  entry point until now — this wires the existing, already-tested function
+ *  to a button so the project (scene JSON + referenced OPFS assets) can
+ *  actually leave the browser. */
+export function SettingsPanel({
+  sceneFile,
+  onKeyChange,
+}: {
+  sceneFile: SceneFile | null;
+  onKeyChange?: (hasKey: boolean) => void;
+}) {
   const [savedKey, setSavedKey] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [status, setStatus] = useState<"idle" | "saved">("idle");
@@ -37,6 +50,17 @@ export function SettingsPanel({ onKeyChange }: { onKeyChange?: (hasKey: boolean)
     await clearFalKey();
     setSavedKey(null);
     onKeyChange?.(false);
+  }
+
+  async function handleExport() {
+    if (!sceneFile) return;
+    const zip = await exportProjectZip(sceneFile);
+    const url = URL.createObjectURL(zip);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "mirror-project.zip";
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   return (
@@ -70,6 +94,25 @@ export function SettingsPanel({ onKeyChange }: { onKeyChange?: (hasKey: boolean)
               Clear
             </button>
           )}
+        </div>
+      </section>
+      <section className="settings-row">
+        <header className="settings-row-header">
+          <span className="settings-row-title">Export project</span>
+        </header>
+        <p className="settings-row-hint">
+          Bundles the project JSON and every referenced asset (photos, GLBs, textures) into a
+          single .zip for portability — e.g. sharing the project outside this browser.
+        </p>
+        <div className="settings-row-actions">
+          <button
+            type="button"
+            className="settings-row-save-button"
+            onClick={() => void handleExport()}
+            disabled={!sceneFile}
+          >
+            Export .zip
+          </button>
         </div>
       </section>
     </div>
