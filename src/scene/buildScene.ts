@@ -3,13 +3,32 @@ import type { CameraPosition, FurnitureItem, SceneFile, WallDef } from "./types"
 
 const WALL_THICKNESS = 10;
 
-// Untextured-shell materials (Phase 1). Phase 3 replaces these with photo-
-// derived materials from the texturing pipeline; furniture stays generic
-// boxes until Phase 4 imports real GLBs.
+// Base (untextured) shell colors/roughness — Phase 3's calibration module
+// (src/scene/shellMaterials.ts) resets to these before multiplying in tint/
+// roughnessScale, so repeated calibration changes don't compound.
+export const SHELL_BASE = {
+  wall: { color: 0xf0e9dc, roughness: 0.92 },
+  ceiling: { color: 0xf5f1e9, roughness: 0.95 },
+  floor: { color: 0xd9d4c9, roughness: 0.35 },
+} as const;
+
+// Shell materials (Phase 1 flat colors; Phase 3 layers photo-derived maps +
+// calibration on top via applyShellMaterials/applyShellCalibration — see
+// src/scene/shellMaterials.ts). `side: DoubleSide` so orbiting under the
+// floor or over the ceiling shows the underside instead of the scene
+// background bleeding through (Phase 1/2 code-review deferred finding).
 const MAT = {
-  wall: new THREE.MeshStandardMaterial({ color: 0xf0e9dc, roughness: 0.92 }),
-  ceiling: new THREE.MeshStandardMaterial({ color: 0xf5f1e9, roughness: 0.95 }),
-  floor: new THREE.MeshStandardMaterial({ color: 0xd9d4c9, roughness: 0.35 }),
+  wall: new THREE.MeshStandardMaterial({ color: SHELL_BASE.wall.color, roughness: SHELL_BASE.wall.roughness }),
+  ceiling: new THREE.MeshStandardMaterial({
+    color: SHELL_BASE.ceiling.color,
+    roughness: SHELL_BASE.ceiling.roughness,
+    side: THREE.DoubleSide,
+  }),
+  floor: new THREE.MeshStandardMaterial({
+    color: SHELL_BASE.floor.color,
+    roughness: SHELL_BASE.floor.roughness,
+    side: THREE.DoubleSide,
+  }),
   doorLeaf: new THREE.MeshStandardMaterial({ color: 0xefeae0, roughness: 0.6 }),
   frame: new THREE.MeshStandardMaterial({ color: 0x33363a, roughness: 0.45, metalness: 0.65 }),
   furniture: new THREE.MeshStandardMaterial({ color: 0xb9ac8f, roughness: 0.7 }),
@@ -24,27 +43,36 @@ const glassMat = new THREE.MeshPhysicalMaterial({
   transparent: true,
 });
 
-function addFloor(scene: THREE.Scene, rect: { x: number; z: number; w: number; d: number }) {
+// Floor gets a per-rect cloned material (not the shared MAT.floor instance)
+// so each rect can carry its own cm-true texture repeat — the room's floor
+// rects (e.g. living-room + entrance-hallway in the seed) differ in size, so
+// a single shared repeat would tile inconsistently across them. Ceiling
+// stays a single shared material: PRD only asks for a "reasonable
+// meters-scale estimate" there, not cm-truth, and it's rarely in view.
+function addFloor(scene: THREE.Scene, rect: { x: number; z: number; w: number; d: number }): THREE.Mesh {
   const geo = new THREE.PlaneGeometry(rect.w, rect.d);
   geo.rotateX(-Math.PI / 2);
-  const mesh = new THREE.Mesh(geo, MAT.floor);
+  const mesh = new THREE.Mesh(geo, MAT.floor.clone());
   mesh.position.set(rect.x + rect.w / 2, 0, rect.z + rect.d / 2);
   mesh.receiveShadow = true;
   scene.add(mesh);
+  return mesh;
 }
 
-function addCeiling(scene: THREE.Scene, rect: { x: number; z: number; w: number; d: number }, height: number) {
+function addCeiling(scene: THREE.Scene, rect: { x: number; z: number; w: number; d: number }, height: number): THREE.Mesh {
   const geo = new THREE.PlaneGeometry(rect.w, rect.d);
   geo.rotateX(Math.PI / 2);
   const mesh = new THREE.Mesh(geo, MAT.ceiling);
   mesh.position.set(rect.x + rect.w / 2, height, rect.z + rect.d / 2);
   scene.add(mesh);
+  return mesh;
 }
 
 // Cuts door/window openings into a wall run, reusing spike/scene2.html's
 // segment-and-opening logic (proven in the R&D spikes), generalized to any
 // wall direction instead of that file's bespoke per-wall calls.
-function addWall(scene: THREE.Scene, wallDef: WallDef, wallHeight: number) {
+function addWall(scene: THREE.Scene, wallDef: WallDef, wallHeight: number): THREE.Mesh[] {
+  const wallMeshes: THREE.Mesh[] = [];
   const [x0, z0] = wallDef.from;
   const [x1, z1] = wallDef.to;
   const dx = x1 - x0;
@@ -81,7 +109,11 @@ function addWall(scene: THREE.Scene, wallDef: WallDef, wallHeight: number) {
 
   function addSegment(aLocal: number, bLocal: number, yBottom: number, yTop: number, mat = MAT.wall) {
     const segLen = bLocal - aLocal;
-    if (segLen <= 0.001) return;
+    // Mirrors addInWallSlab's guard: a lintel/lower-fill span whose yTop has
+    // collapsed to (or below) yBottom — e.g. headHeightCm >= wallHeight —
+    // must no-op instead of handing BoxGeometry a non-positive height (code
+    // review finding: this guard existed on addInWallSlab but not here).
+    if (segLen <= 0.001 || yTop - yBottom <= 0.001) return;
     const h = yTop - yBottom;
     const geo = horizontal
       ? new THREE.BoxGeometry(segLen, h, WALL_THICKNESS)
@@ -90,6 +122,7 @@ function addWall(scene: THREE.Scene, wallDef: WallDef, wallHeight: number) {
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     scene.add(mesh);
+    if (mat === MAT.wall) wallMeshes.push(mesh);
   }
 
   function addInWallSlab(
@@ -120,11 +153,20 @@ function addWall(scene: THREE.Scene, wallDef: WallDef, wallHeight: number) {
   openings.forEach((o) => {
     const F = 6; // frame bar width
     if (o.type === "door" || o.type === "glass-door") {
-      // glass-door renders identically to door in Phase 1 (opaque leaf).
-      // Phase 3 owns swapping the leaf to a glazed material off this
-      // discriminant — Phase 2 only guarantees the type reaches here.
-      addSegment(o.start, o.end, 210, wallHeight); // lintel
-      addInWallSlab(o.start + 2, o.end - 2, 0, 208, 4, MAT.doorLeaf);
+      // Phase 3 fix: honor the opening's own sillHeightCm/headHeightCm
+      // (schema has carried them since Phase 2) instead of the hardcoded
+      // 210/208 that ignored them — a Phase 1/2 code-review deferred
+      // finding. Falls back to the same 0/210 defaults an unset door
+      // implied before, so ordinary doors render unchanged.
+      // glass-door also gets real glazing now (glassMat instead of the
+      // opaque doorLeaf) — Phase 2 only guaranteed the type reached here.
+      const sill = o.sillHeightCm ?? 0;
+      const head = o.headHeightCm ?? 210;
+      const leafTop = Math.max(sill, head - 2); // small gap below the lintel
+      const leafMat = o.type === "glass-door" ? glassMat : MAT.doorLeaf;
+      addSegment(o.start, o.end, 0, sill); // solid wall below a raised sill (no-ops when sill <= 0)
+      addSegment(o.start, o.end, head, wallHeight); // lintel above head height
+      addInWallSlab(o.start + 2, o.end - 2, sill, leafTop, 4, leafMat, o.type === "glass-door");
     } else if (o.type === "window") {
       const sill = o.sillHeightCm ?? 90;
       const head = o.headHeightCm ?? 210;
@@ -142,6 +184,8 @@ function addWall(scene: THREE.Scene, wallDef: WallDef, wallHeight: number) {
       addInWallSlab(mid + 2, o.end - F, paneBottom, paneTop, 2, glassMat, true);
     }
   });
+
+  return wallMeshes;
 }
 
 function furnitureFootprint(item: FurnitureItem): Array<{ w: number; d: number; h: number; offsetX: number; offsetZ: number }> {
@@ -186,9 +230,25 @@ function addFurniture(
   scene.add(group);
 }
 
+/** Shell mesh/material handles Phase 3's live calibration (src/scene/
+ *  shellMaterials.ts) needs — kept separate from the returned THREE.Scene so
+ *  that module doesn't have to re-derive them by traversing/matching (the
+ *  spike's structural mesh-finding trick, unnecessary here since we own the
+ *  mesh-building code — see PRD notes on this file). */
+export interface ShellMeshes {
+  wallMaterial: THREE.MeshStandardMaterial;
+  wallMeshes: THREE.Mesh[];
+  ceilingMaterial: THREE.MeshStandardMaterial;
+  ceilingMeshes: THREE.Mesh[];
+  /** One cloned material per floor rect, in `room.floor` order — each mesh
+   *  can carry its own cm-true repeat. */
+  floorMeshes: THREE.Mesh[];
+}
+
 export interface BuiltScene {
   scene: THREE.Scene;
   cameras: CameraPosition[];
+  shell: ShellMeshes;
 }
 
 export function buildScene(sceneFile: SceneFile): BuiltScene {
@@ -213,11 +273,17 @@ export function buildScene(sceneFile: SceneFile): BuiltScene {
   const bounce = new THREE.HemisphereLight(0xcfd8e0, 0xece6da, 1.05);
   scene.add(bounce);
 
+  const floorMeshes: THREE.Mesh[] = [];
+  const ceilingMeshes: THREE.Mesh[] = [];
+  const wallMeshes: THREE.Mesh[] = [];
+
   sceneFile.room.floor.forEach((rect) => {
-    addFloor(scene, rect);
-    addCeiling(scene, rect, sceneFile.room.ceilingHeightCm);
+    floorMeshes.push(addFloor(scene, rect));
+    ceilingMeshes.push(addCeiling(scene, rect, sceneFile.room.ceilingHeightCm));
   });
-  sceneFile.room.walls.forEach((wall) => addWall(scene, wall, sceneFile.room.ceilingHeightCm));
+  sceneFile.room.walls.forEach((wall) => {
+    wallMeshes.push(...addWall(scene, wall, sceneFile.room.ceilingHeightCm));
+  });
 
   const currentLayout = sceneFile.layouts.find((l) => l.id === sceneFile.current);
   const itemsById = new Map(sceneFile.items.map((item) => [item.id, item]));
@@ -227,5 +293,13 @@ export function buildScene(sceneFile: SceneFile): BuiltScene {
     addFurniture(scene, item, cmd.position, cmd.rotationDeg);
   });
 
-  return { scene, cameras: sceneFile.cameras };
+  const shell: ShellMeshes = {
+    wallMaterial: MAT.wall,
+    wallMeshes,
+    ceilingMaterial: MAT.ceiling,
+    ceilingMeshes,
+    floorMeshes,
+  };
+
+  return { scene, cameras: sceneFile.cameras, shell };
 }

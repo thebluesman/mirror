@@ -28,6 +28,13 @@ const SubFootprint = z.object({ w: z.number(), d: z.number() });
 // discriminant Phase 3 rendering hooks into; Phase 2 only owns the type.
 export const OpeningType = z.enum(["door", "glass-door", "window"]);
 
+// Minimum gap enforced between an opening's sill and head when both are
+// given. Without this, buildScene.ts's leafTop = max(sill, head - 2) can
+// collapse to exactly `sill`, silently dropping the door leaf (code review
+// finding) — better to reject the invalid data at the load boundary than
+// have it render as a degenerate hole in the wall.
+const MIN_SILL_HEAD_GAP_CM = 10;
+
 const WallOpeningSchema = z
   .object({
     name: z.string(),
@@ -38,7 +45,14 @@ const WallOpeningSchema = z
     sillHeightCm: z.number().optional(),
     headHeightCm: z.number().optional(),
   })
-  .loose(); // carry provenance notes (e.g. `note`) through untouched
+  .loose() // carry provenance notes (e.g. `note`) through untouched
+  .refine(
+    (o) =>
+      o.sillHeightCm === undefined ||
+      o.headHeightCm === undefined ||
+      o.headHeightCm - o.sillHeightCm >= MIN_SILL_HEAD_GAP_CM,
+    { message: `headHeightCm must be at least ${MIN_SILL_HEAD_GAP_CM}cm above sillHeightCm` },
+  );
 
 const WallDefSchema = z
   .object({
@@ -57,11 +71,47 @@ const FloorRect = z.object({
   d: z.number(),
 });
 
+// Shell texture calibration (Phase 3, PRD §7.2). Per-surface tint/repeat/
+// roughness multipliers replacing the spike's hand-edited calibration.json —
+// applied multiplicatively on top of whatever texture (or flat procedural
+// color, if no photo uploaded yet) buildScene already produces, exactly like
+// spike/textures/shell-textures.mjs's applyMapsToMaterial. `assetHash`
+// references the tileable-processed photo in the OPFS asset store (Phase 2's
+// content-addressed store); absent means "no photo uploaded, stay
+// procedural." Purely additive/optional, so it doesn't require a
+// SCHEMA_VERSION bump — a v1 file without `room.shell` still validates and
+// simply renders with all-default (no-op) calibration, same as the spike
+// treated a missing calibration.json.
+export const SurfaceCalibrationSchema = z
+  .object({
+    assetHash: z.string().optional(),
+    tint: z.string().default("#ffffff"),
+    repeat: z.tuple([z.number(), z.number()]).default([1, 1]),
+    roughnessScale: z.number().default(1),
+  })
+  .loose();
+
+export const ShellCalibrationSchema = z
+  .object({
+    wall: SurfaceCalibrationSchema.optional(),
+    floor: SurfaceCalibrationSchema.optional(),
+    ceiling: SurfaceCalibrationSchema.optional(),
+  })
+  .loose();
+
 export const RoomSchema = z.object({
   ceilingHeightCm: z.number(),
   floor: z.array(FloorRect),
   walls: z.array(WallDefSchema),
+  shell: ShellCalibrationSchema.optional(),
 });
+
+/** No-op calibration — used when a surface has no entry in `room.shell` yet. */
+export const DEFAULT_SURFACE_CALIBRATION: SurfaceCalibration = {
+  tint: "#ffffff",
+  repeat: [1, 1],
+  roughnessScale: 1,
+};
 
 // FurnitureItem is a union rather than a flat shape with an optional
 // dimsCm, so buildScene can discriminate on `shape` instead of probing for
@@ -157,6 +207,8 @@ export type Dims = z.infer<typeof Dims>;
 export type WallOpening = z.infer<typeof WallOpeningSchema>;
 export type WallDef = z.infer<typeof WallDefSchema>;
 export type Room = z.infer<typeof RoomSchema>;
+export type SurfaceCalibration = z.infer<typeof SurfaceCalibrationSchema>;
+export type ShellCalibration = z.infer<typeof ShellCalibrationSchema>;
 export type FurnitureItem = z.infer<typeof FurnitureItemSchema>;
 export type CameraPosition = z.infer<typeof CameraPositionSchema>;
 export type PlaceCommand = z.infer<typeof PlaceCommandSchema>;

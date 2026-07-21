@@ -20,6 +20,12 @@ export function referencedHashes(scene: SceneFile): string[] {
     if (item.sourcePhotoHash) hashes.add(item.sourcePhotoHash);
     if (item.glbHash) hashes.add(item.glbHash);
   }
+  // Phase 3 added photo-derived shell textures (room.shell.{wall,floor,ceiling}
+  // .assetHash) — each is optional (no photo uploaded yet for that surface).
+  const shell = scene.room.shell;
+  if (shell?.wall?.assetHash) hashes.add(shell.wall.assetHash);
+  if (shell?.floor?.assetHash) hashes.add(shell.floor.assetHash);
+  if (shell?.ceiling?.assetHash) hashes.add(shell.ceiling.assetHash);
   return [...hashes];
 }
 

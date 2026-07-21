@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import seedRaw from "../seed/living-room.json";
 import { Viewport } from "./components/Viewport";
-import { parseScene, type SceneFile } from "./schema/scene";
-import { loadProject, saveProjectNow } from "./storage/autosave";
+import { ShellPanel } from "./components/ShellPanel";
+import { parseScene, type SceneFile, type SurfaceCalibration } from "./schema/scene";
+import { loadProject, saveProjectDebounced, saveProjectNow } from "./storage/autosave";
 import "./App.css";
 
 // Load order (Phase 2 exit criterion — persists across a browser restart):
@@ -35,6 +36,24 @@ function App() {
     };
   }, []);
 
+  // Shell calibration changes come from ShellPanel's sliders/uploads. They're
+  // persisted through the existing storage layer (debounced autosave, same
+  // as any other scene mutation would be) but kept out of the `sceneFile`
+  // reference Viewport uses for its one-time structural build — Viewport
+  // reads `shellCalibration` as a separate prop and applies it live without
+  // rebuilding the WebGL scene (see Viewport.tsx).
+  function updateShellSurface(surface: "wall" | "floor" | "ceiling", calib: SurfaceCalibration) {
+    setSceneFile((prev) => {
+      if (!prev) return prev;
+      const next: SceneFile = {
+        ...prev,
+        room: { ...prev.room, shell: { ...prev.room.shell, [surface]: calib } },
+      };
+      saveProjectDebounced(next);
+      return next;
+    });
+  }
+
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -43,12 +62,14 @@ function App() {
       <div className="app-body">
         <main className="app-viewport">
           {sceneFile ? (
-            <Viewport sceneFile={sceneFile} />
+            <Viewport sceneFile={sceneFile} shellCalibration={sceneFile.room.shell} />
           ) : (
             <div className="app-status">{error ? `Failed to load: ${error}` : "Loading…"}</div>
           )}
         </main>
-        <aside className="app-panel" />
+        <aside className="app-panel">
+          {sceneFile && <ShellPanel shell={sceneFile.room.shell} onUpdateSurface={updateShellSurface} />}
+        </aside>
       </div>
     </div>
   );
