@@ -285,7 +285,7 @@ the riskiest flow in v1. Whichever of 3/4 merges second rebases.
       *Agent: Sonnet, against spike 3's proven scaling/snapping logic.*
 
 **Exit:** one real furniture item goes photo → Meshy → placed in the rendered
-room, in-app, with a paid generation Shyam approved. **Still open** — see
+room, in-app, with a paid generation Shyam approved. **Met 2026-07-21** — see
 "Resolved" below.
 
 **Handoff note (2026-07-21):** Shyam is out of usage budget for this session;
@@ -323,6 +323,27 @@ available in this build session). **The exit criterion itself — a real
 photo through a paid Meshy generation, approved and placed in-app — has not
 been run.** That's explicitly Shyam-gated per the handoff note above; it's
 the next thing to happen on this phase, not a follow-up phase.
+
+**Exit criterion resolved 2026-07-21:** Shyam ran the real acceptance flow —
+`npm install` first to pull in `@fal-ai/client` (declared in `package.json`/
+lockfile but missing from `node_modules` post-handoff, blocking `npm run
+dev` until installed) — then a real photo of his table lamp through a paid
+Meshy generation via his own fal.ai key, confirmed cm dims, placed at the
+Figma-seeded position. GLB downloaded and rendering in-scene; Shyam judged
+it "looks good... good enough to move forward." Phase 4 exit criterion met.
+Two things flagged during the run, not blocking, kept for later:
+- **Seed/G2 geometry issues** — sofa position relative to the floor lamp
+  corner and bedroom door looks off, and the window nearer the corner on
+  the west wall reads as the wrong size. The sofa symptom likely overlaps
+  the already-flagged compound-sofa chaise-offset bug just above (~38%
+  too-wide bounding box), but the floor-lamp/door and window-size reports
+  are new and unconfirmed — worth a dedicated look at `seed/living-room.json`
+  and `buildScene.ts`'s window-opening math before the Phase 5 acceptance
+  run, not diagnosed further here.
+- **DESIGN.md fidelity** — the app doesn't read as strongly "Cohere" yet.
+  Likely just current-stage minimalism (Phase 5 owns viewport chrome/control
+  bar per PRD §9) rather than a real gap, but flagged for a deliberate check
+  once Phase 5's chrome work lands rather than assumed benign.
 
 **`/code-review` pass, 2026-07-21:** 8 findings (6 CONFIRMED, 2 PLAUSIBLE), 3
 fixed directly on the branch — `ImportPanel.tsx`'s confirm-dims form accepted
