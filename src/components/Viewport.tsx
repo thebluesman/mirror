@@ -6,6 +6,7 @@ import { addFurnitureBoxMeshes, buildScene, furnitureOverallDims, type BuiltScen
 import { applyShellSurface, updateSurfaceCalibrationInPlace, type ShellSurface } from "../scene/shellMaterials";
 import { loadShellTexture } from "../scene/loadShellTexture";
 import { fitModelToDims, loadFurnitureModel } from "../scene/loadFurnitureModel";
+import { computeFlatTextureFit, FULL_CONTENT_BOX, type ContentBox } from "../scene/flatItemTexture";
 import { checkCollisions, itemFootprintAABB, wallFootprintAABBs, type AABB } from "../scene/collision";
 import { snapPosition } from "../scene/snapping";
 import { rotateHandleWorldXZ, yawDegFromPointer } from "../scene/rotateHandle";
@@ -49,6 +50,61 @@ function applyCameraPreset(camera: THREE.PerspectiveCamera, controls: OrbitContr
   camera.updateProjectionMatrix();
   controls.target.set(...preset.lookAt);
   controls.update();
+}
+
+// v2 spike D4 orientation-bug follow-up (see spike-v2/OUTCOME.md's D4
+// addendum): the SONDEROD rug photo's raw pixel dimensions are an exactly
+// square 1400x1400 canvas — a product-photography convention that pads a
+// portrait or landscape photo out to a square tile — so `bitmap.width /
+// bitmap.height` reports 1:1 no matter which way the actual rug pattern
+// runs in-frame, and can't feed `needsOrientationRotation` a useful answer.
+// This samples the bitmap down to a small canvas and finds the bounding box
+// of non-background (near-white) pixels, returning that box (fractions of
+// the bitmap's own width/height, image pixel-space convention — Y=0 top)
+// so the caller can both derive an orientation-check aspect ratio from it
+// AND crop the rendered texture to it (round 2 only did the former,
+// discarding the box's coordinates — the padding stayed visible; this pass
+// crops it out, see spike-v2/OUTCOME.md's D4 crop-fix addendum). Falls back
+// to the full bitmap (`FULL_CONTENT_BOX`) if no content is found (e.g. a
+// genuinely blank photo) so a detection miss can't throw or crop to
+// nothing — same safety the old aspect-only fallback had.
+const CONTENT_BOX_SAMPLE = 64;
+const CONTENT_BG_THRESHOLD = 245; // near-white; product photos shoot on white/light backgrounds
+function detectContentBox(bitmap: ImageBitmap): ContentBox {
+  const canvas = document.createElement("canvas");
+  canvas.width = CONTENT_BOX_SAMPLE;
+  canvas.height = CONTENT_BOX_SAMPLE;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return FULL_CONTENT_BOX;
+  ctx.drawImage(bitmap, 0, 0, CONTENT_BOX_SAMPLE, CONTENT_BOX_SAMPLE);
+  const { data } = ctx.getImageData(0, 0, CONTENT_BOX_SAMPLE, CONTENT_BOX_SAMPLE);
+  let minX = CONTENT_BOX_SAMPLE;
+  let maxX = -1;
+  let minY = CONTENT_BOX_SAMPLE;
+  let maxY = -1;
+  for (let y = 0; y < CONTENT_BOX_SAMPLE; y++) {
+    for (let x = 0; x < CONTENT_BOX_SAMPLE; x++) {
+      const i = (y * CONTENT_BOX_SAMPLE + x) * 4;
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      if (r < CONTENT_BG_THRESHOLD || g < CONTENT_BG_THRESHOLD || b < CONTENT_BG_THRESHOLD) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < minX || maxY < minY) return FULL_CONTENT_BOX; // no non-background pixels found
+  // +0/+1 sample-index -> fraction-of-bitmap: the bounding box is inclusive
+  // of the maxX/maxY sample, so its right/bottom edge fraction is (max+1)/N.
+  return {
+    minXFrac: minX / CONTENT_BOX_SAMPLE,
+    maxXFrac: (maxX + 1) / CONTENT_BOX_SAMPLE,
+    minYFrac: minY / CONTENT_BOX_SAMPLE,
+    maxYFrac: (maxY + 1) / CONTENT_BOX_SAMPLE,
+  };
 }
 
 // Clamps how far OrbitControls can orbit vertically — without this, an
@@ -298,6 +354,58 @@ export const Viewport = forwardRef<
           if (!cancelled) addFurnitureBoxMeshes(group, item);
         });
     });
+
+    // v2 spike D4 (W-B, rug fix ladder lever 2 — see spike-v2/OUTCOME.md):
+    // an item with `flatTextureHash` gets its photo-derived texture loaded
+    // from OPFS here and dropped onto the top-face material buildScene
+    // already created and put in the scene — same async-after-build shape
+    // as the GLB load above, just filling in a `.map` instead of attaching
+    // a decoded model. `computeFlatTextureFit` (pure math, unit-tested)
+    // crops out any product-photo padding, corrects for a photo shot in the
+    // "wrong" orientation relative to the item's real footprint, and fits
+    // the result to the item's real w:d footprint without stretching — all
+    // three folded into one repeat/offset/rotation, the same way CSS
+    // `background-size: cover` fits a photo to a differently-shaped box.
+    built.pendingFlatTextures.forEach(({ item, material }) => {
+      const hash = item.flatTextureHash;
+      if (!hash) return;
+      loadShellTexture(hash)
+        .then((source) => {
+          if (cancelled || !source) return;
+          const dims = item.dimsCm;
+          if (!dims) return;
+          const targetAspect = dims.w / dims.d;
+          const rawImageAspect = source.bitmap.width / source.bitmap.height;
+          // D4 crop-fix (see spike-v2/OUTCOME.md's D4 crop-fix addendum):
+          // round 2 only used the content bounding box to decide whether to
+          // rotate, discarding the box's own coordinates — the product-photo
+          // padding stayed visible in the render. This detects the box AND
+          // feeds its actual coordinates to computeFlatTextureFit so the
+          // padding is cropped out, not just accounted for.
+          const contentBox = detectContentBox(source.bitmap);
+          const { repeat, offset, rotation } = computeFlatTextureFit(contentBox, rawImageAspect, targetAspect);
+          const texture = new THREE.Texture(source.bitmap);
+          texture.colorSpace = THREE.SRGBColorSpace;
+          texture.wrapS = texture.wrapT = THREE.ClampToEdgeWrapping;
+          // computeFlatTextureFit's scheme always pairs with center left at
+          // THREE.Texture's default (0, 0) — the rotation pivot is folded
+          // into `offset` instead, so no texture.center.set() call needed.
+          texture.rotation = rotation;
+          texture.repeat.set(repeat[0], repeat[1]);
+          texture.offset.set(offset[0], offset[1]);
+          texture.needsUpdate = true;
+          material.map = texture;
+          material.needsUpdate = true;
+        })
+        .catch((err) => {
+          // No box-mesh fallback needed here (unlike the GLB path above) —
+          // buildScene already put a plain-color box in the scene as this
+          // material's mesh; a failed texture load just leaves it that
+          // flat color instead of vanishing.
+          console.error(`[Viewport] failed to load flat texture for "${item.id}"`, err);
+        });
+    });
+
     setBuildVersion((v) => v + 1);
     const { scene, cameras } = built;
 

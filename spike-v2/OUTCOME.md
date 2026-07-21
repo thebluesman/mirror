@@ -405,6 +405,312 @@ the pre-fix code, passing after) for both a horizontal and a vertical
 wall's spurious cross-axis endpoint. `npx vitest run` (82 tests), `npx tsc
 -b`, `npm run build`, and `oxlint` all clean after the fix.
 
+## D4 — W-B: rug fix (flat textured plane)
+
+**Status: built, evidence captured, awaiting C2 (Shyam judging before/after
+against reference photos).** Branch: `v2/spike-quality`. Screenshots:
+`spike-v2/d4-screenshots/`, captured by `spike-v2/d4-rug-drive.mjs` (same
+one-off-Playwright-driver shape as the W-A scripts).
+
+**Ladder position:** lever 1 (re-generate from a better photo) was
+skipped — Shyam confirmed the photo provided for this pass is the exact
+photo already used for the original Meshy generation, so a re-run
+wouldn't change anything. This entry is lever 2: a flat textured plane/box
+with the photo-derived texture, replacing the generated mesh entirely for
+this one item. Lever 3 (CC0 fabric normal/roughness) wasn't attempted —
+per the plan, only run if lever 2 doesn't pass C2.
+
+**What's there:**
+- **`src/scene/flatItemTexture.ts`** — pure, framework-free math (no
+  THREE/Canvas/DOM dependency), the same shape as `src/texturing/tileable.ts`:
+  `computeCoverUV(imageAspect, targetAspect)` computes THREE.Texture
+  repeat/offset for a "cover" fit (CSS `background-size: cover;
+  background-position: center` — crop whichever axis the photo has "extra"
+  of, keep the rest full-bleed, centered), and `flatTextureBoxDims(dimsCm)`
+  restates `dimsCm` as a named width/height/depth triple. Deliberately
+  *not* reusing `tileable.ts`'s quadrant-swap/cross-fade pipeline — that
+  algorithm solves a different problem (an arbitrary-size floor/wall/
+  ceiling repeating a photo over and over needs its seams hidden); a rug
+  photo mapped once, 1:1, onto the rug's own real footprint never repeats,
+  so there's no seam to hide, only an aspect-ratio mismatch to fit without
+  stretching. The rug's actual case — a 1400x1400 square photo onto a
+  240x170 (~1.41:1) footprint — crops the photo's top/bottom symmetrically
+  and uses its full width, confirmed both in `flatItemTexture.test.ts` and
+  visually in the captured evidence.
+- **`src/schema/scene.ts`** — `flatTextureHash?: string` added to
+  `BoxFurniture` only (not `CompoundSofaFurniture` — the SONDEROD rug is
+  the only candidate and it's a plain box; a flat texture over a compound
+  multi-part footprint has no obvious single "top face" to map onto).
+  Smallest schema change that fits, per the task brief — no new
+  discriminant, no shape variant.
+- **`src/scene/buildScene.ts`** — a box item with `flatTextureHash` and no
+  `glbHash` gets `addFlatTexturedFurnitureMesh`: a single `THREE.Mesh`
+  sized to `dimsCm` (via `flatTextureBoxDims`) with a 6-material array —
+  five faces share the existing `MAT.furniture` instance (unseen for a
+  2cm-thick rug), the top face (+Y, index 2 in `BoxGeometry`'s default
+  material-group order) gets its own fresh `MeshStandardMaterial` instance
+  per item. `BuiltScene.pendingFlatTextures` carries `{item, material}`
+  pairs out of the synchronous builder, the same async-after-build shape
+  `pendingModels` already established for GLB loads — buildScene stays
+  synchronous (no OPFS reads), Viewport fills in the texture after.
+  `glbHash` wins if an item somehow had both (checked first in
+  `addFurniture`), though no code path here ever produces that combination.
+- **`src/components/Viewport.tsx`** — a new effect alongside the existing
+  GLB-load loop: for each `pendingFlatTextures` entry, `loadShellTexture`
+  (reused as-is from Phase 3's shell-texture path — it's just
+  `getAsset` + `createImageBitmap`, generic enough) decodes the stored
+  photo, `computeCoverUV` fits it to the item's `dimsCm.w / dimsCm.d`
+  aspect ratio, and the resulting repeat/offset go on a fresh
+  `THREE.Texture` (`ClampToEdgeWrapping`, not `RepeatWrapping` — the cover
+  fit never samples outside `[offset, offset+repeat] ⊆ [0,1]`, so there's
+  nothing to wrap) assigned to the material's `.map`. No box-mesh fallback
+  needed on a failed load (unlike the GLB path) — buildScene already left
+  a plain-color box mesh in the scene; a failed texture load just leaves
+  it that flat color instead of vanishing.
+
+**Tests:** `src/scene/flatItemTexture.test.ts` (cover-fit math: no-op when
+aspects match, crops width vs. height depending on which is "extra",
+centered offset, the rug's actual 1400x1400-onto-240x170 case, throws on
+non-positive/non-finite input) and `src/scene/buildScene.test.ts` (the
+flat-texture item renders a box sized to its real `dimsCm`, registers in
+`pendingFlatTextures` with a *distinct* per-item top material while the
+other five faces share the one `MAT.furniture` instance, two flat-texture
+items never share a top material with each other, `glbHash` wins over
+`flatTextureHash` if both are set, and a plain box with neither hash is
+unaffected — still the ordinary flat-color placeholder). `npx vitest run`
+(94 tests, up from 82), `npx tsc -b`, `npm run build`, and `oxlint` all
+clean.
+
+**Evidence** (`d4-rug-drive.mjs`, against a running dev server and the
+real seed): screenshots show the placeholder's flat tan box (indistinguishable
+from every other unphotographed box item) replaced by the actual SONDEROD
+rug photo — its blue/teal horizontal-gradient pattern — mapped cleanly onto
+the flat plane at the rug's real position and orientation, no stretching or
+visible seam. Captured from two angles: the seed's own shipped
+`couch-view` camera (`0b-before-couch-view.png` / `1b-after-couch-view.png`
+— identical either way, since the coffee table at `[713,0,561.5]` fully
+occludes the rug at `[683,0,540]` from that waist-height angle, confirming
+the change doesn't regress the one view Shyam's seed actually ships), and
+an evidence-only steep-angle camera injected at runtime as `cameras[0]`
+(`0-before-placeholder.png` / `1-after-flat-texture.png` — not added to the
+committed seed, purely a capture-time patch to the persisted IndexedDB
+record, since fighting OrbitControls with synthetic mouse drags risks
+re-selecting/dragging a furniture item instead of orbiting, the exact trap
+D2's own evidence capture hit).
+
+**Rough edges / limitations found, surfaced not hidden:**
+- **This sandbox cannot show the actual "before."** The real regression
+  this ladder is fixing is "worst-rendering Meshy mesh" vs. "flat plane" —
+  but the rug's real `glbHash` and its generated GLB asset live only in
+  Shyam's own browser profile (OPFS/IndexedDB), which this agent sandbox
+  has no access to, and the committed seed JSON never carries binary
+  hashes (those only exist in a live project's storage, not the
+  hand-authored seed — the same gap D0 traced through `applyImport.ts`).
+  So the "before" shown here is the seed's own current fallback for a
+  glbHash-less item — the flat-color placeholder box — not the actual bad
+  mesh Shyam flagged. The mechanism (photo -> real-time PBR flat plane) is
+  fully demonstrated and evidenced; the *comparison against the actual
+  complaint* is only possible in Shyam's own session, which is exactly
+  what C2 is for.
+- **No live UI to attach a `flatTextureHash` to an item.** There's no
+  rug-specific import affordance — matches the task brief (no fal.ai
+  calls, no new import UI in scope) but means adopting this for real
+  requires either a small dedicated upload control (mirroring
+  `ShellPanel.tsx`'s "Upload photo" pattern per surface) or a one-time
+  manual patch like this evidence script's. Worth a small follow-up if
+  this lever passes C2 — currently the only way to set the field is
+  editing the persisted project record directly.
+- **Side faces are flat-colored, not photo-derived.** For a 2cm-thick rug
+  this is imperceptible (the side faces are ~2cm of vertical sliver,
+  essentially never in frame) — noted rather than treated as a gap worth
+  closing.
+- **`computeCoverUV`'s crop is silent about which content gets trimmed.**
+  For the rug's actual photo (a straight-on shot with the rug roughly
+  centered and some floor margin around it, per the task brief), centered
+  cropping the square photo's top/bottom to fit the wider footprint
+  trims that floor margin, not the rug itself — confirmed by eye in the
+  evidence screenshot — but a differently-framed input photo (rug
+  off-center, or filling the frame edge-to-edge) could crop into the rug
+  pattern itself. No code guard against that; it would show up
+  immediately in a before/after screenshot, which is the intended check.
+- **Not attempted: lever 3 (CC0 fabric normal/roughness).** Per the plan's
+  discipline ("one iteration per lever, not a loop"), this stays out of
+  scope unless C2 finds lever 2 insufficient — the flat plane currently
+  has no normal map, so at a grazing angle or under strong directional
+  light it will read as a flat photo rather than a pile-textured rug
+  surface. Whether that matters enough to warrant lever 3 is exactly what
+  C2 should judge, not something to pre-empt here.
+
+**My read (not the C2 call — that's Shyam's):** the mechanism works
+cleanly and the photo's own pattern/color reads correctly in the app's
+real lighting once mapped 1:1 onto the rug's real footprint — a categorical
+improvement over an undifferentiated flat-color box, and worth judging
+against the actual bad-mesh complaint in Shyam's own session. The two
+limitations most likely to matter at C2 are the missing side/normal detail
+(lever 3's territory, if grazing-angle viewing makes the flat plane read
+as "a photo of a rug" rather than "a rug") and the fact that this
+evidence necessarily compares against a placeholder rather than the real
+bad mesh — worth Shyam pulling up his own project's current rug rendering
+side by side with `1-after-flat-texture.png` rather than trusting this
+doc's comparison alone.
+
+**D4 addendum — orientation bug found at C2, fixed (2026-07-22):** Shyam
+tried lever 2 hands-on and confirmed the texture quality/mapping read well
+but the rug's pattern ran the wrong way relative to how the real rug sits —
+not a fresh regression, a bug in the original mapping this doc's evidence
+didn't catch because the steep evidence-only camera happens to make a
+90°-rotated stripe pattern look plausible at a glance.
+
+Root cause: `computeCoverUV(imageAspect, targetAspect)` assumes the photo's
+own horizontal/vertical axes already line up with the item's world w/d
+footprint axes — it has no way to know the *photo itself* was shot in a
+different landscape/portrait orientation than the footprint. The SONDEROD
+photo (`spike-v2/assets/sonderod-rug-photo.png`) turned out to be a sharper
+case of this than first assumed from the raw file alone: its raw pixel
+dimensions are an exactly-square 1400x1400 canvas (product-photography
+convention — pad a rectangular photo out to a square tile), so
+`bitmap.width / bitmap.height` reports 1:1 and can't be compared against the
+rug's landscape footprint (`w=240 > d=170`, aspect ~1.41) at all. Trimming
+the canvas's white padding to find the actual rug content's bounding box
+puts its aspect at ~968:1343 (~0.72) — clearly portrait, confirming the
+photo really was shot with the rug's long edge running vertically in-frame,
+exactly as the PR review comment guessed, just not detectable from the raw
+bitmap dimensions the way that comment assumed.
+
+Fix, split the same way the module already is (`flatItemTexture.ts` pure
+math / `Viewport.tsx` THREE glue):
+- **`src/scene/flatItemTexture.ts`**: new `needsOrientationRotation(imageAspect,
+  targetAspect)` — returns true when the two disagree on landscape-vs-portrait
+  (`(imageAspect < 1) !== (targetAspect < 1)`, with an exactly-square input
+  (`=== 1`) always returning false — a square number alone can't tell you
+  which way to rotate). Pure and unit-tested (`flatItemTexture.test.ts`):
+  the real SONDEROD content-aspect case and its mirror (photo/footprint
+  swapped), same-orientation non-cases, the square-input edge case, and the
+  existing throw-on-bad-input behavior.
+- **`src/components/Viewport.tsx`**: new `detectContentAspect(bitmap)` —
+  downsamples the bitmap to a 64x64 canvas, finds the bounding box of
+  non-near-white pixels, and returns *that* box's aspect ratio instead of
+  the padded canvas's (falls back to the raw bitmap aspect if no
+  non-background pixel is found, so a detection miss can't throw or force a
+  bogus rotation). The flat-texture-fill effect now calls
+  `needsOrientationRotation(detectContentAspect(source.bitmap), targetAspect)`
+  to decide whether to rotate, and — if so — sets `texture.center.set(0.5,
+  0.5)` + `texture.rotation = Math.PI / 2` and feeds `computeCoverUV` the
+  *reciprocal* of the raw bitmap aspect (not the content aspect — the raw
+  bitmap is what's actually sampled in UV space once `texture.rotation` is
+  applied) so the crop/offset math still lines up post-rotation.
+- Concretely, for the real rug: photo content runs portrait (long pixel axis
+  = the rug's long floor axis, `w=240`; short pixel axis + white padding =
+  the rug's short floor axis, `d=170`). Rotating 90° makes the U axis (mapped
+  onto the footprint's `w`) sample the photo's original height (long,
+  padding-free) and the V axis (mapped onto `d`) sample the photo's original
+  width (short, where `computeCoverUV`'s crop trims almost exactly the
+  padding fraction away) — the bands now run across the rug's short axis and
+  repeat along its long axis, matching the physical photo.
+
+**Re-verified evidence:** re-ran `spike-v2/d4-rug-drive.mjs` against the
+fixed code. `spike-v2/d4-screenshots/1-after-flat-texture-wrong-orientation.png`
+preserves the original (pre-fix) capture for comparison — bands running
+horizontally, stacked along the rug's long axis, the bug Shyam flagged.
+`spike-v2/d4-screenshots/2-after-orientation-fix.png` is the same
+`rug-eval-view` camera angle after the fix — bands now run vertically in
+frame (across the rug's short `d=170` axis) and repeat left-to-right (along
+its long `w=240` axis), matching how the source photo itself reads. The
+originally-committed `1-after-flat-texture.png` and the couch-view captures
+are unchanged/regenerated identically (couch-view still fully occludes the
+rug behind the coffee table either way, confirming no regression there).
+
+`npx vitest run` (99 tests, up from 94), `npx tsc -b`, `npm run build`, and
+`oxlint src/` all clean after this fix.
+
+**D4 addendum — crop fix, padding removed (2026-07-22):** Shyam tried the
+orientation fix hands-on and confirmed the pattern now runs the right way,
+but the white product-photo padding around the rug (visible top and bottom
+of the mapped texture in `2-after-orientation-fix.png`) was still part of
+the rendered top face. Root cause: the orientation fix only used the content
+bounding box (`detectContentAspect`'s downsample-and-scan) to decide
+*whether* to rotate — it computed the box's min/max X/Y locally, derived an
+aspect ratio from them, and threw the coordinates away. Nothing in the
+texture pipeline actually restricted sampling to that box, so the full
+(still-padded) bitmap kept getting mapped in, just correctly oriented.
+
+Fix: `detectContentAspect` became `detectContentBox` (`Viewport.tsx`),
+returning the box itself — `{minXFrac, maxXFrac, minYFrac, maxYFrac}`,
+fractions of the bitmap's own width/height in image/DOM pixel-space
+(Y=0 top), falling back to the full bitmap (`FULL_CONTENT_BOX`) on a
+detection miss, same safety the old aspect-only fallback had.
+`flatItemTexture.ts` gained `computeFlatTextureFit(contentBox,
+rawImageAspect, targetAspect)`, replacing the old
+`needsOrientationRotation` + `computeCoverUV` two-call sequence at the
+Viewport call site with one function that folds three transforms into a
+single repeat/offset/rotation: crop to the content box, rotate 90° if the
+box's own aspect disagrees with the footprint's orientation class, then
+cover-fit crop for aspect ratio within the now-cropped (possibly rotated)
+content — computed as if the content box were the whole photo, then nested
+into the box's actual sub-rectangle of the raw bitmap.
+
+**The V-axis gotcha, worth recording plainly:** `ContentBox` is detected in
+image/DOM pixel-space, where Y=0 is the *top* row and Y grows downward —
+that's what `canvas.getImageData` and the bounding-box scan naturally
+produce. A `THREE.Texture` has `flipY = true` by default, so its UV V-axis
+runs the *other* way: V=0 is the *bottom* of the image, V=1 the top. A
+pixel-space Y-range `[minYFrac, maxYFrac]` (out of the bitmap's height)
+becomes texture V-range `[1 - maxYFrac, 1 - minYFrac]` — a swap-and-complement,
+not a direct copy of the fractions. Copying the raw fractions across
+without this flip would crop the correct *height* of content but from the
+wrong vertical strip (e.g. cropping in the padding on one edge while
+cutting into the rug pattern on the other) — geometrically plausible enough
+to pass a casual glance, exactly the kind of bug that survives to a real
+screenshot review. `computeFlatTextureFit` applies the flip once, explicitly,
+at the top of the function, with the derivation spelled out in its doc
+comment.
+
+**Composing the rotation with the crop** (the other easy-to-get-backwards
+part): a straight "crop, then separately rotate, then separately cover-fit"
+implementation would need three sequential `THREE.Texture` transforms, but a
+`THREE.Texture` only exposes one combined `repeat`/`offset`/`rotation`/
+`center` affine transform. The fix folds all three into that single
+transform algebraically — expand the already-validated round-2 formula
+(`rotation = +90°`, `center = (0.5, 0.5)`, repeat/offset from
+`computeCoverUV`) into its explicit `outU(gu,gv) = repeat[0]·gv + K1`,
+`outV(gu,gv) = -repeat[1]·gu + K2` form, generalize "the whole image" to
+"the content box," then nest the content-box crop (a plain, rotation-free
+scale+offset) on top, re-expressed with `center` left at THREE.Texture's
+default `(0, 0)` (an equivalent, simpler parametrization of the same
+affine map). This was **not** trusted by hand-derivation alone: verified
+with a throwaway Node script (`three` package, not committed) that built
+actual `THREE.Texture` instances from both the old round-2 formula and the
+new composed formula, called `updateMatrix()`, and multiplied known corner
+UVs through `texture.matrix` to confirm (a) the new formula reproduces the
+old formula exactly when the content box is the full bitmap (no
+regression), and (b) with a real cropped box, every sampled corner lands
+inside the content box's texture-space sub-rectangle (the padding is
+actually excluded, not just deprioritized). The same checks became
+permanent tests in `flatItemTexture.test.ts` (using the real `three`
+package, matching `buildScene.test.ts`/`loadFurnitureModel.test.ts`'s
+existing precedent for THREE-dependent tests in this codebase).
+
+**Re-verified evidence:** re-ran `spike-v2/d4-rug-drive.mjs` unmodified
+(the script itself needed no changes — it just patches in a photo and
+reloads). `spike-v2/d4-screenshots/3-after-crop-fix.png` (same
+`rug-eval-view` camera angle as `2-after-orientation-fix.png`) shows the
+white padding gone from both the top and bottom edges of the mapped
+texture, the rug's blue/teal band pattern now filling the plane
+edge-to-edge, with the same correct band orientation `2-after-orientation-fix.png`
+established. `1-after-flat-texture.png`, `1-after-flat-texture-wrong-orientation.png`,
+and `2-after-orientation-fix.png` are all left untouched for comparison
+history; couch-view captures are unchanged (still fully occluded by the
+coffee table either way).
+
+`npx vitest run` (105 tests, up from 99 — 6 new `computeFlatTextureFit`
+cases), `npx tsc -b`, `npm run build`, and `oxlint src/` all clean after
+this fix.
+
+**C2 verdict (Shyam, 2026-07-22): pass.** "Yes much better." Three-round C2
+(texture quality → orientation → crop) closes clean — the rug's flat-
+textured-plane approach is the final W-B answer for this item, no lever 3
+needed. Merged via PR #11.
+
 ## C1 — Checkpoint: Shyam drives the W-A branch, 2026-07-21
 
 Driven against `main` post-#10 (D1+D2+D3), against Shyam's own imported room
@@ -572,23 +878,6 @@ holds up under an actual hand on the mouse, not just Playwright-driven
 evidence. UI polish (grab-target sizing, a 0deg/snap-angle affordance) is
 explicitly deferred, not blocking — merged as-is via PR #12.
 
-## D4 — W-B: rug fix (flat textured plane)
-
-**Status: built, C2-tested, one round-trip fix in progress (PR #11).** See
-PR #11 for the full build writeup (flat box + photo-derived top-face texture
-instead of a generated GLB, cover-fit via `flatItemTexture.ts`). Stale
-placeholder heading above corrected here — this actually ran in parallel
-with D5, not "not started."
-
-**C2 (Shyam, 2026-07-21): texture quality good, orientation wrong.** The
-photo-derived material itself reads well, but the rug's pattern doesn't run
-the way the physical rug does — traced to `computeCoverUV` assuming the
-source photo's orientation already matches the item's world footprint
-orientation, which doesn't hold for a portrait-shot photo against a
-landscape (`w=240` > `d=170`) footprint. Fix in progress on PR #11 (orientation
-detection + 90° texture rotation before the cover-fit math); C2 will need a
-second pass once that lands.
-
 ## C3 — Checkpoint: Meshy vs. Hunyuan side-by-sides, 2026-07-22
 
 Shyam judged the `spike-v2/d5-contact-sheets/` side-by-sides in-app (real
@@ -599,11 +888,10 @@ higher quality than the Meshy equivalent. Two caveats, neither of which
 Shyam considers blocking for the overall call:
 
 - **Rug — bad on both providers.** The rug's mesh geometry itself is wrong
-  regardless of provider. This is expected to be moot once PR #11's flat-
-  textured-plane fix lands — that approach bypasses mesh generation for the
-  rug entirely (photo-derived flat texture instead), so once its orientation
-  bug is fixed the rug no longer depends on either provider's mesh output at
-  all.
+  regardless of provider. **Resolved, not just moot**: PR #11's flat-
+  textured-plane fix (D4, above) merged after a clean C2 pass — the rug
+  bypasses mesh generation entirely now, so it no longer depends on either
+  provider's mesh output at all.
 - **Bookshelf — same structural defect on both providers** (cubby holes on
   the model's narrow end instead of the wide end, matching the C1 finding).
   Reproducing identically across two independent generation providers is
