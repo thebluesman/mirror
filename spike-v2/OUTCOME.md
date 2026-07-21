@@ -1,12 +1,107 @@
-# v2 Spike — Outcome (in progress)
+# v2 Spike — Outcome (closed)
 
 Tracks verdicts as `v2-spike-plan.md`'s workstreams complete. Started
-2026-07-21. Format follows `spike/OUTCOME*.md`.
+2026-07-21, closed 2026-07-22. Format follows `spike/OUTCOME*.md`. Detailed
+per-workstream sections follow below; this section is the roll-up per §10's
+deliverable spec ("per-workstream verdicts... recorded separately, so a
+mixed result stays legible") — read this first, drill into a section below
+for evidence/rationale on any one line.
+
+## Spike verdict summary — 2026-07-22
+
+**Net result: GO.** All three workstreams cleared their bar, one with a
+scope decision to make in PRD-v2 (deferred shell-texture ladder) and one
+piece of real follow-on build work already unblocked (the Hunyuan
+provider swap's actual code change). Nothing came back no-go.
+
+**W-A — Arrangement interaction: Go-with-constraints, upgraded post-C1.**
+- Move, collision/overlap, snapping, replace, and multi-layout are all
+  decision-grade (C1, D1-D3).
+- Rotate: keyboard-step was decision-grade at C1; the missing UI handle
+  (C1's one named gap) was built and hands-on-confirmed working
+  afterward (C1 follow-up, merged). Rough UI polish (grab-target sizing,
+  a 0deg/snap-angle affordance) explicitly deferred, not blocking.
+- **Open scope question for PRD-v2, not a bug:** no vertical placement axis
+  (floor-plane + yaw only, per plan §9's explicit exclusion). Surfaced at
+  C1 as a real want (lifting an item clear of a collision) — worth a
+  deliberate yes/no in PRD-v2, not a silent carry-forward.
+- **D0 (TV-not-showing): confirmed and closed.** Root cause was a fresh
+  import's default placement landing at the room origin with no wall
+  awareness, hiding the item in/outside a wall — exactly D0's gap-2
+  hypothesis. This is now a confirmed PRD-v2 acceptance criterion: default
+  placement for a newly-imported item must be visible/sane, not silently
+  at the origin.
+- **Bookshelf model defect** (cubby holes on the narrow end, no backboard)
+  is *not* an arrangement bug — confirmed at C1 and reconfirmed at C3
+  (reproduces identically on both Meshy and Hunyuan) as a bad source
+  photo. Needs a re-shoot, not code. Tracked as content debt, not scope.
+
+**W-B — Render quality: rug fixed and merged; shell textures deliberately
+deferred to v2 proper.**
+- Rug: the flat-textured-plane approach (bypassing mesh generation
+  entirely for this one item) passed C2 after three rounds — texture
+  quality, then orientation, then crop/padding — each a real, distinct bug
+  the photo-derived-texture approach surfaced and fixed. Merged (PR #11).
+  This also retroactively resolves the rug's bad-mesh caveat from C3 (W-C),
+  since the rug no longer depends on either generation provider at all.
+- Shell tiles (floor/wall/ceiling reading as obvious tiles): **not
+  attempted this spike** — Shyam's call (2026-07-22) is to carry this
+  ladder into the actual v2 build rather than spend spike time on it.
+  Recorded as a deliberate scope deferral, not a dropped finding: PRD-v2
+  should carry forward both candidate fixes from the original plan §2
+  (better CC0 source textures calibrated to Shyam's surface photos, or an
+  agent-driven pass on the photo-derived textures in `src/texturing/`).
+
+**W-C — Generation provider: Hunyuan3D adopted, ADR written, real build
+work still open.**
+- C3 verdict: Hunyuan wins significantly on quality (confirmed under the
+  app's own lighting, not a preview viewer — settles the spike's viewer-
+  flattery risk) *and* is cheaper (~$0.53-0.68/generation vs. Meshy's
+  ~$0.80). No tradeoff to weigh, which is why Shyam's follow-on call was
+  simple: full provider swap, no per-item/per-user model choice, no Meshy
+  fallback kept.
+- **ADR-0002** records this (amends, doesn't supersede, ADR-0001 — the
+  browser-direct/no-proxy architecture is unchanged, only which fal-hosted
+  model gets called). Journaled.
+- Multi-angle/multi-view test: inconclusive by its own admission — the
+  only real second angle available was a 3/4 front-right shot, no genuine
+  back/side photo, so it couldn't actually test Hunyuan's back-view
+  fidelity claim. Left open; would need deliberately-shot back/side photos
+  of a test item to answer for real, not urgent given the quality verdict
+  already landed decisively on other grounds.
+- **Not yet done, real work PRD-v2/the build phase should scope:** the
+  actual import-flow code (`src/import/falClient.ts`, `applyImport.ts`)
+  still calls Meshy's endpoint/schema. ADR-0002 is the decision; swapping
+  the literal endpoint URL and request/response field names
+  (`input_image_url` in, `model_glb.url` out, per D5's confirmed live
+  schema) is unblocked build work, not done here.
+
+**Carried-forward rough edges** (non-blocking, listed here for one-stop
+visibility — full detail in each workstream's own section below): no undo/
+history system (schema anticipates one, v2-proper territory per plan §9);
+collision/snap recompute cost is O(items) per pointermove, fine at the
+seed's ~13-item scale, worth revisiting at real-room scale; no layout-
+rename affordance (save-as-new only); wall AABBs don't subtract door/window
+openings (no current seed placement hits this); `applyFurnitureImport`'s
+default-placement-if-missing logic only ever checks `sceneFile.current`,
+untested against a non-default active layout.
+
+**What's next:** PRD-v2 drafting, per plan §9 ("no PRD-v2 drafting inside
+the spike — the spike ends in an OUTCOME doc; the PRD is the next
+conversation, shaped by it").
 
 ## D0 — TV-not-showing diagnosis
 
-**Status: cause hypothesized from code tracing, not yet confirmed against
-Shyam's actual project state (still needed — see plan §8.6).**
+**Status: confirmed and closed (Shyam, 2026-07-22).** The TV item was
+hidden in/outside the wall — matching gap 2 below exactly: a fresh import's
+default placement (`position: [0, 0, 0]`, no `elevationCm` accounting) put
+it at the room's origin corner with no regard for wall geometry, rather
+than anywhere near the actual TV wall. Confirms the working hypothesis
+without needing gap 1's "forced to `+ New item…`" duplicate-item theory —
+the placement gap alone fully explains "completed import, object not
+showing." Both gaps below remain real, and gap 2 in particular is now a
+confirmed (not just hypothesized) acceptance criterion for whichever v2
+placement/import code eventually replaces v1's default-placement path.
 
 Traced the import path end to end: `ImportPanel.tsx` → `applyImport.ts` →
 `buildScene.ts` → `Viewport.tsx`'s async GLB-load effect. The Phase 4
@@ -48,8 +143,7 @@ cause for v2") — D3 should treat both as acceptance criteria: replacing an
 already-imported item must not require `+ New item…`, and any new-item
 default placement should be visible/sane, not silently at the origin.
 
-**To confirm/close:** Shyam's project export (or the TV source photo, for a
-fresh repro) per plan §8.6 — still outstanding.
+**Closed** (2026-07-22) — see status line above. No longer outstanding.
 
 ## D1 — W-A core (selection, floor-plane drag, rotate)
 
