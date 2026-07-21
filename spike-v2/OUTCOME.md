@@ -572,9 +572,66 @@ holds up under an actual hand on the mouse, not just Playwright-driven
 evidence. UI polish (grab-target sizing, a 0deg/snap-angle affordance) is
 explicitly deferred, not blocking — merged as-is via PR #12.
 
-## D4 — not started
+## D4 — W-B: rug fix (flat textured plane)
 
-Blocked on Shyam's rug photo (D4's own input, separate from D5).
+**Status: built, C2-tested, one round-trip fix in progress (PR #11).** See
+PR #11 for the full build writeup (flat box + photo-derived top-face texture
+instead of a generated GLB, cover-fit via `flatItemTexture.ts`). Stale
+placeholder heading above corrected here — this actually ran in parallel
+with D5, not "not started."
+
+**C2 (Shyam, 2026-07-21): texture quality good, orientation wrong.** The
+photo-derived material itself reads well, but the rug's pattern doesn't run
+the way the physical rug does — traced to `computeCoverUV` assuming the
+source photo's orientation already matches the item's world footprint
+orientation, which doesn't hold for a portrait-shot photo against a
+landscape (`w=240` > `d=170`) footprint. Fix in progress on PR #11 (orientation
+detection + 90° texture rotation before the cover-fit math); C2 will need a
+second pass once that lands.
+
+## C3 — Checkpoint: Meshy vs. Hunyuan side-by-sides, 2026-07-22
+
+Shyam judged the `spike-v2/d5-contact-sheets/` side-by-sides in-app (real
+lighting, not a provider preview viewer).
+
+**Verdict: Hunyuan wins significantly.** Most items render at meaningfully
+higher quality than the Meshy equivalent. Two caveats, neither of which
+Shyam considers blocking for the overall call:
+
+- **Rug — bad on both providers.** The rug's mesh geometry itself is wrong
+  regardless of provider. This is expected to be moot once PR #11's flat-
+  textured-plane fix lands — that approach bypasses mesh generation for the
+  rug entirely (photo-derived flat texture instead), so once its orientation
+  bug is fixed the rug no longer depends on either provider's mesh output at
+  all.
+- **Bookshelf — same structural defect on both providers** (cubby holes on
+  the model's narrow end instead of the wide end, matching the C1 finding).
+  Reproducing identically across two independent generation providers is
+  strong evidence this is an **input-photo problem** (the source photo's
+  framing/angle), not something either provider mis-modeled — fixing it
+  needs a better source photo, not a provider swap.
+
+**Answering §2's three W-C questions**, per what C3 actually established
+vs. what's still open:
+- *(a) Is Hunyuan's edge real under app lighting, or viewer flattery?* —
+  **Real.** Judged inside the app's own renderer/lighting per OUTCOME-3's
+  rule, not a fal preview viewer. This settles the flattery concern the
+  plan called out.
+- *(b) Does multi-angle input materially help?* — **Inconclusive**, per D5's
+  own caveat: the only real second angle available for the table was a 3/4
+  front-right shot, no genuine back/side photo, so this test couldn't
+  actually probe Hunyuan's back-view fidelity claim, only whether a second
+  front-ish angle helps at all. Left open — would need real back/side
+  photos of a test item to answer properly.
+- *(c) Adoption cost* — answered by D5/R1: real spend confirmed at ~$0.53-0.68
+  per item (cheaper than Meshy's ~$0.80), browser-direct CORS path expected
+  to hold (same fal platform/client as Meshy, per R1 — not independently
+  re-verified beyond D5's successful live calls).
+
+**Next step, not yet done:** per `v2-spike-plan.md` §5, adopting Hunyuan
+requires a new ADR superseding/amending ADR-0001 before PRD-v2 assumes it —
+this verdict alone doesn't change what the app calls today. Flagged here so
+it doesn't get silently assumed.
 
 ## D5 — W-C: Meshy vs. Hunyuan generation comparison
 
