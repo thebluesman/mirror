@@ -443,7 +443,7 @@ also covers `applyFurnitureImport`'s silent no-op on a corrupted
       e.g. a note near the room/placement info, rather than silently going
       stale). *Agent: Sonnet — small, but the PRD assigns it and no phase owned
       it.*
-- [ ] Acceptance run: Shyam sets up his actual room shell, imports his actual
+- [x] Acceptance run: Shyam sets up his actual room shell, imports his actual
       furniture, judges against OUTCOME-3's "that's my room" bar. Fix-forward on
       whatever it surfaces. *Human-in-the-loop.*
 
@@ -489,8 +489,69 @@ in `seed/living-room.json` (`headHeightCm` set to a magnitude instead of an
 absolute elevation). Nothing left over from that run for her to pick up
 beyond the DESIGN.md check above.
 
-**Exit:** PRD §10 satisfied end to end; closing journal entry; v2 spike scoping
-becomes the next conversation.
+**Acceptance run resolved 2026-07-21:** Shyam ran the real flow end to end —
+his own room shell, his own furniture, all imported via the Import panel —
+and judged the result **"passable"** against OUTCOME-3's bar: good enough to
+close v1 on, with remaining polish deferred rather than blocking. Findings
+surfaced and fixed in this pass:
+
+- **Furniture facing/orientation wrong** (sofa, shoe rack; bookshelf
+  rendered squished/on its side) — traced to a real gap: v1 had no
+  mechanism to correct a Meshy GLB that comes out sideways/backwards
+  (`OUTCOME-3` hit this exact class of bug and worked around it offline;
+  v1's pipeline never carried a fix forward). Added an optional
+  `modelRotationDeg` field (schema + `fitModelToDims` + an `ImportPanel`
+  rotation picker) applied *before* the bounding-box rescale — the
+  **capability** is fixed and merged. Applying it to the sofa/shoe rack
+  themselves (re-running each through Import with a rotation correction)
+  is deliberately **not done** on Shyam's live project — his call, since
+  v2's arrangement work will likely reposition/rescale these items anyway,
+  making a fix now wasted effort. Revisit when v2 touches them.
+- **Re-import blocked for already-imported items** — `ImportPanel`'s item
+  picker filtered out anything with a `glbHash`, so a wrong source photo
+  (the water cooler) couldn't be fixed without a full delete/recreate path
+  that didn't exist either. Fixed: all items are now re-import targets,
+  with a distinct warning before replacing an already-imported one (a
+  `/code-review` pass on this fix caught and closed 5 more findings,
+  including a stale-rotation-carryover bug and a compound-sofa dims
+  corruption path — see `docs/journal/` for that pass's detail).
+- **Wall missing next to the water cooler** — root cause was *not* the
+  furniture (confirmed by re-importing the water cooler with a correct
+  photo, which didn't fix it). Live scene-graph inspection (a small
+  dev-only console hook added to `Viewport.tsx`) plus a follow-up Figma
+  MCP pass found the real cause: the open-kitchen alcove's walls were
+  hidden in Figma when the original G2 conversion ran (seed's own
+  `meta.changedSinceSpike3` already documented this) and were re-added to
+  Figma afterward without the seed being updated to match. Added
+  `kitchen-west-wall`/`kitchen-south-wall` to `seed/living-room.json`,
+  reflecting Figma nodes `40:100`/`40:102`. The kitchen room itself stays
+  out of scope for v1 (no floor/furniture, no pass-through opening) — only
+  the boundary wall was needed.
+- **Table lamp item lost** (deleted from Shyam's live project during
+  troubleshooting) — recovered without a second paid Meshy generation: OPFS
+  assets are content-addressed, so the original photo/GLB were still
+  sitting there orphaned; identified by upload timestamp and file-signature
+  sniffing, confirmed visually, then re-attached to a re-created item via a
+  direct IndexedDB patch.
+- **Shell texture quality** (wall/floor/ceiling photos look flat/poorly-lit)
+  — raised, deliberately **not** fixed: doing so with AI-cleaned/generated
+  textures would reopen the "texturing is local, only network call is
+  Meshy" standing decision, which Shyam chose not to revisit now. Logged as
+  a known v1 limitation.
+
+Two fixes (orientation correction, kitchen walls) landed as normal
+`v1/*` branch merges to `main`; the wall/lamp recoveries were direct,
+narrowly-scoped patches to Shyam's live browser data (IndexedDB/OPFS), not
+code changes, since his real project state — not the committed seed — was
+what needed correcting.
+
+**Exit:** PRD §10 satisfied — passable, not pixel-perfect, by Shyam's own
+judgment, with remaining polish (shell texture quality chief among it)
+explicitly deferred rather than silently accepted. **v1 is done.** Closing
+journal entry next; v2 spike scoping becomes the next conversation. Some
+Phase 5 follow-up work from realladygrey may still be in flight (per
+Shyam, reviewed separately/later) — this close-out doesn't presume it's in
+or out of what shipped.
 
 ## Standing orchestration mechanics
 
