@@ -208,6 +208,84 @@ module (single-image comparison, reusing the upload/extractGlbUrl helpers)
 plus a separate function for the multi-angle test, living in `spike-v2/`
 per §4 ("W-C is scripted"), not app code.
 
-## D2/D3/D4/D5 — not started
+## D2 — W-A rules: footprint collision flagging + wall/edge snapping
 
-Blocked on D1 (D2/D3) or R1 (D5), or on Shyam's inputs (D4's rug photo).
+**Status: built, evidence captured, awaiting C1 alongside D1/D3.** Branch:
+`v2/spike-arrange` (same branch as D1 — "after D1, same files" per the
+delegation map). Screenshots: `spike-v2/d2-screenshots/`, captured by
+`spike-v2/d2-collision-snap-drive.mjs` (a one-off Playwright driver, same
+shape as D1's `w-a-drive.mjs`).
+
+**What's there:**
+- **`src/scene/collision.ts`** — `itemFootprintAABB()` (world-space AABB for
+  a placed item, unioning compound-sofa sub-footprints), `wallFootprintAABBs()`
+  (one AABB per wall run, at `buildScene.ts`'s `WALL_THICKNESS`), and
+  `checkCollisions()` (item-vs-item and item-vs-wall AABB overlap). Pure,
+  framework-free functions — same shape as `src/texturing/tileable.ts` — so
+  Viewport.tsx's per-pointermove drag handler can call them with no THREE
+  overhead. Deliberately AABB, not true oriented-rectangle SAT: "footprint-
+  rectangle detection is enough ... decision support, not physics" per
+  v2-spike-plan.md §2. Exact at the 0/90/180/270deg placements the seed and
+  Figma conversion use; only ever over-flags (never under-flags) at W-A's
+  in-between 15deg rotate steps.
+- **`src/scene/snapping.ts`** — `snapPosition()`, independent per-axis
+  snapping against wall/item AABB edges (abut or edge-align, whichever's
+  closest within an 8cm threshold). Axis-aligned math is exact for the
+  axis-aligned walls `buildScene.ts` draws.
+- **Viewport.tsx wiring**: `onPointerMove`'s drag handler snaps the
+  candidate position (unless Shift is held — the plan's "must be escapable"
+  bar) before committing it live to the group, then recolors the selection
+  outline red via a new `updateCollisionHighlight()` helper if the item's
+  footprint now overlaps another item or a wall. The same helper fires on
+  keyboard rotate, on first selecting an already-overlapping item, and when
+  a committed layout change moves some *other* item the selection depends
+  on — so the highlight never lags behind what's actually on screen. Per
+  the plan's "decision support, not physics" framing, nothing is blocked —
+  overlapping placements are flagged, not prevented.
+- **Known simplification, flagged not hidden**: wall AABBs don't subtract
+  door/window openings — a furniture item positioned inside a doorway's
+  clear width reads as a wall collision even though the render shows an
+  open gap there. No current seed placement puts an item in a doorway;
+  reusing `addWall`'s segment-cutting logic just for this check risked
+  drifting from the renderer's own geometry for a case nothing hits yet.
+
+**Tests**: `src/scene/collision.test.ts` and `src/scene/snapping.test.ts` —
+AABB math (axis-aligned exactness, off-axis over-estimation, compound-sofa
+union, wall-run AABBs, overlap/no-overlap/flush-touching) and snap math
+(wall abutment, item-to-item edge alignment, independent x/z, no-snap
+outside threshold). `npx vitest run` — 75 tests, all passing (60 pre-
+existing + 15 new). `npx tsc -b`, `npm run build`, and `oxlint` all clean.
+
+**Evidence** (`d2-collision-snap-drive.mjs`, against a running dev server
+and the real seed): dragging `water-cooler` onto `billy-hogadal-shelving`
+recolors the selection outline red on overlap
+(`1-item-collision-mid-drag.png`). Dragging `floor-lamp` (28cm wide,
+seed position x=492) toward the west wall (inner face at x=479, so a flush
+placement centers it at x=493) from a raw drag target of x=498 pulls it to
+x=496 — visibly snapped closer to the wall than the raw cursor target,
+outline cyan (not yet overlapping) — while the same drag held with Shift
+lands at x=498.000004, matching the raw target with no adjustment,
+confirming the escape hatch. (The snapped result landed a few cm short of
+the hand-computed ideal of 493 — traced to the evidence script's synthetic
+pixel-rounded mouse path, not the app's snap math itself, which the unit
+tests exercise exactly; the qualitative result — snap-enabled pulls toward
+the wall, Shift-held doesn't move at all from the raw target — is what
+matters here and holds cleanly.)
+
+**Rough edges found (surfacing per §6, not hiding them):**
+- Framing a Playwright evidence shot for this feature turned out to be its
+  own small trap: a shallow waist-height camera let other, taller furniture
+  sitting between the camera and a drag target block the click raycast
+  entirely (the first evidence attempt's "collision" screenshot turned out
+  to be a much bigger neighboring item the ray had hit first, not the
+  intended target) — worth remembering for D3's own evidence capture.
+- Collision/snap targets are recomputed by walking every other placed
+  item's live group every pointermove (`built.furnitureGroups`) — fine at
+  the seed's ~13-item scale, but an obvious spot to revisit if D3's
+  multi-layout work or a larger real room makes per-move cost noticeable.
+
+## D3/D4/D5 — not started
+
+D3 (W-A persistence: named layouts + replace) is next, same branch/files as
+D1/D2 per the delegation map. D4/D5 remain blocked on Shyam's inputs (D4's
+rug photo; D5's FAL_KEY plus item/multi-angle photos).

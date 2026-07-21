@@ -6,20 +6,23 @@ import { addFurnitureBoxMeshes, buildScene, furnitureOverallDims, type BuiltScen
 import { applyShellSurface, updateSurfaceCalibrationInPlace, type ShellSurface } from "../scene/shellMaterials";
 import { loadShellTexture } from "../scene/loadShellTexture";
 import { fitModelToDims, loadFurnitureModel } from "../scene/loadFurnitureModel";
+import { checkCollisions, itemFootprintAABB, wallFootprintAABBs, type AABB } from "../scene/collision";
+import { snapPosition } from "../scene/snapping";
 import {
   DEFAULT_SURFACE_CALIBRATION,
   type CameraPosition,
   type ShellCalibration,
   type SurfaceCalibration,
 } from "../schema/scene";
-import type { SceneFile } from "../scene/types";
+import type { FurnitureItem, SceneFile } from "../scene/types";
 import "./Viewport.css";
 
 // v2 spike (W-A, `v2/spike-arrange` — see spike-v2/OUTCOME.md): move + rotate
 // + selection for a placed item, prototyped directly in the real viewport
 // per v2-spike-plan.md §4. Spike-quality: the seam below is the thing being
-// evaluated, not a finished feature (no collision/snap — D2 — or named
-// layouts/replace — D3).
+// evaluated, not a finished feature. D1 built move/rotate/select; D2 (this
+// pass) adds footprint collision flagging + wall/edge snapping on top of the
+// same seam; named layouts/replace (D3) still isn't here.
 
 /** Imperative handle for Phase 5's named-viewpoint save/recall (ViewportChrome
  *  drives this) — the live camera/controls only exist inside this component's
@@ -68,6 +71,10 @@ const MAX_POLAR_ANGLE = Math.PI - 0.1;
 // ever wants an in-between angle.
 const ROTATE_STEP_DEG = 15;
 const SELECTION_COLOR = 0x4fd1ff;
+// D2: the selection outline recolors to this when the selected item's
+// footprint currently overlaps another item or a wall — the plan's
+// "decision support, not physics" bar means we flag, we don't block.
+const COLLISION_COLOR = 0xff5c5c;
 
 export const Viewport = forwardRef<
   ViewportHandle,
@@ -105,6 +112,44 @@ export const Viewport = forwardRef<
   const selectedItemIdRef = useRef<string | null>(null);
   selectedItemIdRef.current = selectedItemId;
   const selectionHelperRef = useRef<THREE.BoxHelper | null>(null);
+
+  // D2: wall AABBs and the item-id -> definition lookup only change when a
+  // structural rebuild happens (room/items are structuralSceneFile deps), so
+  // they're computed once per build and read from every drag/rotate/select
+  // collision check rather than recomputed per pointer event.
+  const wallAABBsRef = useRef<AABB[]>([]);
+  const itemsByIdRef = useRef<Map<string, FurnitureItem>>(new Map());
+
+  // D2: recolors the selection outline to flag footprint overlap — called
+  // after any live mutation (drag move, rotate step, a committed layout
+  // change affecting the selected item, or first selecting an already-
+  // overlapping item) so the highlight never lags behind what's on screen.
+  function updateCollisionHighlight(itemId: string, group: THREE.Group) {
+    const helper = selectionHelperRef.current;
+    const item = itemsByIdRef.current.get(itemId);
+    const built = builtRef.current;
+    if (!helper || !item || !built) return;
+    const rotationDeg = ((THREE.MathUtils.radToDeg(group.rotation.y) % 360) + 360) % 360;
+    const aabb = itemFootprintAABB(item, [group.position.x, group.position.y, group.position.z], rotationDeg);
+    const others: Array<{ itemId: string; aabb: AABB }> = [];
+    built.furnitureGroups.forEach((otherGroup, otherId) => {
+      if (otherId === itemId) return;
+      const otherItem = itemsByIdRef.current.get(otherId);
+      if (!otherItem) return;
+      const otherRotationDeg = ((THREE.MathUtils.radToDeg(otherGroup.rotation.y) % 360) + 360) % 360;
+      others.push({
+        itemId: otherId,
+        aabb: itemFootprintAABB(
+          otherItem,
+          [otherGroup.position.x, otherGroup.position.y, otherGroup.position.z],
+          otherRotationDeg,
+        ),
+      });
+    });
+    const { itemIds, wall } = checkCollisions(aabb, others, wallAABBsRef.current);
+    const colliding = itemIds.length > 0 || wall;
+    (helper.material as THREE.LineBasicMaterial).color.set(colliding ? COLLISION_COLOR : SELECTION_COLOR);
+  }
 
   // Per-surface tracking for the calibration effect below: the last
   // calibration actually applied (so it can diff and skip no-op work) and
@@ -189,6 +234,11 @@ export const Viewport = forwardRef<
     // treat this as a first-ever apply for all three surfaces.
     lastAppliedCalibRef.current = {};
     appliedTexturesRef.current = {};
+    // D2: wall geometry and item definitions are structural too — recomputed
+    // here alongside `built` so a collision check during this build's
+    // lifetime never reads stale walls/items from a previous room.
+    wallAABBsRef.current = wallFootprintAABBs(structuralSceneFile.room);
+    itemsByIdRef.current = new Map(structuralSceneFile.items.map((item) => [item.id, item]));
 
     // Phase 4: items with a completed Meshy import get their real GLB loaded
     // and fit into the placeholder group buildScene already positioned —
@@ -336,8 +386,44 @@ export const Viewport = forwardRef<
       setPointerNdcFromEvent(evt);
       raycaster.setFromCamera(pointerNdc, camera);
       if (!raycaster.ray.intersectPlane(dragPlane, planeHit)) return; // camera edge case: ray parallel to the plane
-      drag.group.position.x = planeHit.x + grabOffset.x;
-      drag.group.position.z = planeHit.z + grabOffset.z;
+      const { group, itemId } = drag;
+      const rawX = planeHit.x + grabOffset.x;
+      const rawZ = planeHit.z + grabOffset.z;
+      const item = itemsByIdRef.current.get(itemId);
+
+      // D2: snap the candidate position against walls/other items unless the
+      // gesture is holding Shift — the plan's "must be escapable (hold-to-
+      // disable)" bar. Snap uses the same AABB the collision check below
+      // does, so a snapped-flush placement doesn't immediately re-flag as
+      // colliding with the very wall/item it just snapped to (collision.ts's
+      // EPSILON exists for exactly that).
+      let x = rawX;
+      let z = rawZ;
+      if (item && !evt.shiftKey) {
+        const rotationDeg = ((THREE.MathUtils.radToDeg(group.rotation.y) % 360) + 360) % 360;
+        const rawAABB = itemFootprintAABB(item, [rawX, group.position.y, rawZ], rotationDeg);
+        const others: AABB[] = [];
+        builtRef.current?.furnitureGroups.forEach((otherGroup, otherId) => {
+          if (otherId === itemId) return;
+          const otherItem = itemsByIdRef.current.get(otherId);
+          if (!otherItem) return;
+          const otherRotationDeg = ((THREE.MathUtils.radToDeg(otherGroup.rotation.y) % 360) + 360) % 360;
+          others.push(
+            itemFootprintAABB(
+              otherItem,
+              [otherGroup.position.x, otherGroup.position.y, otherGroup.position.z],
+              otherRotationDeg,
+            ),
+          );
+        });
+        const snapped = snapPosition(rawAABB, [rawX, group.position.y, rawZ], wallAABBsRef.current, others);
+        x = snapped.position[0];
+        z = snapped.position[2];
+      }
+
+      group.position.x = x;
+      group.position.z = z;
+      updateCollisionHighlight(itemId, group);
     }
 
     function onPointerUp(evt: PointerEvent) {
@@ -381,6 +467,7 @@ export const Viewport = forwardRef<
       evt.preventDefault();
       group.rotation.y += THREE.MathUtils.degToRad(stepDeg);
       const rotationDeg = normalizeDeg(THREE.MathUtils.radToDeg(group.rotation.y));
+      updateCollisionHighlight(itemId, group);
       onCommitPlacementRef.current?.(itemId, [group.position.x, group.position.y, group.position.z], rotationDeg);
     }
 
@@ -589,6 +676,14 @@ export const Viewport = forwardRef<
       group.rotation.y = THREE.MathUtils.degToRad(cmd.rotationDeg);
     });
     selectionHelperRef.current?.update(); // outline may now be stale (item moved) — resync its AABB too
+    // D2: any layout change can move the *other* items a selected one's
+    // collision state depends on (not just the selected item itself), so
+    // re-derive the highlight here too rather than only from this
+    // component's own drag/rotate handlers.
+    if (selectedItemIdRef.current) {
+      const group = built.furnitureGroups.get(selectedItemIdRef.current);
+      if (group) updateCollisionHighlight(selectedItemIdRef.current, group);
+    }
   }, [sceneFile.layouts, sceneFile.current, buildVersion]);
 
   // v2 spike (W-A) — selection-outline lifecycle: a THREE.BoxHelper
@@ -628,6 +723,10 @@ export const Viewport = forwardRef<
     helper.renderOrder = 999;
     built.scene.add(helper);
     selectionHelperRef.current = helper;
+    // D2: color the outline correctly from the moment of selection — an
+    // item that's already overlapping something shouldn't need a drag
+    // before the flag shows up.
+    updateCollisionHighlight(selectedItemId, group);
   }, [selectedItemId, buildVersion]);
 
   return <div ref={containerRef} className="viewport" />;
