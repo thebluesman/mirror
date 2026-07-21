@@ -400,6 +400,29 @@ also covers `applyFurnitureImport`'s silent no-op on a corrupted
       furniture, judges against OUTCOME-3's "that's my room" bar. Fix-forward on
       whatever it surfaces. *Human-in-the-loop.*
 
+**Handoff note (2026-07-21):** realladygrey picking this phase up fresh.
+Branch off `main` as `v1/polish` (worktree), same `HANDOFF.md`-if-interrupted
+and `/code-review`-before-merge discipline as prior phases. Beyond the three
+checklist items above, fold in two things that surfaced during Shyam's
+Phase 4 acceptance run (see that phase's "Exit criterion resolved" note) —
+neither was on Phase 5's original checklist, but both will visibly affect
+the acceptance run's "that's my room" judgment, so worth doing alongside or
+before the checklist items rather than leaving for a later pass:
+
+- **Seed/render geometry check.** Sofa position relative to the floor lamp
+  (in the corner) and the bedroom door looks off, and the west-wall window
+  nearer the corner reads as the wrong size. The sofa symptom likely
+  overlaps the already-flagged compound-sofa chaise-offset bug above (~38%
+  too-wide bounding box) — check that fix resolves it before assuming a
+  separate cause. The floor-lamp/door and window-size reports are new and
+  unconfirmed; look at `seed/living-room.json` and `buildScene.ts`'s
+  window-opening math.
+- **DESIGN.md/Cohere fidelity check.** The app doesn't read as strongly
+  "Cohere" yet per Shyam. Likely just current-stage minimalism — item #1
+  above (viewport chrome, control bar, pill buttons) is exactly the work
+  that should resolve or clarify this — but treat it as a deliberate
+  check against `DESIGN.md` once that chrome lands, not an assumed non-issue.
+
 **Exit:** PRD §10 satisfied end to end; closing journal entry; v2 spike scoping
 becomes the next conversation.
 
