@@ -567,6 +567,11 @@ server and the real seed):
   that needs Shyam's own hand on the mouse, same as C1's original bar. Recorded
   here so that's an explicit next step, not an assumed pass.
 
+**Hands-on verdict (Shyam, 2026-07-21): works.** Confirms the mechanism
+holds up under an actual hand on the mouse, not just Playwright-driven
+evidence. UI polish (grab-target sizing, a 0deg/snap-angle affordance) is
+explicitly deferred, not blocking — merged as-is via PR #12.
+
 ## D4/D5 — not started
 
 Blocked on Shyam's inputs (D4's rug photo; D5's FAL_KEY plus item/
