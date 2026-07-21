@@ -1,0 +1,282 @@
+[browser console error] Failed to load resource: the server responded with a status of 404 (Not Found)
+captured 0-initial.png
+captured 0b-selected.png (selection outline, before any drag movement)
+captured 1-mid-drag.png (item mid-drag, before release)
+captured 2-after-drop.png (after commit)
+captured 3-after-rotate.png (two 15deg steps = 30deg)
+persisted commands (post drag+rotate, pre-reload): [
+  {
+    "type": "place",
+    "itemId": "swivel-chair",
+    "position": [
+      618.527129117522,
+      0,
+      464.65668552061254
+    ],
+    "rotationDeg": 30,
+    "note": "NW corner by TV wall; backrest toward the corner, open front facing SE into the room. rotationDeg not meaningful yet (circular footprint, no facing convention defined) — orientation is qualitative until Phase 4 calibration."
+  },
+  {
+    "type": "place",
+    "itemId": "tv-stand",
+    "position": [
+      683,
+      0,
+      343.5
+    ],
+    "rotationDeg": 0
+  },
+  {
+    "type": "place",
+    "itemId": "tv-samsung-frame",
+    "position": [
+      683,
+      70,
+      324.5
+    ],
+    "rotationDeg": 0
+  },
+  {
+    "type": "place",
+    "itemId": "billy-hogadal-shelving",
+    "position": [
+      1009,
+      0,
+      339
+    ],
+    "rotationDeg": 0
+  },
+  {
+    "type": "place",
+    "itemId": "water-cooler",
+    "position": [
+      1113,
+      0,
+      339
+    ],
+    "rotationDeg": 0
+  },
+  {
+    "type": "place",
+    "itemId": "dining-table",
+    "position": [
+      1009,
+      0,
+      453.5
+    ],
+    "rotationDeg": 90,
+    "note": "rotated 90deg since spike 3; intrinsic dims unchanged (153x92)"
+  },
+  {
+    "type": "place",
+    "itemId": "sonderod-rug",
+    "position": [
+      683,
+      0,
+      540
+    ],
+    "rotationDeg": 0
+  },
+  {
+    "type": "place",
+    "itemId": "coffee-table",
+    "position": [
+      713,
+      0,
+      561.5
+    ],
+    "rotationDeg": 0
+  },
+  {
+    "type": "place",
+    "itemId": "applaryd-sofa",
+    "position": [
+      655,
+      0,
+      655.5
+    ],
+    "rotationDeg": 0,
+    "note": "corrected main body center: Figma's drawn main rect (x510 z609 322x93) has its west edge at x510, shared with the chaise's own drawn west edge - shrinking main.w from the drawn 322 to the real 290 while preserving that shared west edge moves the center from 671 to 655 (671 - (322-290)/2). Confirmed against Figma: chaise sits 36cm from the west wall (x510 - x474)."
+  },
+  {
+    "type": "place",
+    "itemId": "bookshelf",
+    "position": [
+      897,
+      0,
+      425.75
+    ],
+    "rotationDeg": 0
+  },
+  {
+    "type": "place",
+    "itemId": "shoe-rack",
+    "position": [
+      1103.5,
+      0,
+      687.5
+    ],
+    "rotationDeg": 0
+  },
+  {
+    "type": "place",
+    "itemId": "floor-lamp",
+    "position": [
+      492,
+      0,
+      684
+    ],
+    "rotationDeg": 0,
+    "note": "by the sofa's west end"
+  },
+  {
+    "type": "place",
+    "itemId": "table-lamp",
+    "position": [
+      896.5,
+      72,
+      375.5
+    ],
+    "rotationDeg": 0,
+    "note": "elevationCm 72 = resting on top of the horizontal bookshelf"
+  }
+]
+captured 4-after-reload.png (evidence of persistence)
+persisted commands (post reload): [
+  {
+    "type": "place",
+    "itemId": "swivel-chair",
+    "position": [
+      618.527129117522,
+      0,
+      464.65668552061254
+    ],
+    "rotationDeg": 30,
+    "note": "NW corner by TV wall; backrest toward the corner, open front facing SE into the room. rotationDeg not meaningful yet (circular footprint, no facing convention defined) — orientation is qualitative until Phase 4 calibration."
+  },
+  {
+    "type": "place",
+    "itemId": "tv-stand",
+    "position": [
+      683,
+      0,
+      343.5
+    ],
+    "rotationDeg": 0
+  },
+  {
+    "type": "place",
+    "itemId": "tv-samsung-frame",
+    "position": [
+      683,
+      70,
+      324.5
+    ],
+    "rotationDeg": 0
+  },
+  {
+    "type": "place",
+    "itemId": "billy-hogadal-shelving",
+    "position": [
+      1009,
+      0,
+      339
+    ],
+    "rotationDeg": 0
+  },
+  {
+    "type": "place",
+    "itemId": "water-cooler",
+    "position": [
+      1113,
+      0,
+      339
+    ],
+    "rotationDeg": 0
+  },
+  {
+    "type": "place",
+    "itemId": "dining-table",
+    "position": [
+      1009,
+      0,
+      453.5
+    ],
+    "rotationDeg": 90,
+    "note": "rotated 90deg since spike 3; intrinsic dims unchanged (153x92)"
+  },
+  {
+    "type": "place",
+    "itemId": "sonderod-rug",
+    "position": [
+      683,
+      0,
+      540
+    ],
+    "rotationDeg": 0
+  },
+  {
+    "type": "place",
+    "itemId": "coffee-table",
+    "position": [
+      713,
+      0,
+      561.5
+    ],
+    "rotationDeg": 0
+  },
+  {
+    "type": "place",
+    "itemId": "applaryd-sofa",
+    "position": [
+      655,
+      0,
+      655.5
+    ],
+    "rotationDeg": 0,
+    "note": "corrected main body center: Figma's drawn main rect (x510 z609 322x93) has its west edge at x510, shared with the chaise's own drawn west edge - shrinking main.w from the drawn 322 to the real 290 while preserving that shared west edge moves the center from 671 to 655 (671 - (322-290)/2). Confirmed against Figma: chaise sits 36cm from the west wall (x510 - x474)."
+  },
+  {
+    "type": "place",
+    "itemId": "bookshelf",
+    "position": [
+      897,
+      0,
+      425.75
+    ],
+    "rotationDeg": 0
+  },
+  {
+    "type": "place",
+    "itemId": "shoe-rack",
+    "position": [
+      1103.5,
+      0,
+      687.5
+    ],
+    "rotationDeg": 0
+  },
+  {
+    "type": "place",
+    "itemId": "floor-lamp",
+    "position": [
+      492,
+      0,
+      684
+    ],
+    "rotationDeg": 0,
+    "note": "by the sofa's west end"
+  },
+  {
+    "type": "place",
+    "itemId": "table-lamp",
+    "position": [
+      896.5,
+      72,
+      375.5
+    ],
+    "rotationDeg": 0,
+    "note": "elevationCm 72 = resting on top of the horizontal bookshelf"
+  }
+]
+PERSISTENCE OK: pre-reload and post-reload commands match

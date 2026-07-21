@@ -589,6 +589,16 @@ export const Viewport = forwardRef<
     if (!group) return;
     const helper = new THREE.BoxHelper(group, SELECTION_COLOR);
     helper.raycast = () => {};
+    // The helper's wireframe sits exactly on the wrapped item's own surface —
+    // same depth as the mesh it outlines, which z-fights and mostly loses
+    // against a filled box/GLB mesh (found while capturing W-A evidence: the
+    // outline was computed correctly but essentially invisible on screen).
+    // Rendering it depth-test-disabled and after everything else (a fixed,
+    // late renderOrder) is the standard "always-on-top overlay" fix for
+    // exactly this — cheap, and correct for a selection indicator, which
+    // should never be occluded by the thing it's pointing at.
+    (helper.material as THREE.LineBasicMaterial).depthTest = false;
+    helper.renderOrder = 999;
     built.scene.add(helper);
     selectionHelperRef.current = helper;
   }, [selectedItemId, buildVersion]);
