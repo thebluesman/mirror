@@ -189,7 +189,7 @@ instead of the static file.
 
 ### Phase 3 — Shell texturing flow (`v1/texturing`, parallel with 2)
 
-- [ ] **Reimplement** (not port) `spike/textures/`'s tileable-texture pipeline
+- [x] **Reimplement** (not port) `spike/textures/`'s tileable-texture pipeline
       in-browser (local, no network). Scoped honestly: `make-tileable.mjs` is
       built on **sharp**, a native Node library that cannot run in a browser —
       the quadrant-swap + cross-fade logic must be rewritten on Canvas/
@@ -199,11 +199,49 @@ instead of the static file.
       against Phase 1's viewport component. The *algorithms* are proven; the
       *code* is not reusable as-is. *Agent: Sonnet; Opus only if the rewrite hits
       real architectural friction.*
-- [ ] Upload UI (wall/floor/ceiling photos) + calibration panel — tint/repeat
+- [x] Upload UI (wall/floor/ceiling photos) + calibration panel — tint/repeat
       sliders replacing the spike's hand-edited `calibration.json` (PRD §7.2).
       Upload/processing states designed ad-hoc from `DESIGN.md` tokens; flag to
       Shyam for a Figma pass only if the ad-hoc version isn't good enough.
       *Agent: Sonnet.*
+
+**Resolved 2026-07-21:** `src/texturing/tileable.ts` reimplements the spike's
+quadrant-swap + cross-fade algorithm over plain RGBA buffers (Node-testable,
+framework-free); `src/texturing/pipeline.ts` wraps it for the browser
+(OffscreenCanvas/ImageBitmap, photo → center-crop → tileable → JPEG blob).
+`src/scene/shellMaterials.ts` + `loadShellTexture.ts` reimplement
+`shell-textures.mjs`'s calibration math (tint/repeat/roughness) directly
+against `buildScene.ts`'s own material objects — no structural mesh-finding
+needed since this is owned app code, not the spike's file-ownership-
+constrained target. `src/schema/scene.ts` gained an additive
+`room.shell.{wall,floor,ceiling}` calibration shape (no version bump
+needed). `src/components/ShellPanel.tsx` is the upload + tint/repeat/
+roughness slider UI, wired into `App.tsx` and persisted through Phase 2's
+OPFS asset store + IndexedDB autosave. Also closed both Phase 1/2
+code-review deferrals assigned here: `buildScene.ts`'s door/window branches
+now honor `headHeightCm`/`sillHeightCm` instead of hardcoded 210/208, and
+floor/ceiling got `THREE.DoubleSide` + `OrbitControls` polar-angle clamping.
+Verified in-browser via Playwright with Shyam's real surface photos: 0
+console errors, textures apply live, calibration survives reload.
+
+**`/code-review` pass, 2026-07-21:** 8 findings (7 CONFIRMED, 1 PLAUSIBLE),
+all fixed and re-verified on the phase branch before merge — `zipExport.ts`'s
+`referencedHashes()` was missing `room.shell.*.assetHash` (exported zips
+silently dropped shell textures); `Viewport.tsx`'s calibration effect could
+flicker a surface black (texture disposed without nulling `material.map`
+when effect runs overlapped) and leaked one `ImageBitmap` per surface per
+change (never `.close()`d on the success path) — both traced to a root
+cause also fixed: no debounce on calibration sliders, so any single-surface
+tweak reloaded and reprocessed all three surfaces; three `buildScene.ts`
+door/opening edge cases (`sillHeightCm > 0` leaving a see-through gap under
+doors, unclamped `headHeightCm >= wallHeight` producing degenerate
+lintel geometry, and a `headHeightCm - sillHeightCm <= 2` gap silently
+deleting the door leaf — the last two now guarded in `addSegment` and via a
+new `WallOpeningSchema` `.refine()` respectively); and a latent regression
+where splitting the build effect from the calibration effect had frozen
+`Viewport.tsx`'s structural rebuild to mount-only (fixed via a
+`useMemo`'d structural-fields comparison, restoring the original
+`[sceneFile]`-reactive guarantee for any future non-shell scene change).
 
 **Exit:** shell textured from Shyam's photos entirely in-app, calibrated via
 sliders, persisted (rebase onto Phase 2's store at merge).
