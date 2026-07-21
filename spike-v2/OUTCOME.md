@@ -450,6 +450,123 @@ the selected item (alongside the existing keyboard step) — scoped and
 tracked as its own build pass on top of `main` post-#10; see the PR for
 implementation and evidence once it lands.
 
+## C1 follow-up — rotate UI handle
+
+**Status: built, evidence captured.** Branch: `v2/spike-arrange-rotate-handle`
+(off `main` post-C1). Screenshots:
+`spike-v2/d1-followup-rotate-handle-screenshots/`, captured by
+`spike-v2/d1-followup-rotate-handle-drive.mjs` (same one-off-Playwright-driver
+shape as D1/D2/D3's evidence scripts).
+
+**What's there:**
+- **The handle itself**: a small sphere, offset along the selected item's
+  local +Z from its center (`ROTATE_HANDLE_MARGIN_CM = 25` beyond the item's
+  own half-depth), reusing `SELECTION_COLOR` so it reads as part of the same
+  selection affordance as the existing outline, not a new unrelated UI
+  element. Shares the outline's depth-test-disabled/late-`renderOrder`
+  overlay treatment, for the same reason: a selection control should never be
+  occluded by the furniture it's attached to, and that overlay treatment
+  doubles as making it a reliable click target. Created/destroyed alongside
+  `selectionHelperRef`'s `THREE.BoxHelper` in the same lifecycle effect.
+- **The math**: `src/scene/rotateHandle.ts` — two pure, framework-free
+  functions (`yawDegFromPointer`, `rotateHandleWorldXZ`), same "pure
+  algorithm, no THREE dependency" shape as `collision.ts`/`snapping.ts`.
+  `yawDegFromPointer` takes the item's center and the pointer's current
+  floor-plane hit and returns the yaw that points the item's local +Z (where
+  the handle rests at yaw 0) at the pointer — direction only, independent of
+  distance from center, so it's exactly what a rotate-drag sets
+  `group.rotation.y` to on every `pointermove`. `rotateHandleWorldXZ` is its
+  inverse (used to position the handle itself). Both verified against the
+  same `THREE.Object3D.rotation.y` convention D2's `itemFootprintAABB` fix
+  pinned down, and round-trip-tested against each other.
+- **Not parented under the item's group.** The handle's world position is
+  recomputed from the group's live position/rotation at three points: its own
+  creation, the placement-reconciliation effect (a committed layout change
+  from outside this component's own drag code, e.g. a future undo), and
+  every `animate()` frame (so a live translate-drag, rotate-drag, or keyboard
+  step all keep it glued to the item with no extra bookkeeping). Mirrors why
+  the selection outline isn't parented either — a translate-drag mutates
+  `group.position` directly, and re-deriving the handle's world (x, z) from
+  that every frame is simpler than fighting THREE's parent-transform update
+  timing for a value only ever read, never authored, by the handle itself.
+- **Its own raycast target.** `onPointerDown` checks the handle mesh in
+  isolation, first, before the general `scene.children` walk that decides
+  between "clicked the selected item" (start a translate-drag) and "clicked
+  empty space" (deselect). A hit here starts a `rotateDrag` gesture and
+  returns immediately, so clicking the handle can never be read as a
+  translate-drag on the item it's attached to — the two gestures
+  (`drag`/`rotateDrag`) are mutually exclusive per pointer-down, same
+  "gesture owns the pointer, controls are disabled" treatment translate
+  already uses.
+- **Same seam, same commit path.** Dragging the handle mutates
+  `group.rotation.y` live (mutate-during-gesture) via `onPointerMove`'s new
+  `rotateDrag` branch — a floor-plane raycast at the item's height, exactly
+  like translate-drag's `dragPlane` technique, feeding `yawDegFromPointer`
+  instead of a position delta. `updateCollisionHighlight()` fires on every
+  move, same as translate-drag and keyboard-rotate already do. On
+  pointer-up/pointer-cancel/mid-drag structural rebuild, `commitRotateDrag()`
+  fires through the identical `onCommitPlacementRef` path move and
+  keyboard-step rotate use, normalizing degrees the same way (`normalizeDeg`)
+  — no new commit machinery.
+- **Keyboard step untouched** — `ROTATE_STEP_DEG`, `onKeyDown`, and its
+  `evt.repeat` guard are unchanged; the handle is additive.
+
+**Tests**: `src/scene/rotateHandle.test.ts` — the four cardinal directions
+(0/90/180/270deg), distance-independence (only direction matters), a
+non-origin center, and a round-trip through both functions for an arbitrary
+yaw/center/offset. `npx vitest run` — 91 tests, all passing (82 pre-existing +
+9 new in `rotateHandle.test.ts`). `npx tsc -b`, `npm run build`, and
+`oxlint src/` all clean.
+
+**Evidence** (`d1-followup-rotate-handle-drive.mjs`, against a running dev
+server and the real seed):
+- Selecting `shoe-rack` shows the cyan handle sphere appear next to it
+  (`1-selected-handle-visible.png`); dragging it toward a +40deg target
+  screenshots mid-drag with the item visibly rotated partway
+  (`2-mid-drag-40deg.png`) and after release at 38.97deg — within tolerance
+  of the 40deg drag target, the small gap being the synthetic mouse path's
+  step count rather than the rotation math itself
+  (`3-after-release.png`). A page reload confirms the commit persisted
+  (`PERSISTENCE OK`), same discipline D1 used for translate/keyboard-rotate.
+- A keyboard-step regression check (`e` key) still steps exactly 15deg after
+  the handle code landed (`KEYBOARD ROTATE OK`), confirming the two rotate
+  paths don't interfere.
+- Dragging `water-cooler`'s handle toward the neighboring
+  `billy-hogadal-shelving` (7cm apart at rest, close enough that any
+  noticeable yaw swings a footprint corner into it) recolors the selection
+  outline red mid-drag (`4-collision-mid-handle-drag.png`), confirming
+  `updateCollisionHighlight()` stays live during a handle-drag exactly as it
+  does for translate-drag and keyboard-rotate.
+
+**Rough edges found (surfacing per plan §6's discipline, not hiding them):**
+- **No visual rotation gradient/ring** — the handle is a plain sphere with no
+  indication of "which way is 0deg" or a snapping ring at 15deg increments
+  (the keyboard step's granularity). Free-angle drag and 15deg-stepped
+  keyboard rotate can now disagree by a few degrees if used interleaved on
+  the same item — not a bug (both commit through the same path, and
+  `normalizeDeg` keeps values sane), but a real inconsistency in how precise
+  each control is. Worth deciding, if this becomes real UI, whether the
+  handle should snap to the same 15deg steps or stay free-angle.
+- **Handle grab target is small and floats in open space** — 6cm-radius
+  sphere with no camera-relative size compensation (a far-zoomed-out view
+  makes it a tiny screen-space target; very close-up it can dominate the
+  frame). The depth-test-disabled overlay treatment means it's always
+  clickable regardless of occlusion by nearer geometry, which is consistent
+  but also means it can be clicked "through" furniture that visually should
+  be in front of it — acceptable for a selection affordance, worth a second
+  look before a real build.
+- **No visible drag affordance until already dragging** — same gap D1 flagged
+  for translate-drag (no cursor change, no hover highlight on the handle
+  itself before pointerdown) — inherited, not newly introduced, but now
+  applies to a second control.
+- **Feel, hands-on**: not yet driven by Shyam directly (this is a same-day
+  follow-up build, evidence captured via the Playwright script above, not a
+  live hands-on session) — the numeric/screenshot evidence shows the
+  mechanism works correctly, but whether the drag *feels* good (grab-target
+  size, drag sensitivity, handle placement) is exactly the kind of judgment
+  that needs Shyam's own hand on the mouse, same as C1's original bar. Recorded
+  here so that's an explicit next step, not an assumed pass.
+
 ## D4/D5 — not started
 
 Blocked on Shyam's inputs (D4's rug photo; D5's FAL_KEY plus item/
