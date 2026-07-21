@@ -268,11 +268,11 @@ Depends on **2 merged and G1's answer** — not on 3: import and shell texturing
 touch different parts of the scene, so a slow texturing phase must not block
 the riskiest flow in v1. Whichever of 3/4 merges second rebases.
 
-- [ ] *(Only if G1's ADR says browser-direct fails)* Build the minimal local
-      proxy helper G1 scoped, before the flow work below. *Agent: Sonnet.*
-- [ ] Settings panel: fal.ai key paste, stored in IndexedDB, never bundled.
+- [x] ~~*(Only if G1's ADR says browser-direct fails)* Build the minimal local
+      proxy helper G1 scoped~~ — not needed; ADR-0001 resolved G1 browser-direct.
+- [x] Settings panel: fal.ai key paste, stored in IndexedDB, never bundled.
       *Agent: Sonnet.*
-- [ ] Meshy job flow: photo upload → cost-surfacing confirm step → async
+- [x] Meshy job flow: photo upload → cost-surfacing confirm step → async
       generation with progress → GLB into OPFS. Failure leaves no half-imported
       item; per-item retry reuses the uploaded photo. Consider passing the photo
       as a base64 data URI in the generate request instead of a separate upload
@@ -280,12 +280,13 @@ the riskiest flow in v1. Whichever of 3/4 merges second rebases.
       call and one CORS failure point, at ~33% larger payload (watch request-size
       limits on large phone photos). *Agent: Opus — the async/failure semantics
       are the risky part.*
-- [ ] Post-generation: confirm/adjust cm dimensions → rescale + floor-snap →
+- [x] Post-generation: confirm/adjust cm dimensions → rescale + floor-snap →
       place at Figma-seeded position/rotation (default position if no footprint).
       *Agent: Sonnet, against spike 3's proven scaling/snapping logic.*
 
 **Exit:** one real furniture item goes photo → Meshy → placed in the rendered
-room, in-app, with a paid generation Shyam approved.
+room, in-app, with a paid generation Shyam approved. **Still open** — see
+"Resolved" below.
 
 **Handoff note (2026-07-21):** Shyam is out of usage budget for this session;
 realladygrey (GitHub collaborator) is picking up all four checklist items
@@ -300,6 +301,28 @@ convention as Phase 3 (`HANDOFF.md` if she doesn't finish in one sitting,
 `/code-review` before merge); Shyam runs the real photo → paid generation →
 exit-criterion check himself once her branch is ready, since that step is
 what the exit criterion actually requires him for.
+
+**Resolved 2026-07-21 (implementation, not the exit criterion):** the
+Settings/Meshy-client/GLB-rendering/import-flow work above is built —
+`src/components/SettingsPanel.tsx` + `src/storage/settings.ts` (fal.ai key,
+IndexedDB, never bundled; `src/storage/db.ts` now centralizes the
+IndexedDB open/upgrade path autosave.ts and settings.ts both use, so they
+can't drift onto two different `DB_VERSION`s), `src/import/falClient.ts`
+(browser-direct per ADR-0001: upload → submit/poll with progress → download,
+tolerant GLB-URL extraction), `src/scene/loadFurnitureModel.ts` +
+`buildScene.ts`/`Viewport.tsx` (an item with `glbHash` loads its model from
+OPFS and fits it to confirmed cm dims — rescale/floor-snap/recenter done at
+load time in Three.js rather than pre-baked — async, same
+after-the-structural-build pattern Phase 3 established for shell textures),
+and `src/components/ImportPanel.tsx` + `src/import/applyImport.ts` (pick or
+name an item → upload photo → cost-confirm → generate with progress →
+confirm dims → commit at its Figma-seeded placement or a default position).
+`npm run build`/`tsc -b`/`oxlint`/`npm run test` (48/48) all clean; verified
+in-browser via Playwright short of the live Meshy call itself (no fal.ai key
+available in this build session). **The exit criterion itself — a real
+photo through a paid Meshy generation, approved and placed in-app — has not
+been run.** That's explicitly Shyam-gated per the handoff note above; it's
+the next thing to happen on this phase, not a follow-up phase.
 
 **`/code-review` pass, 2026-07-21:** 8 findings (6 CONFIRMED, 2 PLAUSIBLE), 3
 fixed directly on the branch — `ImportPanel.tsx`'s confirm-dims form accepted
