@@ -6,7 +6,7 @@ import { addFurnitureBoxMeshes, buildScene, furnitureOverallDims, type BuiltScen
 import { applyShellSurface, updateSurfaceCalibrationInPlace, type ShellSurface } from "../scene/shellMaterials";
 import { loadShellTexture } from "../scene/loadShellTexture";
 import { fitModelToDims, loadFurnitureModel } from "../scene/loadFurnitureModel";
-import { computeCoverUV, needsOrientationRotation } from "../scene/flatItemTexture";
+import { computeFlatTextureFit, FULL_CONTENT_BOX, type ContentBox } from "../scene/flatItemTexture";
 import { checkCollisions, itemFootprintAABB, wallFootprintAABBs, type AABB } from "../scene/collision";
 import { snapPosition } from "../scene/snapping";
 import {
@@ -58,29 +58,32 @@ function applyCameraPreset(camera: THREE.PerspectiveCamera, controls: OrbitContr
 // bitmap.height` reports 1:1 no matter which way the actual rug pattern
 // runs in-frame, and can't feed `needsOrientationRotation` a useful answer.
 // This samples the bitmap down to a small canvas and finds the bounding box
-// of non-background (near-white) pixels, returning that box's aspect ratio
-// instead of the padded canvas's — the same "trim the letterboxing" idea a
-// human would apply by eye. Falls back to the raw bitmap aspect if no
-// content is found (e.g. a genuinely blank photo) so a detection miss can't
-// throw or force a bogus rotation.
-const CONTENT_ASPECT_SAMPLE = 64;
+// of non-background (near-white) pixels, returning that box (fractions of
+// the bitmap's own width/height, image pixel-space convention — Y=0 top)
+// so the caller can both derive an orientation-check aspect ratio from it
+// AND crop the rendered texture to it (round 2 only did the former,
+// discarding the box's coordinates — the padding stayed visible; this pass
+// crops it out, see spike-v2/OUTCOME.md's D4 crop-fix addendum). Falls back
+// to the full bitmap (`FULL_CONTENT_BOX`) if no content is found (e.g. a
+// genuinely blank photo) so a detection miss can't throw or crop to
+// nothing — same safety the old aspect-only fallback had.
+const CONTENT_BOX_SAMPLE = 64;
 const CONTENT_BG_THRESHOLD = 245; // near-white; product photos shoot on white/light backgrounds
-function detectContentAspect(bitmap: ImageBitmap): number {
-  const rawAspect = bitmap.width / bitmap.height;
+function detectContentBox(bitmap: ImageBitmap): ContentBox {
   const canvas = document.createElement("canvas");
-  canvas.width = CONTENT_ASPECT_SAMPLE;
-  canvas.height = CONTENT_ASPECT_SAMPLE;
+  canvas.width = CONTENT_BOX_SAMPLE;
+  canvas.height = CONTENT_BOX_SAMPLE;
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  if (!ctx) return rawAspect;
-  ctx.drawImage(bitmap, 0, 0, CONTENT_ASPECT_SAMPLE, CONTENT_ASPECT_SAMPLE);
-  const { data } = ctx.getImageData(0, 0, CONTENT_ASPECT_SAMPLE, CONTENT_ASPECT_SAMPLE);
-  let minX = CONTENT_ASPECT_SAMPLE;
+  if (!ctx) return FULL_CONTENT_BOX;
+  ctx.drawImage(bitmap, 0, 0, CONTENT_BOX_SAMPLE, CONTENT_BOX_SAMPLE);
+  const { data } = ctx.getImageData(0, 0, CONTENT_BOX_SAMPLE, CONTENT_BOX_SAMPLE);
+  let minX = CONTENT_BOX_SAMPLE;
   let maxX = -1;
-  let minY = CONTENT_ASPECT_SAMPLE;
+  let minY = CONTENT_BOX_SAMPLE;
   let maxY = -1;
-  for (let y = 0; y < CONTENT_ASPECT_SAMPLE; y++) {
-    for (let x = 0; x < CONTENT_ASPECT_SAMPLE; x++) {
-      const i = (y * CONTENT_ASPECT_SAMPLE + x) * 4;
+  for (let y = 0; y < CONTENT_BOX_SAMPLE; y++) {
+    for (let x = 0; x < CONTENT_BOX_SAMPLE; x++) {
+      const i = (y * CONTENT_BOX_SAMPLE + x) * 4;
       const r = data[i];
       const g = data[i + 1];
       const b = data[i + 2];
@@ -92,10 +95,15 @@ function detectContentAspect(bitmap: ImageBitmap): number {
       }
     }
   }
-  if (maxX < minX || maxY < minY) return rawAspect; // no non-background pixels found
-  const contentWidth = (maxX - minX + 1) * (bitmap.width / CONTENT_ASPECT_SAMPLE);
-  const contentHeight = (maxY - minY + 1) * (bitmap.height / CONTENT_ASPECT_SAMPLE);
-  return contentWidth / contentHeight;
+  if (maxX < minX || maxY < minY) return FULL_CONTENT_BOX; // no non-background pixels found
+  // +0/+1 sample-index -> fraction-of-bitmap: the bounding box is inclusive
+  // of the maxX/maxY sample, so its right/bottom edge fraction is (max+1)/N.
+  return {
+    minXFrac: minX / CONTENT_BOX_SAMPLE,
+    maxXFrac: (maxX + 1) / CONTENT_BOX_SAMPLE,
+    minYFrac: minY / CONTENT_BOX_SAMPLE,
+    maxYFrac: (maxY + 1) / CONTENT_BOX_SAMPLE,
+  };
 }
 
 // Clamps how far OrbitControls can orbit vertically — without this, an
@@ -321,9 +329,12 @@ export const Viewport = forwardRef<
     // from OPFS here and dropped onto the top-face material buildScene
     // already created and put in the scene — same async-after-build shape
     // as the GLB load above, just filling in a `.map` instead of attaching
-    // a decoded model. `computeCoverUV` (pure math, unit-tested) fits the
-    // photo's own aspect ratio to the item's real w:d footprint without
-    // stretching, the same way CSS `background-size: cover` would.
+    // a decoded model. `computeFlatTextureFit` (pure math, unit-tested)
+    // crops out any product-photo padding, corrects for a photo shot in the
+    // "wrong" orientation relative to the item's real footprint, and fits
+    // the result to the item's real w:d footprint without stretching — all
+    // three folded into one repeat/offset/rotation, the same way CSS
+    // `background-size: cover` fits a photo to a differently-shaped box.
     built.pendingFlatTextures.forEach(({ item, material }) => {
       const hash = item.flatTextureHash;
       if (!hash) return;
@@ -334,24 +345,21 @@ export const Viewport = forwardRef<
           if (!dims) return;
           const targetAspect = dims.w / dims.d;
           const rawImageAspect = source.bitmap.width / source.bitmap.height;
-          // D4 orientation-bug fix: decide "does the photo need a 90°
-          // rotation" from the bitmap's trimmed *content* aspect (robust to
-          // a photo padded to a square canvas, like the SONDEROD rug's —
-          // see detectContentAspect above and spike-v2/OUTCOME.md's D4
-          // addendum), but feed computeCoverUV the raw bitmap aspect (or its
-          // reciprocal if rotating) since that's what's actually sampled in
-          // UV space once texture.rotation is applied.
-          const contentAspect = detectContentAspect(source.bitmap);
-          const rotate = needsOrientationRotation(contentAspect, targetAspect);
-          const imageAspect = rotate ? 1 / rawImageAspect : rawImageAspect;
-          const { repeat, offset } = computeCoverUV(imageAspect, targetAspect);
+          // D4 crop-fix (see spike-v2/OUTCOME.md's D4 crop-fix addendum):
+          // round 2 only used the content bounding box to decide whether to
+          // rotate, discarding the box's own coordinates — the product-photo
+          // padding stayed visible in the render. This detects the box AND
+          // feeds its actual coordinates to computeFlatTextureFit so the
+          // padding is cropped out, not just accounted for.
+          const contentBox = detectContentBox(source.bitmap);
+          const { repeat, offset, rotation } = computeFlatTextureFit(contentBox, rawImageAspect, targetAspect);
           const texture = new THREE.Texture(source.bitmap);
           texture.colorSpace = THREE.SRGBColorSpace;
           texture.wrapS = texture.wrapT = THREE.ClampToEdgeWrapping;
-          if (rotate) {
-            texture.center.set(0.5, 0.5);
-            texture.rotation = Math.PI / 2;
-          }
+          // computeFlatTextureFit's scheme always pairs with center left at
+          // THREE.Texture's default (0, 0) — the rotation pivot is folded
+          // into `offset` instead, so no texture.center.set() call needed.
+          texture.rotation = rotation;
           texture.repeat.set(repeat[0], repeat[1]);
           texture.offset.set(offset[0], offset[1]);
           texture.needsUpdate = true;

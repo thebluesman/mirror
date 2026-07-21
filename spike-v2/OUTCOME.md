@@ -623,6 +623,89 @@ rug behind the coffee table either way, confirming no regression there).
 `npx vitest run` (99 tests, up from 94), `npx tsc -b`, `npm run build`, and
 `oxlint src/` all clean after this fix.
 
+**D4 addendum — crop fix, padding removed (2026-07-22):** Shyam tried the
+orientation fix hands-on and confirmed the pattern now runs the right way,
+but the white product-photo padding around the rug (visible top and bottom
+of the mapped texture in `2-after-orientation-fix.png`) was still part of
+the rendered top face. Root cause: the orientation fix only used the content
+bounding box (`detectContentAspect`'s downsample-and-scan) to decide
+*whether* to rotate — it computed the box's min/max X/Y locally, derived an
+aspect ratio from them, and threw the coordinates away. Nothing in the
+texture pipeline actually restricted sampling to that box, so the full
+(still-padded) bitmap kept getting mapped in, just correctly oriented.
+
+Fix: `detectContentAspect` became `detectContentBox` (`Viewport.tsx`),
+returning the box itself — `{minXFrac, maxXFrac, minYFrac, maxYFrac}`,
+fractions of the bitmap's own width/height in image/DOM pixel-space
+(Y=0 top), falling back to the full bitmap (`FULL_CONTENT_BOX`) on a
+detection miss, same safety the old aspect-only fallback had.
+`flatItemTexture.ts` gained `computeFlatTextureFit(contentBox,
+rawImageAspect, targetAspect)`, replacing the old
+`needsOrientationRotation` + `computeCoverUV` two-call sequence at the
+Viewport call site with one function that folds three transforms into a
+single repeat/offset/rotation: crop to the content box, rotate 90° if the
+box's own aspect disagrees with the footprint's orientation class, then
+cover-fit crop for aspect ratio within the now-cropped (possibly rotated)
+content — computed as if the content box were the whole photo, then nested
+into the box's actual sub-rectangle of the raw bitmap.
+
+**The V-axis gotcha, worth recording plainly:** `ContentBox` is detected in
+image/DOM pixel-space, where Y=0 is the *top* row and Y grows downward —
+that's what `canvas.getImageData` and the bounding-box scan naturally
+produce. A `THREE.Texture` has `flipY = true` by default, so its UV V-axis
+runs the *other* way: V=0 is the *bottom* of the image, V=1 the top. A
+pixel-space Y-range `[minYFrac, maxYFrac]` (out of the bitmap's height)
+becomes texture V-range `[1 - maxYFrac, 1 - minYFrac]` — a swap-and-complement,
+not a direct copy of the fractions. Copying the raw fractions across
+without this flip would crop the correct *height* of content but from the
+wrong vertical strip (e.g. cropping in the padding on one edge while
+cutting into the rug pattern on the other) — geometrically plausible enough
+to pass a casual glance, exactly the kind of bug that survives to a real
+screenshot review. `computeFlatTextureFit` applies the flip once, explicitly,
+at the top of the function, with the derivation spelled out in its doc
+comment.
+
+**Composing the rotation with the crop** (the other easy-to-get-backwards
+part): a straight "crop, then separately rotate, then separately cover-fit"
+implementation would need three sequential `THREE.Texture` transforms, but a
+`THREE.Texture` only exposes one combined `repeat`/`offset`/`rotation`/
+`center` affine transform. The fix folds all three into that single
+transform algebraically — expand the already-validated round-2 formula
+(`rotation = +90°`, `center = (0.5, 0.5)`, repeat/offset from
+`computeCoverUV`) into its explicit `outU(gu,gv) = repeat[0]·gv + K1`,
+`outV(gu,gv) = -repeat[1]·gu + K2` form, generalize "the whole image" to
+"the content box," then nest the content-box crop (a plain, rotation-free
+scale+offset) on top, re-expressed with `center` left at THREE.Texture's
+default `(0, 0)` (an equivalent, simpler parametrization of the same
+affine map). This was **not** trusted by hand-derivation alone: verified
+with a throwaway Node script (`three` package, not committed) that built
+actual `THREE.Texture` instances from both the old round-2 formula and the
+new composed formula, called `updateMatrix()`, and multiplied known corner
+UVs through `texture.matrix` to confirm (a) the new formula reproduces the
+old formula exactly when the content box is the full bitmap (no
+regression), and (b) with a real cropped box, every sampled corner lands
+inside the content box's texture-space sub-rectangle (the padding is
+actually excluded, not just deprioritized). The same checks became
+permanent tests in `flatItemTexture.test.ts` (using the real `three`
+package, matching `buildScene.test.ts`/`loadFurnitureModel.test.ts`'s
+existing precedent for THREE-dependent tests in this codebase).
+
+**Re-verified evidence:** re-ran `spike-v2/d4-rug-drive.mjs` unmodified
+(the script itself needed no changes — it just patches in a photo and
+reloads). `spike-v2/d4-screenshots/3-after-crop-fix.png` (same
+`rug-eval-view` camera angle as `2-after-orientation-fix.png`) shows the
+white padding gone from both the top and bottom edges of the mapped
+texture, the rug's blue/teal band pattern now filling the plane
+edge-to-edge, with the same correct band orientation `2-after-orientation-fix.png`
+established. `1-after-flat-texture.png`, `1-after-flat-texture-wrong-orientation.png`,
+and `2-after-orientation-fix.png` are all left untouched for comparison
+history; couch-view captures are unchanged (still fully occluded by the
+coffee table either way).
+
+`npx vitest run` (105 tests, up from 99 — 6 new `computeFlatTextureFit`
+cases), `npx tsc -b`, `npm run build`, and `oxlint src/` all clean after
+this fix.
+
 ## D5 — not started
 
 Blocked on Shyam's inputs (FAL_KEY plus item/multi-angle photos).
