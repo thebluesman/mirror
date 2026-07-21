@@ -108,13 +108,15 @@ const CompoundSofaFurniture = z
 // lacks a required top-level `dimsCm` so it can only match CompoundSofa.
 export const FurnitureItemSchema = z.union([CompoundSofaFurniture, BoxFurniture]);
 
-export const CameraPositionSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  eye: z.tuple([z.number(), z.number(), z.number()]),
-  lookAt: z.tuple([z.number(), z.number(), z.number()]),
-  fovDeg: z.number(),
-});
+export const CameraPositionSchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    eye: z.tuple([z.number(), z.number(), z.number()]),
+    lookAt: z.tuple([z.number(), z.number(), z.number()]),
+    fovDeg: z.number(),
+  })
+  .loose(); // carry provenance notes (e.g. `note`) through untouched, like every sibling schema
 
 export const PlaceCommandSchema = z
   .object({
@@ -167,13 +169,11 @@ export type SceneFile = z.infer<typeof SceneFileSchema>;
  * total for the versions it knows; throws on an unrecognized version so a
  * corrupt/foreign file fails loud rather than silently half-migrating.
  *
- * v1-draft -> v1:
- *  - bump schemaVersion
- *  - reclassify any wall opening drawn as a plain "door" but glazed
- *    full-height (sill 0, head set) as "glass-door". The committed seed
- *    already carries the "glass-door" discriminant, so this branch is a
- *    no-op there; it exists so an unedited draft file (or an older
- *    Figma-session export) still lands on the real type.
+ * v1-draft -> v1: bump schemaVersion only. The draft's "glass-door" opening
+ * type is authored explicitly (see the committed seed's balcony-door) rather
+ * than inferred from sill/head heights — a value-based heuristic here would
+ * misclassify an ordinary door that happens to share the same heights, so
+ * v1-draft files need "glass-door" set directly, not guessed at migration.
  */
 export function migrate(raw: unknown): unknown {
   if (typeof raw !== "object" || raw === null) {
@@ -186,29 +186,7 @@ export function migrate(raw: unknown): unknown {
   if (version === SCHEMA_VERSION) return raw;
 
   if (version === "v1-draft") {
-    const room = (scene.room ?? {}) as Record<string, unknown>;
-    const walls = Array.isArray(room.walls) ? room.walls : [];
-    const migratedWalls = walls.map((w) => {
-      const wall = w as Record<string, unknown>;
-      const openings = Array.isArray(wall.openings) ? wall.openings : undefined;
-      if (!openings) return wall;
-      return {
-        ...wall,
-        openings: openings.map((o) => {
-          const op = o as Record<string, unknown>;
-          const isFullHeightGlass =
-            op.type === "door" &&
-            op.sillHeightCm === 0 &&
-            typeof op.headHeightCm === "number";
-          return isFullHeightGlass ? { ...op, type: "glass-door" } : op;
-        }),
-      };
-    });
-    return {
-      ...scene,
-      meta: { ...meta, schemaVersion: SCHEMA_VERSION },
-      room: { ...room, walls: migratedWalls },
-    };
+    return { ...scene, meta: { ...meta, schemaVersion: SCHEMA_VERSION } };
   }
 
   throw new Error(`migrate: unknown schemaVersion "${String(version)}"`);

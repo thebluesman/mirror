@@ -44,11 +44,9 @@ function runTx<T>(
 export async function saveProjectNow(scene: SceneFile): Promise<void> {
   const db = await openDB();
   try {
-    // Store a structured-clone-safe plain object (JSON round-trip strips any
-    // non-clonable oddities and matches what a file save would write).
-    await runTx(db, "readwrite", (store) =>
-      store.put(JSON.parse(JSON.stringify(scene)) as SceneFile, KEY),
-    );
+    // scene is always a zod-parsed SceneFile (plain numbers/strings/arrays),
+    // already safe for IndexedDB's own structured clone in store.put.
+    await runTx(db, "readwrite", (store) => store.put(scene, KEY));
   } finally {
     db.close();
   }

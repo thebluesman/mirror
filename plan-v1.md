@@ -152,6 +152,36 @@ and `oxlint` are clean. Verified in-browser via Playwright: 0 console errors
 before/after reload, IDB round-trips `schemaVersion "v1"`, and a
 mutate-then-reload survives — the persistence exit criterion holds.
 
+**`/code-review` pass, 2026-07-21:** 8 findings; 3 fixed directly on `main`
+(`CameraPositionSchema` missing `.loose()` — was silently dropping the seed
+camera's `note` field on first load+autosave; a redundant `JSON.parse(JSON.
+stringify(...))` clone in `autosave.ts`'s `saveProjectNow` — `IDBObjectStore.
+put()` already structured-clones; `migrate()`'s value-based door→glass-door
+reclassification heuristic — fragile in both directions, and already dead for
+the actual seed data since its balcony door is typed `glass-door` directly, so
+simplified to a version-bump-only migration). The other 5 are deferred to the
+phases positioned to fix them:
+
+- **Phase 3 (texturing)/door rendering polish**: `buildScene.ts`'s door/
+  glass-door branch hardcodes lintel/leaf heights (210/208) and ignores the
+  opening's own `headHeightCm`/`sillHeightCm`, even though the schema carries
+  them generally now — same bucket as Phase 1's deferred window-height finding.
+- **Phase 4 (furniture import)**: `assets.ts`'s `putAsset()` idempotency check
+  only verifies a file exists, not that a prior write completed — an
+  interrupted import (tab closed mid-write) can leave a 0-byte stub masked as
+  "already stored" forever. Worth hardening once real imports exist.
+- **Phase 5 (polish/save-load chrome)**: `projectFile.ts`'s file-input
+  fallback (`pickFileViaInput`) never resolves/rejects if the user cancels the
+  native picker in a browser lacking the 'cancel' input event (Safari/Firefox
+  — the exact fallback target); and `App.tsx` has no recovery path if an
+  IndexedDB restore throws (`clearProject()` exists but nothing calls it from
+  UI) — both are UI-layer gaps in modules Phase 2 built but didn't wire up yet.
+- **No owning phase yet (schema robustness, flag before v2)**: an item
+  authored with both `dimsCm` and `main`/`chaise` but no `shape` field
+  silently validates as a plain box (`FurnitureItemSchema`'s union tries
+  `CompoundSofaFurniture` first but falls through on the missing literal) —
+  narrow edge case, no current data triggers it.
+
 **Exit:** project persists across a browser restart (PRD §10's persistence
 criterion, testable before flows exist); Phase 1 viewport reads from the store
 instead of the static file.

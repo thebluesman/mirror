@@ -93,24 +93,18 @@ describe("migrate", () => {
     expect(migrated.meta.schemaVersion).toBe(SCHEMA_VERSION);
   });
 
-  it("reclassifies a full-height glass door drawn as a plain door", () => {
+  it("leaves opening types untouched — glass-door must be authored explicitly, not inferred", () => {
     const draft = minimalV1() as any;
     draft.meta.schemaVersion = "v1-draft";
     draft.room.walls[0].openings = [
+      // Same sill/head heights as a real full-height glass door, but typed
+      // "door" — migration must not guess at reclassification from heights.
       { name: "balcony", along: "z", start: 0, size: 110, type: "door", sillHeightCm: 0, headHeightCm: 210 },
-    ];
-    const migrated = migrate(draft) as any;
-    expect(migrated.room.walls[0].openings[0].type).toBe("glass-door");
-  });
-
-  it("leaves an ordinary door untouched", () => {
-    const draft = minimalV1() as any;
-    draft.meta.schemaVersion = "v1-draft";
-    draft.room.walls[0].openings = [
       { name: "d", along: "x", start: 0, size: 90, type: "door" },
     ];
     const migrated = migrate(draft) as any;
     expect(migrated.room.walls[0].openings[0].type).toBe("door");
+    expect(migrated.room.walls[0].openings[1].type).toBe("door");
   });
 
   it("does not mutate the input", () => {
