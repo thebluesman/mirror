@@ -572,7 +572,236 @@ holds up under an actual hand on the mouse, not just Playwright-driven
 evidence. UI polish (grab-target sizing, a 0deg/snap-angle affordance) is
 explicitly deferred, not blocking — merged as-is via PR #12.
 
-## D4/D5 — not started
+## D4 — not started
 
-Blocked on Shyam's inputs (D4's rug photo; D5's FAL_KEY plus item/
-multi-angle photos).
+Blocked on Shyam's rug photo (D4's own input, separate from D5).
+
+## D5 — W-C: Meshy vs. Hunyuan generation comparison
+
+**Status: evidence captured, awaiting C3 (Shyam judging the side-by-sides
+in-app).** Branch: `v2/spike-c-generation`. Per the plan, this section is
+evidence, not a verdict — the three W-C questions from §2 are stated at the
+end with only the parts that have hard evidence answered; the quality
+question itself is explicitly left for C3.
+
+### Endpoint — confirmed live, not guessed
+
+R1 flagged `fal-ai/hunyuan-3d/v3.1/pro/image-to-3d` as its best-fit guess for
+what Shyam's informal test used, but unconfirmed, and recommended checking a
+live call before writing any harness code. Did that first, at $0 cost, before
+spending on generations:
+
+- Fetched `fal.ai`'s public per-model OpenAPI schema
+  (`https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/hunyuan-3d/v3.1/pro/image-to-3d`
+  — no auth required) and cross-checked it with a `fal.subscribe` call using
+  deliberately empty `input: {}`, which fal rejects with a 422 validation
+  error listing the real required/optional fields — free, no generation
+  runs, same "let a schema mismatch fail loud" discipline `falClient.ts`
+  already uses.
+- This **corrects two things R1's triangulated memo got wrong**, found before
+  any paid call:
+  - The single-image input field is **`input_image_url`**, not `image_url`
+    as the memo guessed.
+  - The output GLB lives at **`model_glb.url`**, not `model_mesh.url` as the
+    memo guessed. This happens to not matter for code — `falClient.ts`'s
+    `GLB_URL_KEY_CANDIDATES` already lists `"model_glb.url"` as its #2
+    candidate — but it's worth recording as a correction, not just luck.
+  - **There is no separate multi-view endpoint for v3.1.** Unlike the v2
+    family (`hunyuan3d/v2/multi-view` is a genuinely different endpoint),
+    v3.1 Pro's *one* endpoint takes up to 8 optional named view-angle fields
+    (`back_image_url`, `left_image_url`, `right_image_url`, `top_image_url`,
+    `bottom_image_url`, `left_front_image_url`, `right_front_image_url`)
+    alongside the required `input_image_url` (front) — multi-view is just
+    filling in more of the same request, not a different request shape. This
+    simplified D5's harness relative to R1's expectation of two separate code
+    paths.
+- Script: `spike-v2/d5-generate.mjs` (a small standalone module, per R1's
+  "don't generalize `falClient.ts`" recommendation — parallels
+  `spike/import/generate-item.py`'s shape, not app code).
+
+### Real pricing — confirmed, replacing R1's triangulated table (for this endpoint)
+
+Fetched fal's own public model page
+(`https://fal.ai/models/fal-ai/hunyuan-3d/v3.1/pro/image-to-3d`) and read the
+billing note fal shows in its own playground UI, verbatim:
+
+> Your request will cost $0.375 per generation... Enabling PBR materials
+> adds $0.15. Using multi-view images adds $0.15. Custom face count adds
+> $0.15.
+
+So, for what D5 actually ran (PBR on, default face count throughout):
+
+| Run | Fields used | Price |
+|---|---|---|
+| Single-image (water-cooler, bookshelf, sonderod-rug) | `input_image_url` + `enable_pbr` | $0.375 + $0.15 = **$0.525** each |
+| Multi-view (table) | `input_image_url` + `right_front_image_url` + `enable_pbr` | $0.375 + $0.15 (PBR) + $0.15 (multi-view) = **$0.675** |
+
+**Total real spend: 3 × $0.525 + $0.675 = $2.25** — well under the plan's
+$10–20 W-C budget, and confirms R1's "every Hunyuan variant is cheaper than
+Meshy's ~$0.80" finding with real, not triangulated, numbers for this
+endpoint. Generation wall-clock time was consistent across all four runs:
+135.6s, 142.4s, 155.9s, 138.3s (`spike-v2/d5-generation-log.json` — request
+IDs and timings recorded, no key or billing-account info).
+
+### What ran
+
+Three items, single image, matching Meshy's original input photo exactly
+(the same `*-source.png`/`.webp` files staged from Shyam's real project
+export — no new photos, no re-shoot):
+
+- **Water Cooler** (34×30×105cm)
+- **Bookshelf** (40×143.5×72cm)
+- **SONDEROD Rug** (240×170×2cm)
+
+One multi-view probe, **dining table** (153×92×76cm) — separate from the
+3-item comparison slate per the plan, Hunyuan-only (no Meshy counterpart to
+compare against, since Meshy doesn't take multi-view input).
+
+GLBs generated: `spike-v2/d5-assets/generated/*.glb` (not committed — see
+below). Meshy's pre-existing GLBs (Shyam's real project export, not
+regenerated) staged at `spike-v2/d5-assets/existing-assets/` alongside their
+source photos.
+
+**Not committed to git**: the raw GLB binaries (both Meshy's pre-existing
+ones and the newly generated Hunyuan ones), ~8–50MB each — regenerable
+(Meshy's are already in Shyam's own project export; Hunyuan's are
+reproducible from the committed source photos via `d5-generate.mjs` for
+~$2.25) and would otherwise be the bulk of this branch's diff.
+`.gitignore` covers both directories. What *is* committed: the source
+photos (small, and the only irreproducible input), the generation log
+(pricing/timing, no secrets), the render harness/scripts, and every
+screenshot the contact sheets reference.
+
+### Multi-view coverage — an honest limitation, not hidden
+
+The staged `table-angles/` inputs are `angle-1.png`/`angle-2.png`
+(near-duplicate straight-on shots), `angle-3.png` (a 3/4 perspective showing
+the table's right end + front face), and `angle-4.png` (a low-res duplicate
+of angle-1) — **no genuine back or left-side photo exists**. D5 mapped:
+
+- `angle-1.png` → `input_image_url` (front, required)
+- `angle-3.png` → `right_front_image_url` (the closest of the 8 named fields
+  to what that photo actually shows — a right-front 45° angle)
+
+That's it — one real angle beyond the front. R1 flagged that Hunyuan's
+multi-view value proposition is specifically fixing **back-view** fidelity;
+this test cannot speak to that at all, since no back photo was available to
+feed it. What it *can* speak to: whether a second, off-axis angle
+(front-right) helps proportion/depth accuracy versus front-only — visible in
+the contact sheet's `table.html` page, but still a probe of "does a second
+angle help," not "does back-view multi-view work," and the outcome doc
+doesn't overstate it as the latter. This is also, per the plan, "the
+cheapest possible probe of PRD §11's multi-state furniture idea" — it shows
+multi-view *input* works end-to-end and is cheap, without saying anything
+about a multi-state *feature*.
+
+### In-app render harness — reused, not hand-rolled
+
+Per OUTCOME-3's "viewer flattery" rule: nothing here was judged from fal's
+own preview viewer. Built `spike-v2/render-harness.html`/`.ts`, a standalone
+page (not part of the running app, lives in `spike-v2/` per §4) that:
+
+- Calls the real `buildScene()` (`src/scene/buildScene.ts`) — same sun
+  `DirectionalLight` + hemisphere bounce light + shell materials every real
+  scene gets — against a minimal but schema-valid synthetic room (a single
+  item, generously sized so the camera never ends up outside a wall — see
+  "rough edges" below), rather than hand-rolling a separate lighting setup.
+- Replicates Viewport.tsx's renderer/tonemap config line-for-line
+  (`antialias`, `SRGBColorSpace`, `ACESFilmicToneMapping`,
+  `PCFSoftShadowMap`) and its `PMREMGenerator(RoomEnvironment)` IBL setup —
+  the same reflections every real furniture item in the app gets.
+- Calls the real `fitModelToDims()` (`src/scene/loadFurnitureModel.ts`) to
+  rescale/floor-snap/recenter each loaded GLB to the item's actual
+  `dimsCm` from `project.json` — the same transform every Meshy import
+  already gets at load time, unmodified (no separate rescale script needed
+  for this comparison — D5 reuses the live-load-time version rather than
+  spike 3's offline `process-glb.mjs`/`gltf-transform` path, since the app
+  already has this covered and it's the more current of the two).
+- Driven by `spike-v2/d5-render-drive.mjs` (Playwright, same one-off-driver
+  shape as `w-a-drive.mjs`/`d2-collision-snap-drive.mjs`/etc.) — for each
+  item, loads the Meshy GLB then the Hunyuan GLB into the same scene/camera
+  setup and captures 5 identical camera views: 4 azimuths around the item
+  (0°/45°/90°/180° — 180° stands in for OUTCOME-3's back-view convention)
+  plus a top-down shot (added after the rug's flat 2cm profile made every
+  eye-level view a grazing edge-on sliver not worth judging).
+
+**Rough edges found (surfacing per plan §6 discipline, not hiding them):**
+- A freshly generated GLB (Meshy or Hunyuan) has no established "front"
+  convention the way a seeded, `modelRotationDeg`-corrected app item does —
+  so the 4 azimuth views are labeled by camera position (view A/B/C/D), not
+  by claimed front/back/side, since guessing which way each mesh "faces"
+  is exactly the kind of unearned precision this spike avoids. What's held
+  constant is the comparison: both providers' renders of the same item get
+  the identical 5 camera positions and identical lighting.
+- First attempt used a small (600×600cm) harness room; the rug's 240cm
+  width put the camera *outside* the wall for its widest framing, producing
+  a blank grey frame (the wall's own back face filling the screen, no
+  error). Fixed by sizing the harness room generously (4000×4000cm)
+  relative to any single item.
+- The top-down view initially rendered blank too, for an unrelated reason:
+  the camera's height for a steep look-down exceeded the harness room's
+  ceiling — same failure signature (blank grey, no error), different cause
+  (camera physically above the opaque ceiling mesh, blocking its own view
+  straight down). Fixed by giving the harness room a tall (1500cm, not a
+  real room's ~270cm) ceiling — this room only exists to give `buildScene()`
+  something to light, not to be realistic.
+- Separately, `Object3D.lookAt` degenerates when the view direction is
+  nearly parallel to `camera.up` — the same top-down view exposed this too:
+  even after the ceiling fix, a steep look-down needs `camera.up` set to a
+  horizontal reference (not the default world +Y) or the camera basis comes
+  out degenerate. Both fixes are in `render-harness.ts`, commented at the
+  fix site for whoever next needs a top-down framing in a Three.js scene.
+
+### Side-by-side contact sheet
+
+`spike-v2/d5-contact-sheets/index.html` (open directly in a browser — fully
+static, no build step, links to one page per item):
+`water-cooler.html`, `bookshelf.html`, `sonderod-rug.html`, `table.html`.
+Each item page is a Meshy-row/Hunyuan-row table, 5 matching-view columns,
+images pulled directly from `spike-v2/d5-render-screenshots/<item>/`.
+
+Non-binding observations from building the harness (not a verdict — C3 is):
+water-cooler's Meshy texture has a visible warped/rippled artifact across
+the dispenser front that Hunyuan's doesn't share; both providers reproduce
+the *same* bookshelf structural defect C1 already flagged (cubbies on the
+narrow end, no backboard) — suggesting that's an input-photo ambiguity
+(a bookshelf photographed lying on its side) rather than a Meshy-specific
+failure, since an independent model made the same mistake; the rug's
+top-down view shows Meshy holding a straighter rectangular silhouette while
+Hunyuan's came out visibly more warped/bowed despite deeper color
+saturation. These are exactly the kind of read that needs Shyam's own C3
+pass to confirm or overturn, not a spike-author's judgment call.
+
+### The three W-C questions (§2) — answered only where D5 has hard evidence
+
+(a) **Is Hunyuan's quality edge real under app lighting, or viewer
+flattery?** Not answered here — this is C3's call, by design. The contact
+sheet exists specifically so that question can be judged under identical
+in-app lighting rather than fal's preview viewer.
+
+(b) **Does multi-angle input materially fix back-view/fidelity failures?**
+Not answered — the available test inputs had no genuine back photo (see
+coverage caveat above), so this spike cannot speak to Hunyuan's actual
+back-view value proposition either way. What it does show: a second
+off-axis (front-right) angle is cheap ($0.15) and the request plumbing
+works end-to-end. Whether that specific input materially changed the
+table's fidelity versus a hypothetical front-only run is also left to C3,
+since no front-only Hunyuan run of the table exists to compare against (out
+of budget scope for this probe).
+
+(c) **What would adoption cost?** Answered, with real numbers: **$0.525 per
+single-image generation, $0.675 with a second view angle** — cheaper than
+Meshy's ~$0.80 either way, confirming R1's directional finding with live
+data. Browser-direct CORS feasibility: **not independently re-verified from
+a browser origin in this pass** — `d5-generate.mjs` ran from Node (matching
+`spike/import/generate-item.py`'s script-based precedent, not
+`falClient.ts`'s browser path), so this doesn't repeat ADR-0001's exact
+"real browser, real CORS preflight" check the way R1 recommended. What *is*
+confirmed: the same `@fal-ai/client` package, the same `fal.storage.upload`
++ `fal.subscribe` calls, against the same fal queue-job platform Meshy uses
+— R1's "no reason to expect this to differ" inference still stands, now
+with a real successful round-trip behind it (not just a schema check), but
+the literal three-leg-from-a-browser-tab verification ADR-0001 did for
+Meshy remains open if Hunyuan adoption is pursued for real. Any adoption
+decision still requires its own ADR superseding/amending ADR-0001, per §5 —
+not assumed here.

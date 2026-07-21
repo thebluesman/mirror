@@ -1,0 +1,55 @@
+[
+  {
+    "name": "water-cooler",
+    "endpoint": "fal-ai/hunyuan-3d/v3.1/pro/image-to-3d",
+    "requestId": "019f863d-e231-71b1-a91c-b64e2961b5e1",
+    "inputFieldsUsed": [
+      "input_image_url",
+      "enable_pbr"
+    ],
+    "elapsedMs": 135592,
+    "glbBytes": 42764444,
+    "seed": null,
+    "ranAt": "2026-07-21T19:56:13.532Z"
+  },
+  {
+    "name": "bookshelf",
+    "endpoint": "fal-ai/hunyuan-3d/v3.1/pro/image-to-3d",
+    "requestId": "019f8640-4414-75b3-9d24-fe9ffb83eac2",
+    "inputFieldsUsed": [
+      "input_image_url",
+      "enable_pbr"
+    ],
+    "elapsedMs": 142358,
+    "glbBytes": 46805816,
+    "seed": null,
+    "ranAt": "2026-07-21T19:58:59.118Z"
+  },
+  {
+    "name": "sonderod-rug",
+    "endpoint": "fal-ai/hunyuan-3d/v3.1/pro/image-to-3d",
+    "requestId": "019f8642-cd5c-7612-bee5-6a5aee5eb993",
+    "inputFieldsUsed": [
+      "input_image_url",
+      "enable_pbr"
+    ],
+    "elapsedMs": 155934,
+    "glbBytes": 49306776,
+    "seed": null,
+    "ranAt": "2026-07-21T20:01:56.526Z"
+  },
+  {
+    "name": "table",
+    "endpoint": "fal-ai/hunyuan-3d/v3.1/pro/image-to-3d",
+    "requestId": "019f8645-8abe-7231-afc5-30a6135fe390",
+    "inputFieldsUsed": [
+      "enable_pbr",
+      "input_image_url",
+      "right_front_image_url"
+    ],
+    "elapsedMs": 138331,
+    "glbBytes": 44338448,
+    "seed": null,
+    "ranAt": "2026-07-21T20:04:42.268Z"
+  }
+]

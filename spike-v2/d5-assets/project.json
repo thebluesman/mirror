@@ -1,0 +1,577 @@
+{
+  "meta": {
+    "source": "Figma 'Living Room' page (Emerald Residence 107), frame 0:2, scale 1px = 1cm — G2 conversion session, 2026-07-20. Successor to spike/geometry.json; positions below reflect the current Figma layout, not the spike-era one.",
+    "units": "cm",
+    "schemaVersion": "v1",
+    "coords": "position = [x, y, z] of each item's plan-view CENTER (not top-left, unlike geometry.json); x = Figma x, z = Figma y, y = up/floor-snap height. rotationDeg is yaw around the vertical axis.",
+    "assumed": "Ceiling 240 confirmed (spike 3, door-to-wall pixel ratio). Window sill 90 / height 120 assumed; balcony door full-height glass (opening to 210), carried from geometry.json — not re-derivable from the 2D Figma plan.",
+    "changedSinceSpike3": [
+      "Kitchen enclosure removed from the Figma layout (grey block gone); floor segment renamed kitchen-and-passage -> entrance-hallway, geometry unchanged, main-door position unchanged.",
+      "Rug (SONDEROD) moved ~77cm north — now only partly under the sofa, more under the swivel-chair/coffee-table zone.",
+      "Bookshelf: laid on its side (new height 72cm = old width), legs removed, relocated from the south wall near the sofa to standing near Billy+Hogadal/dining table. Back particle-board panel removed — open both sides, books accessible from either face, spines facing outward.",
+      "Billy+Hogadal shelving shifted ~53cm east, now close against the water cooler.",
+      "Dining table rotated 90deg in place (intrinsic dims unchanged, 153x92) and shifted slightly east/north.",
+      "Sofa and coffee table shifted a small amount (~7-16cm) — treated as redraw noise, not confirmed as intentional.",
+      "Two new items added: floor lamp, table lamp (table lamp rests on top of the now-horizontal bookshelf)."
+    ]
+  },
+  "room": {
+    "ceilingHeightCm": 240,
+    "floor": [
+      {
+        "name": "living-room",
+        "x": 474,
+        "z": 324,
+        "w": 656,
+        "d": 378
+      },
+      {
+        "name": "entrance-hallway",
+        "x": 1130,
+        "z": 274,
+        "w": 369,
+        "d": 428
+      }
+    ],
+    "walls": [
+      {
+        "name": "north-tv-wall",
+        "from": [
+          474,
+          324
+        ],
+        "to": [
+          1130,
+          324
+        ],
+        "note": "TV wall; interior face"
+      },
+      {
+        "name": "hallway-west-stub",
+        "from": [
+          1130,
+          324
+        ],
+        "to": [
+          1130,
+          274
+        ],
+        "note": "connects TV wall to hallway back wall"
+      },
+      {
+        "name": "hallway-north-wall",
+        "from": [
+          1130,
+          274
+        ],
+        "to": [
+          1499,
+          274
+        ]
+      },
+      {
+        "name": "kitchen-west-wall",
+        "from": [
+          1130,
+          324
+        ],
+        "to": [
+          1130,
+          562
+        ],
+        "note": "Encloses the open-kitchen alcove; solid, no pass-through modeled (out of scope for v1)."
+      },
+      {
+        "name": "kitchen-south-wall",
+        "from": [
+          1130,
+          562
+        ],
+        "to": [
+          1499,
+          562
+        ],
+        "note": "South boundary of the open-kitchen alcove; meets the east wall at its main-door opening start (z=562)."
+      },
+      {
+        "name": "east-wall",
+        "from": [
+          1499,
+          274
+        ],
+        "to": [
+          1499,
+          702
+        ],
+        "openings": [
+          {
+            "name": "main-door",
+            "along": "z",
+            "start": 562,
+            "size": 140,
+            "type": "door"
+          }
+        ]
+      },
+      {
+        "name": "south-wall",
+        "from": [
+          474,
+          702
+        ],
+        "to": [
+          1499,
+          702
+        ],
+        "openings": [
+          {
+            "name": "bedroom-door",
+            "along": "x",
+            "start": 892,
+            "size": 108,
+            "type": "door"
+          },
+          {
+            "name": "powder-room-door",
+            "along": "x",
+            "start": 1290,
+            "size": 87,
+            "type": "door"
+          }
+        ]
+      },
+      {
+        "name": "west-wall",
+        "from": [
+          474,
+          324
+        ],
+        "to": [
+          474,
+          702
+        ],
+        "openings": [
+          {
+            "name": "balcony-door",
+            "along": "z",
+            "start": 393,
+            "size": 110,
+            "type": "glass-door",
+            "sillHeightCm": 0,
+            "headHeightCm": 210,
+            "note": "full-height glass balcony door, charcoal aluminum frame"
+          },
+          {
+            "name": "window",
+            "along": "z",
+            "start": 533,
+            "size": 110,
+            "type": "window",
+            "sillHeightCm": 90,
+            "headHeightCm": 210,
+            "note": "framed window, charcoal aluminum frame; headHeightCm corrected from a literal 120 (spike/geometry.json's \"sill 90 / height 120\" meant a 120cm-tall opening, i.e. head = sill + height = 210, not head = 120)"
+          }
+        ]
+      }
+    ],
+    "shell": {
+      "wall": {
+        "assetHash": "46f85b35b64108286ac0432921262b3258096b2894ab62f0efb80bcbcc366d83",
+        "tint": "#ffffff",
+        "repeat": [
+          4,
+          4
+        ],
+        "roughnessScale": 2
+      },
+      "floor": {
+        "assetHash": "e7443cc8f8c3c50c194403dbd091b69c46cb89c5e537f71b739dfde0309f67d7",
+        "tint": "#ffffff",
+        "repeat": [
+          0.25,
+          0.25
+        ],
+        "roughnessScale": 2
+      },
+      "ceiling": {
+        "assetHash": "a26a757619b1d2d854a32a108ec8e3d70798e3650828808ed722f843595089ad",
+        "tint": "#ffffff",
+        "repeat": [
+          4,
+          4
+        ],
+        "roughnessScale": 0
+      }
+    }
+  },
+  "items": [
+    {
+      "id": "swivel-chair",
+      "name": "West Elm Cozy Swivel Chair",
+      "dimsCm": {
+        "w": 98,
+        "d": 90,
+        "h": 72.9
+      },
+      "sourcePhotoHash": "43dbad53f3108ed59e7e3720192461af631537c5bb423a175f53b0254953b176",
+      "glbHash": "4a9d8ac7102dff6009f208b89c8cf950016a2070cb719b24b8a360f8d2548e91",
+      "notes": "Round barrel-style swivel armchair, charcoal melange fabric. Product page: 38.6\"w x 35.4\"d x 28.7\"h, seat height 16.5\"."
+    },
+    {
+      "id": "tv-stand",
+      "name": "TV Stand",
+      "dimsCm": {
+        "w": 180,
+        "d": 39,
+        "h": 56
+      },
+      "sourcePhotoHash": "fe075c147a225950191eca8e312a78200292fa62880e4bfd785eb150303db819",
+      "glbHash": "948f43d644d050fbc6bdd39417515c9664efe71acf2f71ef4eb38c49dc6bff9d",
+      "notes": "Mid-century oak/ash media unit, white drawer fronts, open middle shelf, tapered legs.",
+      "legHeightCm": 20
+    },
+    {
+      "id": "tv-samsung-frame",
+      "name": "Samsung Frame TV",
+      "dimsCm": {
+        "w": 145.8,
+        "d": 2.5,
+        "h": 83.3
+      },
+      "elevationCm": 70,
+      "sourcePhotoHash": "897b5d32c77b94663a7dc6fe367a494072d1738cd96af2e204862c1e2a01b1c8",
+      "glbHash": "a02d5201da5bbca1247912fe95e80eb14fe7ffeace31d89779e337a6be71383a",
+      "notes": "65\" Samsung The Frame (QN65LS03B, purchased 2023), Beveled-style customizable bezel in White (angled/mitered profile, not the flat Modern style), mounted flush on north wall above TV stand via included slim-fit wall mount. Dims from official Samsung spec (57.4 x 32.8 x 1 in, without stand)."
+    },
+    {
+      "id": "billy-hogadal-shelving",
+      "name": "Billy + Hogadal Unit",
+      "dimsCm": {
+        "w": 160,
+        "d": 30,
+        "h": 149
+      },
+      "sourcePhotoHash": "01bd648c3cd289b7460866d39ceed58be5b39a6499ea342ca8f4e38f64ace714",
+      "glbHash": "60d6fcaf655892d83f009daca07f5b34a1891731085bdbc5f9a31f17b5fcedfe",
+      "notes": "2x BILLY/HOGADAL bookcases with woven bamboo doors on 2x BILLY rolling drawers."
+    },
+    {
+      "id": "water-cooler",
+      "name": "Water Cooler",
+      "dimsCm": {
+        "w": 34,
+        "d": 30,
+        "h": 105
+      },
+      "sourcePhotoHash": "7f8bad6a00143fcb1aedb5ca4cfc3cfdbf2258170f4283e1dcd7f15d5bf23c0a",
+      "glbHash": "e2946f2d0f88538be7dd9eb4930a91819318d3e937c5e7c9c9d8bda73d117bf7",
+      "notes": "Panasonic bottom-load dispenser, black + stainless."
+    },
+    {
+      "id": "dining-table",
+      "name": "Dining Table",
+      "dimsCm": {
+        "w": 153,
+        "d": 92,
+        "h": 76
+      },
+      "sourcePhotoHash": "16f76e0e76e322770aa187a76df0c756119b73c1217a397e876113bce29d0aef",
+      "glbHash": "5d2392630a60c41d4066486fe8554dd228b13b34e8860fbc47024eb9e0f9c286",
+      "notes": "West Elm Modern Expandable, unexpanded; white lacquer top, pecan legs.",
+      "legHeightCm": 69
+    },
+    {
+      "id": "sonderod-rug",
+      "name": "SONDEROD Rug",
+      "dimsCm": {
+        "w": 240,
+        "d": 170,
+        "h": 2
+      },
+      "sourcePhotoHash": "cc96ebe2171d818b4b01b0aece61c95bb1e4767566f69a468b83ac056d4e1c2e",
+      "glbHash": "89332430d26b8da6e2ee41a550ef1c2e6b299f29541851bc1dcfe9b4db3cf291",
+      "notes": "IKEA SONDEROD high-pile rug, blue."
+    },
+    {
+      "id": "coffee-table",
+      "name": "Coffee Table",
+      "dimsCm": {
+        "w": 116,
+        "d": 39,
+        "h": 32
+      },
+      "sourcePhotoHash": "513900022ffaa8aef8aa7ab88e5ac6689509d1ee15ce266756436313527f24e1",
+      "glbHash": "c60771baf03dd2435ad033a843f6cbfd3b26856eabd07ec8587f9a90e988343b",
+      "notes": "IKEA GUTTANE, solid oak, long/narrow/low.",
+      "legHeightCm": 26
+    },
+    {
+      "id": "applaryd-sofa",
+      "name": "APPLARYD Sofa",
+      "shape": "compound-sofa",
+      "main": {
+        "w": 290,
+        "d": 93
+      },
+      "chaise": {
+        "w": 91,
+        "d": 162
+      },
+      "dimsCm": {
+        "w": 290,
+        "d": 162,
+        "h": 82
+      },
+      "backHeightCm": 82,
+      "sourcePhotoHash": "859eb658315b09272abad0b85f89c881b4d589bc3247dd35b7cd47515194b073",
+      "glbHash": "8499422902d34b8eeb5b75aac2edc0ea76c71014079cfd4853339c2ea2ad0ab5",
+      "notes": "L-shape, faces north (toward TV wall). Chaise on WEST end. Dims from IKEA product page — main width 290 corrects the Figma-drawn 322 (drawn footprint included chaise overlap), matching the tv-stand precedent of trusting product specs over the drawn box.",
+      "seatHeightCm": 47,
+      "backrestHeightCm": 70,
+      "armHeightCm": 72,
+      "freeHeightUnderFurnitureCm": 20
+    },
+    {
+      "id": "bookshelf",
+      "name": "Bookshelf",
+      "dimsCm": {
+        "w": 40,
+        "d": 143.5,
+        "h": 72
+      },
+      "sourcePhotoHash": "d3ec4d9c5de19a0265d8e23a371cca115154bc13470c7cb13e59eb1f068b5eeb",
+      "glbHash": "809a2f5b55451d73e8faefab4069c0c17f94918c6ec97cd9b574432cf9f50b7c",
+      "notes": "Pine open bookcase, laid on its side, legs removed. Back particle-board panel removed — open both sides, books (spines out) accessible from either face."
+    },
+    {
+      "id": "shoe-rack",
+      "name": "IKEA STALL Shoe Cabinet",
+      "dimsCm": {
+        "w": 79,
+        "d": 29,
+        "h": 148
+      },
+      "sourcePhotoHash": "7d9b74577091da13511180518551ef338ae25c6698c48768a1ca0c4366ce7136",
+      "glbHash": "b1f8db583bb3596f3f2dd6f0e574f6436cd25effa9d0cdc7a8bc1a6816306fb2",
+      "notes": "White, 3 flip-down compartments, front legs only."
+    },
+    {
+      "id": "floor-lamp",
+      "name": "Floor Lamp",
+      "dimsCm": {
+        "w": 28,
+        "d": 28,
+        "h": 182
+      },
+      "sourcePhotoHash": "6532e5ac5b9ae1c9fb27a726f215f32e685fe5d2de35e9eb36d36f2031ee038c",
+      "glbHash": "92504969e31f30a47d5cea98c5d8cd2eb30a7b33103838b080d608eaadf2a35d",
+      "notes": "New since spike 3. Footprint is base diameter."
+    },
+    {
+      "id": "table-lamp",
+      "name": "Table Lamp",
+      "shape": "box",
+      "dimsCm": {
+        "w": 29,
+        "d": 29,
+        "h": 32
+      },
+      "sourcePhotoHash": "d1a2e49a23dca254dd165a5613b2137729c0a22035aefdef16dcea17b8352959",
+      "glbHash": "a3920c3cb5f3d61a45e0430c7c3e62a8ba491d251795837d0e7c208d9a2ea4f3",
+      "notes": "New since spike 3. Footprint is base diameter. Rests on top of the now-horizontal bookshelf."
+    }
+  ],
+  "cameras": [
+    {
+      "id": "couch-view",
+      "name": "couch-view",
+      "eye": [
+        660,
+        115,
+        640
+      ],
+      "lookAt": [
+        683,
+        120,
+        324
+      ],
+      "fovDeg": 60,
+      "note": "seated on the sofa main seat, looking north at the TV wall"
+    },
+    {
+      "id": "dining-table-view",
+      "name": "dining table view",
+      "eye": [
+        1082.3068348528154,
+        120.99539708899306,
+        511.82391874619765
+      ],
+      "lookAt": [
+        893.7564877449113,
+        78.81711280770473,
+        387.5456368667189
+      ],
+      "fovDeg": 60
+    },
+    {
+      "id": "entryway-view",
+      "name": "entryway-view",
+      "eye": [
+        1136.1088572214967,
+        146.00095092987974,
+        619.8421982701176
+      ],
+      "lookAt": [
+        643.1147353366136,
+        133.3582574742154,
+        422.58537292988626
+      ],
+      "fovDeg": 60
+    }
+  ],
+  "layouts": [
+    {
+      "id": "current",
+      "name": "current",
+      "base": null,
+      "commands": [
+        {
+          "type": "place",
+          "itemId": "swivel-chair",
+          "position": [
+            560.1513775169357,
+            0,
+            383.0277748145662
+          ],
+          "rotationDeg": 45,
+          "note": "NW corner by TV wall; backrest toward the corner, open front facing SE into the room. rotationDeg not meaningful yet (circular footprint, no facing convention defined) — orientation is qualitative until Phase 4 calibration."
+        },
+        {
+          "type": "place",
+          "itemId": "tv-stand",
+          "position": [
+            716.6194149484711,
+            0,
+            354.5710328884335
+          ],
+          "rotationDeg": 0.6649440197893455
+        },
+        {
+          "type": "place",
+          "itemId": "tv-samsung-frame",
+          "position": [
+            714.6776011562766,
+            70,
+            333.8210328884335
+          ],
+          "rotationDeg": 0
+        },
+        {
+          "type": "place",
+          "itemId": "billy-hogadal-shelving",
+          "position": [
+            988.005158774157,
+            0,
+            350.0710328884335
+          ],
+          "rotationDeg": 0
+        },
+        {
+          "type": "place",
+          "itemId": "water-cooler",
+          "position": [
+            1113,
+            0,
+            339
+          ],
+          "rotationDeg": 0
+        },
+        {
+          "type": "place",
+          "itemId": "dining-table",
+          "position": [
+            982.0197659916269,
+            0,
+            491.9519303990645
+          ],
+          "rotationDeg": 270,
+          "note": "rotated 90deg since spike 3; intrinsic dims unchanged (153x92)"
+        },
+        {
+          "type": "place",
+          "itemId": "sonderod-rug",
+          "position": [
+            682.8178825337304,
+            0,
+            540.2924845041215
+          ],
+          "rotationDeg": 0
+        },
+        {
+          "type": "place",
+          "itemId": "coffee-table",
+          "position": [
+            720.0487197664559,
+            0,
+            531.6121144138846
+          ],
+          "rotationDeg": 0
+        },
+        {
+          "type": "place",
+          "itemId": "applaryd-sofa",
+          "position": [
+            682.0606476314049,
+            0,
+            614.9519303990645
+          ],
+          "rotationDeg": 180,
+          "note": "corrected main body center: Figma's drawn main rect (x510 z609 322x93) has its west edge at x510, shared with the chaise's own drawn west edge - shrinking main.w from the drawn 322 to the real 290 while preserving that shared west edge moves the center from 671 to 655 (671 - (322-290)/2). Confirmed against Figma: chaise sits 36cm from the west wall (x510 - x474)."
+        },
+        {
+          "type": "place",
+          "itemId": "bookshelf",
+          "position": [
+            864.6341369357621,
+            0,
+            467.52562800651975
+          ],
+          "rotationDeg": 0
+        },
+        {
+          "type": "place",
+          "itemId": "shoe-rack",
+          "position": [
+            1103.5,
+            0,
+            687.5
+          ],
+          "rotationDeg": 180
+        },
+        {
+          "type": "place",
+          "itemId": "floor-lamp",
+          "position": [
+            492,
+            0,
+            684
+          ],
+          "rotationDeg": 0,
+          "note": "by the sofa's west end"
+        },
+        {
+          "type": "place",
+          "itemId": "table-lamp",
+          "position": [
+            863.810506716558,
+            72,
+            526.6121144138846
+          ],
+          "rotationDeg": 0,
+          "note": "elevationCm 72 = resting on top of the horizontal bookshelf"
+        }
+      ]
+    }
+  ],
+  "current": "current"
+}
