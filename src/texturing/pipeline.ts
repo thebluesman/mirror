@@ -45,7 +45,7 @@ async function rgbaToJpegBlob(img: RgbaImage, quality: number): Promise<Blob> {
   const canvas = new OffscreenCanvas(img.width, img.height);
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("pipeline: 2d context unavailable");
-  const imageData = new ImageData(img.data, img.width, img.height);
+  const imageData = new ImageData(new Uint8ClampedArray(img.data), img.width, img.height);
   ctx.putImageData(imageData, 0, 0);
   return canvas.convertToBlob({ type: "image/jpeg", quality });
 }

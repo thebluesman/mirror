@@ -3,6 +3,9 @@ import seedRaw from "../../seed/living-room.json";
 import {
   SceneFileSchema,
   SCHEMA_VERSION,
+  DEFAULT_SURFACE_CALIBRATION,
+  ShellCalibrationSchema,
+  SurfaceCalibrationSchema,
   migrate,
   parseScene,
   type SceneFile,
@@ -147,5 +150,49 @@ describe("parseScene (migrate + validate) and round-trip", () => {
     const westWall = scene.room.walls.find((w) => w.name === "west-wall");
     const balcony = westWall?.openings?.find((o) => o.name === "balcony-door");
     expect(balcony?.type).toBe("glass-door");
+  });
+});
+
+describe("shell texture calibration (Phase 3)", () => {
+  it("is optional — a scene with no room.shell still validates (old files unaffected)", () => {
+    expect(() => SceneFileSchema.parse(minimalV1())).not.toThrow();
+    const scene = SceneFileSchema.parse(minimalV1());
+    expect(scene.room.shell).toBeUndefined();
+  });
+
+  it("accepts a partial shell (only some surfaces calibrated)", () => {
+    const scene = minimalV1() as any;
+    scene.room.shell = { wall: { tint: "#ffcc00", repeat: [2, 1.5], roughnessScale: 0.8 } };
+    const parsed = SceneFileSchema.parse(scene);
+    expect(parsed.room.shell?.wall?.tint).toBe("#ffcc00");
+    expect(parsed.room.shell?.floor).toBeUndefined();
+  });
+
+  it("SurfaceCalibrationSchema fills in defaults for an empty object", () => {
+    const parsed = SurfaceCalibrationSchema.parse({});
+    expect(parsed).toEqual({ tint: "#ffffff", repeat: [1, 1], roughnessScale: 1 });
+  });
+
+  it("carries assetHash through and defaults DEFAULT_SURFACE_CALIBRATION matches the schema default", () => {
+    const parsed = SurfaceCalibrationSchema.parse({ assetHash: "abc123" });
+    expect(parsed.assetHash).toBe("abc123");
+    expect({ tint: parsed.tint, repeat: parsed.repeat, roughnessScale: parsed.roughnessScale }).toEqual(
+      DEFAULT_SURFACE_CALIBRATION,
+    );
+  });
+
+  it("ShellCalibrationSchema round-trips through JSON like the rest of the scene", () => {
+    const scene = minimalV1() as any;
+    scene.room.shell = {
+      wall: { assetHash: "h1", tint: "#eeeeee", repeat: [1.2, 1], roughnessScale: 1 },
+      floor: { assetHash: "h2", tint: "#ffffff", repeat: [10.9, 6.3], roughnessScale: 1 },
+    };
+    const parsed = parseScene(scene);
+    const roundTripped = parseScene(JSON.parse(JSON.stringify(parsed)));
+    expect(roundTripped).toEqual(parsed);
+  });
+
+  it("rejects a malformed calibration (repeat must be a 2-tuple)", () => {
+    expect(() => ShellCalibrationSchema.parse({ wall: { repeat: [1, 2, 3] } })).toThrow();
   });
 });
