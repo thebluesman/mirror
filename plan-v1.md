@@ -87,9 +87,35 @@ wall/opening-cutting logic to any wall run; furniture renders as generic
 `dimsCm` boxes (no GLBs exist yet — that's Phase 4) with a compound-sofa
 special case for the seed's main/chaise sub-footprints. Verified in-browser
 via Playwright: renders room + furniture from `seed/living-room.json` with no
-console errors, orbit-drag repositions the camera. No `/code-review` run yet
-(user hasn't triggered it) — flagged for Shyam to run before Phase 2/3 start
-if wanted.
+console errors, orbit-drag repositions the camera.
+
+**`/code-review` pass, 2026-07-21:** 8 findings; the 2 real rendering bugs
+(TV mount elevation double-counted, window sill/head height ignoring the
+seed's `sillHeightCm`/`headHeightCm`) are fixed in `buildScene.ts`. The other
+6 are deferred, not forgotten — each is owned by the phase below that's
+positioned to fix it properly rather than patched ad-hoc in Phase 1:
+
+- **Phase 2 (schema)**: `WallOpening.type` has no `"glass-door"` value, so
+  the seed's full-height glass balcony door (typed `"door"`) renders as an
+  opaque leaf, losing its glazing — needs a real schema type, not a Phase 1
+  patch. Also: `FurnitureItem.dimsCm` is typed required but the seed's
+  `applaryd-sofa` omits it (main/chaise only) — `furnitureFootprint()` in
+  `buildScene.ts` has an unguarded `item.dimsCm.w` fallback that will throw
+  on a future item that's neither fully `dimsCm` nor fully `main`+`chaise`.
+- **Phase 3 (texturing)/general polish**: floor/ceiling planes aren't
+  `THREE.DoubleSide` and `OrbitControls` isn't polar-angle-clamped, so
+  orbiting under the floor or over the ceiling shows the background color
+  through them.
+- **Viewport hardening (no owning phase yet — flag before Phase 5 polish)**:
+  scene geometries/materials are never disposed on unmount (confirmed
+  leaking one full scene's worth of GPU buffers on React 19 StrictMode's
+  dev-mode double-invoke); `camera.fov = preset.fovDeg || HUMAN_FOV` uses
+  `||` instead of `??` (silently drops a legitimate `fovDeg: 0` preset).
+- **Phase 4 (furniture import) altitude note**: `furnitureFootprint()`
+  dispatches the compound-sofa case on `item.main && item.chaise` presence
+  rather than a modeled shape discriminant — fine for now, but Phase 4's
+  per-item GLB-swap logic will want a real discriminant to hook into rather
+  than special-casing around this presence-check.
 
 **Exit:** `npm run dev` shows the room shell from seed data with camera control.
 Merged, reviewed, journaled.

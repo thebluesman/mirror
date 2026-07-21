@@ -54,7 +54,13 @@ function addWall(scene: THREE.Scene, wallDef: WallDef, wallHeight: number) {
   const s0 = horizontal ? Math.min(x0, x1) : Math.min(z0, z1);
 
   const openings = (wallDef.openings ?? [])
-    .map((o) => ({ start: o.start - s0, end: o.start + o.size - s0, type: o.type }))
+    .map((o) => ({
+      start: o.start - s0,
+      end: o.start + o.size - s0,
+      type: o.type,
+      sillHeightCm: o.sillHeightCm,
+      headHeightCm: o.headHeightCm,
+    }))
     .sort((a, b) => a.start - b.start);
 
   let cursor = 0;
@@ -117,16 +123,20 @@ function addWall(scene: THREE.Scene, wallDef: WallDef, wallHeight: number) {
       addSegment(o.start, o.end, 210, wallHeight); // lintel
       addInWallSlab(o.start + 2, o.end - 2, 0, 208, 4, MAT.doorLeaf);
     } else if (o.type === "window") {
-      addSegment(o.start, o.end, 0, 90); // sill wall below
-      addSegment(o.start, o.end, 210, wallHeight); // lintel above
-      addInWallSlab(o.start, o.start + F, 90, 210, 8, MAT.frame);
-      addInWallSlab(o.end - F, o.end, 90, 210, 8, MAT.frame);
-      addInWallSlab(o.start + F, o.end - F, 90, 96, 8, MAT.frame);
-      addInWallSlab(o.start + F, o.end - F, 204, 210, 8, MAT.frame);
+      const sill = o.sillHeightCm ?? 90;
+      const head = o.headHeightCm ?? 210;
+      const paneTop = head - F;
+      const paneBottom = sill + F;
+      addSegment(o.start, o.end, 0, sill); // sill wall below
+      addSegment(o.start, o.end, head, wallHeight); // lintel above
+      addInWallSlab(o.start, o.start + F, sill, head, 8, MAT.frame);
+      addInWallSlab(o.end - F, o.end, sill, head, 8, MAT.frame);
+      addInWallSlab(o.start + F, o.end - F, sill, paneBottom, 8, MAT.frame);
+      addInWallSlab(o.start + F, o.end - F, paneTop, head, 8, MAT.frame);
       const mid = (o.start + o.end) / 2;
-      addInWallSlab(mid - 2, mid + 2, 96, 204, 8, MAT.frame);
-      addInWallSlab(o.start + F, mid - 2, 96, 204, 2, glassMat, true);
-      addInWallSlab(mid + 2, o.end - F, 96, 204, 2, glassMat, true);
+      addInWallSlab(mid - 2, mid + 2, paneBottom, paneTop, 8, MAT.frame);
+      addInWallSlab(o.start + F, mid - 2, paneBottom, paneTop, 2, glassMat, true);
+      addInWallSlab(mid + 2, o.end - F, paneBottom, paneTop, 2, glassMat, true);
     }
   });
 }
@@ -155,11 +165,13 @@ function addFurniture(
   group.position.set(position[0], position[1], position[2]);
   group.rotation.y = THREE.MathUtils.degToRad(rotationDeg);
 
-  const elevation = (item.elevationCm as number) ?? 0;
+  // Elevation is already baked into `position[1]` by the layout command (see
+  // e.g. table-lamp/tv-samsung-frame in seed/living-room.json) — don't add
+  // item.elevationCm again here, or items with both end up floating 2x high.
   furnitureFootprint(item).forEach((part) => {
     const geo = new THREE.BoxGeometry(part.w, part.h, part.d);
     const mesh = new THREE.Mesh(geo, MAT.furniture);
-    mesh.position.set(part.offsetX, elevation + part.h / 2, part.offsetZ);
+    mesh.position.set(part.offsetX, part.h / 2, part.offsetZ);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     group.add(mesh);
