@@ -57,7 +57,34 @@ Status: started, see `v2/spike-arrange` branch.
 
 ## R1 — Hunyuan3D (fal.ai) endpoint/pricing survey
 
-Status: started.
+**Status: done.** Full memo: `spike-v2/R1-hunyuan-memo.md`.
+
+Two fal-hosted model families exist: **v2** (`fal-ai/hunyuan3d/v2` +
+`/turbo`/`/mini`/`/mini/turbo`, single-image; `/multi-view` +
+`/multi-view/turbo`, multi-image via named per-angle fields) and **v3.1**
+(`fal-ai/hunyuan-3d/v3.1/pro/image-to-3d` — up to 8 view angles, best
+quality; `/rapid/image-to-3d` — single front view, cheaper). Best-fit guess
+for what Shyam actually tried is **v3.1 Pro** (only endpoint matching both
+"noticeably better" and "multi-angle"), but that's inferred, not confirmed —
+D5 should check his fal dashboard history rather than assume.
+
+All variants are cheaper per-run than Meshy's ~$0.80 (v3.1 Pro + PBR +
+multi-view tops out around $0.60–0.70 worst case) — cost isn't a blocker
+either way, though the memo flags the v2/multi-view figure as unreliable
+(conflicting sources) and wants live confirmation before D5 finalizes
+budget. CORS: same fal queue-job platform as Meshy (`fal.storage.upload` /
+`fal.subscribe`), so the three legs ADR-0001 verified should carry over —
+inferred with high confidence from platform consistency, but not
+empirically re-tested (fal.ai's site 403'd a plain fetch during this
+research pass), so D5 still needs to verify it for real, same discipline as
+ADR-0001 used for Meshy. Handily, Hunyuan's output field (`model_mesh.url`)
+already matches `falClient.ts`'s first `GLB_URL_KEY_CANDIDATES` entry.
+
+Protocol recommendation for D5: don't generalize `falClient.ts` into a
+multi-provider abstraction — write a small parallel `hunyuanClient.ts`-style
+module (single-image comparison, reusing the upload/extractGlbUrl helpers)
+plus a separate function for the multi-angle test, living in `spike-v2/`
+per §4 ("W-C is scripted"), not app code.
 
 ## D2/D3/D4/D5 — not started
 
