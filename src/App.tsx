@@ -2,11 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import seedRaw from "../seed/living-room.json";
 import { Viewport, type ViewportHandle } from "./components/Viewport";
 import { ViewportChrome } from "./components/ViewportChrome";
+import { LayoutChrome } from "./components/LayoutChrome";
 import { ShellPanel } from "./components/ShellPanel";
 import { ImportPanel } from "./components/ImportPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { parseScene, type CameraPosition, type SceneFile, type SurfaceCalibration } from "./schema/scene";
 import { makeCameraPosition } from "./scene/cameraViewpoints";
+import { makeLayout } from "./scene/layouts";
 import { loadProject, saveProjectDebounced, saveProjectNow } from "./storage/autosave";
 import "./App.css";
 
@@ -100,6 +102,39 @@ function App() {
     void saveProjectNow(next);
   }
 
+  // D3 (v2 spike, W-A persistence): saving/deleting a layout, and switching
+  // which one is `current`, are each a discrete, deliberate action — same
+  // immediate-persist treatment as handleSaveView/handleDeleteView above,
+  // for the same reason (not a continuously-dragged value to debounce).
+  function handleSwitchLayout(id: string) {
+    if (!sceneFile) return;
+    const next: SceneFile = { ...sceneFile, current: id };
+    setSceneFile(next);
+    void saveProjectNow(next);
+  }
+
+  function handleSaveLayout(name: string): boolean {
+    if (!sceneFile) return false;
+    const source = sceneFile.layouts.find((l) => l.id === sceneFile.current);
+    if (!source) return false;
+    const layout = makeLayout(name, source, sceneFile.layouts);
+    const next: SceneFile = { ...sceneFile, layouts: [...sceneFile.layouts, layout], current: layout.id };
+    setSceneFile(next);
+    void saveProjectNow(next);
+    return true;
+  }
+
+  function handleDeleteLayout(id: string) {
+    if (!sceneFile) return;
+    // LayoutChrome already disables deleting the last remaining layout or
+    // the currently active one (so `current` never dangles) — this is a
+    // second guard against the same invariant, not the only one.
+    if (id === sceneFile.current || sceneFile.layouts.length <= 1) return;
+    const next: SceneFile = { ...sceneFile, layouts: sceneFile.layouts.filter((l) => l.id !== id) };
+    setSceneFile(next);
+    void saveProjectNow(next);
+  }
+
   // v2 spike (W-A, `v2/spike-arrange`): Viewport's drag-release/rotate-step
   // gesture handlers call this exactly once per gesture (never per-frame —
   // see Viewport.tsx's mutate-during-gesture seam) with the item's final
@@ -140,6 +175,13 @@ function App() {
                 sceneFile={sceneFile}
                 shellCalibration={sceneFile.room.shell}
                 onCommitPlacement={commitPlacement}
+              />
+              <LayoutChrome
+                layouts={sceneFile.layouts}
+                currentId={sceneFile.current}
+                onSwitch={handleSwitchLayout}
+                onSave={handleSaveLayout}
+                onDelete={handleDeleteLayout}
               />
               <ViewportChrome
                 cameras={sceneFile.cameras}

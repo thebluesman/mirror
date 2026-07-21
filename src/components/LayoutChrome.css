@@ -1,0 +1,15 @@
+/* D3: LayoutChrome reuses ViewportChrome.css's pill/bar classes (imported
+ * alongside this file) but needs its own position — ViewportChrome already
+ * owns bottom-center for camera viewpoints — and a way to mark the active
+ * layout's pill, which camera viewpoints have no equivalent of (recall
+ * doesn't leave one view "current"). */
+
+.viewport-chrome--top {
+  top: var(--space-24);
+  bottom: auto;
+}
+
+.viewport-chrome-pill--active {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: var(--color-canvas);
+}

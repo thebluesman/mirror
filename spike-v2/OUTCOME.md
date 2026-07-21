@@ -284,8 +284,84 @@ matters here and holds cleanly.)
   the seed's ~13-item scale, but an obvious spot to revisit if D3's
   multi-layout work or a larger real room makes per-move cost noticeable.
 
-## D3/D4/D5 — not started
+## D3 — W-A persistence: named layouts + replace via re-import
 
-D3 (W-A persistence: named layouts + replace) is next, same branch/files as
-D1/D2 per the delegation map. D4/D5 remain blocked on Shyam's inputs (D4's
-rug photo; D5's FAL_KEY plus item/multi-angle photos).
+**Status: built, evidence captured, awaiting C1 alongside D1/D2.** Branch:
+`v2/spike-arrange`. Screenshots: `spike-v2/d3-screenshots/`, captured by
+`spike-v2/d3-layouts-drive.mjs` (same one-off-Playwright-driver shape as
+D1/D2's evidence scripts).
+
+**Replace via re-import — already done, not new work here.** Checked
+before building anything: Phase 5's acceptance-run fix (plan-v1.md, "Re-
+import blocked for already-imported items") already made every item a
+re-import target, with a warning before replacing an already-imported
+one's photo/model/dims/orientation (`ImportPanel.tsx`/`applyImport.ts`).
+Item identity (`itemId`) is separate from placement (`layouts[].commands`,
+keyed by `itemId`) and from the asset (`glbHash`) — so replacing an asset
+never touches any layout's placement commands, in the current layout or
+any other. Confirmed by reading `applyFurnitureImport`, not re-verified
+live here (no fal.ai key in this session — same gap D1/D4/D5 flag).
+
+**What's new for named layouts:**
+- **`src/scene/layouts.ts`** — `makeLayout()`, pure: snapshots a source
+  layout's current `commands` into a new named `Layout` (slugified,
+  de-duplicated id via the same `util/slug.ts` scheme `cameraViewpoints.ts`
+  uses for saved views), recording `base: source.id` per the schema's
+  documented intent (`schema/scene-schema-draft.md`: "base: parent layoutId").
+  A full copy, not a diff — `buildScene.ts`/`Viewport.tsx` read a layout's
+  `commands` directly with no base-merge step, so a diff-only layout
+  wouldn't render correctly yet; this proves the `layouts[]`/`current`
+  shape works as authored since v1, it doesn't redesign it.
+- **`src/components/LayoutChrome.tsx`** — a second floating pill bar
+  (top-center, via a `.viewport-chrome--top` CSS override so it doesn't
+  collide with `ViewportChrome`'s existing bottom-center camera-viewpoint
+  bar), same save/name/delete interaction pattern as `ViewportChrome`.
+  Clicking a layout's pill switches to it; the active layout's pill is
+  visually distinct; deleting the last remaining layout or the currently
+  active one is disabled (would leave `sceneFile.current` pointing at
+  nothing) rather than silently no-op'd.
+- **`App.tsx`** — `handleSwitchLayout`/`handleSaveLayout`/`handleDeleteLayout`,
+  same "discrete, deliberate action, persist immediately" treatment as
+  `handleSaveView`/`handleDeleteView` already use for camera viewpoints.
+  Switching layouts sets `sceneFile.current`, which was already a
+  structural-rebuild dependency in `Viewport.tsx` (D1's comment: "switching
+  to a different saved layout is a structural change... and should get a
+  real rebuild, unlike an in-place edit to the current layout's commands")
+  — so layout switching needed no Viewport changes at all, just proof the
+  existing wiring does what it was built for.
+
+**Tests**: `src/scene/layouts.test.ts` — command copy is a real copy (not
+a shared reference), `base` is recorded, id slugification/de-duplication,
+blank-name fallback. `npx vitest run` — 79 tests, all passing (75 pre-
+existing + 4 new). `npx tsc -b`, `npm run build`, and `oxlint` all clean.
+
+**Evidence** (`d3-layouts-drive.mjs`, against a running dev server and the
+real seed): starting from the seed's single `current` layout, saving a new
+"Weekend" layout shows both pills with "Weekend" active
+(`1-after-save-second-layout.png`); clicking "current" switches back
+(`2-switched-back-to-current.png`); reloading the page keeps both layouts
+and the active selection (`3-after-reload.png`) — IndexedDB read-back
+confirms `layouts` and `current` are byte-identical before and after
+reload (`PERSISTENCE OK`), the same persistence-proof discipline D1 used
+for move/rotate.
+
+**Rough edges found (surfacing per §6, not hiding them):**
+- `applyFurnitureImport`'s existing "add a default placement if the
+  current layout doesn't have one for this item" logic (Phase 4) only
+  ever checks `scene.current` — importing/replacing while a *non-default*
+  layout is active, for an item that layout hasn't placed yet, adds a
+  `[0,0,0]` default command to *that* layout only, leaving other layouts
+  as they were. This is arguably correct (each layout tracks its own
+  placement) but untested here — D3's evidence only exercises save/
+  switch/reload, not import-while-on-a-non-default-layout. Worth a
+  deliberate check at C1 if Shyam's hands-on drive touches it.
+- No UI affordance to rename a layout after saving (camera viewpoints have
+  the same gap) — save-as-new with a new name is the only path; not
+  required by the plan's bar ("save current arrangement as a named layout,
+  make a second one, switch between them") but a natural follow-up if D3's
+  branch becomes v2's real seed.
+
+## D4/D5 — not started
+
+Blocked on Shyam's inputs (D4's rug photo; D5's FAL_KEY plus item/
+multi-angle photos).
