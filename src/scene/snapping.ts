@@ -60,9 +60,25 @@ export function snapPosition(
   others: AABB[],
   threshold: number = SNAP_THRESHOLD_CM,
 ): SnapResult {
-  const targets = [...walls, ...others];
-  const targetsX: Interval[] = targets.map((t) => ({ min: t.minX, max: t.maxX }));
-  const targetsZ: Interval[] = targets.map((t) => ({ min: t.minZ, max: t.maxZ }));
+  // A wall's AABB is thin along the one axis its face actually points on —
+  // the other axis is just the wall run's extent (its endpoints/corners),
+  // not a real perpendicular face. Code-review finding: feeding a wall's
+  // full AABB into both axes' target lists let an item snap its X (say) to
+  // a horizontal wall's run endpoint as if that were a wall face there,
+  // even with no actual wall along that axis at that point. Restricting
+  // each wall to its own thin axis fixes it; item AABBs are unaffected —
+  // a placed item genuinely has a real face on every side, so both axes
+  // stay valid snap targets for `others`.
+  const wallTargetsX: Interval[] = [];
+  const wallTargetsZ: Interval[] = [];
+  walls.forEach((w) => {
+    if (w.maxX - w.minX <= w.maxZ - w.minZ) wallTargetsX.push({ min: w.minX, max: w.maxX });
+    else wallTargetsZ.push({ min: w.minZ, max: w.maxZ });
+  });
+  const itemTargetsX: Interval[] = others.map((t) => ({ min: t.minX, max: t.maxX }));
+  const itemTargetsZ: Interval[] = others.map((t) => ({ min: t.minZ, max: t.maxZ }));
+  const targetsX = [...wallTargetsX, ...itemTargetsX];
+  const targetsZ = [...wallTargetsZ, ...itemTargetsZ];
 
   const deltaX = bestSnapDelta({ min: movingAABB.minX, max: movingAABB.maxX }, targetsX, threshold);
   const deltaZ = bestSnapDelta({ min: movingAABB.minZ, max: movingAABB.maxZ }, targetsZ, threshold);

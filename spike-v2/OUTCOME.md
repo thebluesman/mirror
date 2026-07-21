@@ -386,6 +386,25 @@ already flagged as colliding in that state regardless of which way it
 snaps, so nothing is hidden from the user. `npx vitest run` (80 tests),
 `npx tsc -b`, `npm run build`, and `oxlint` all clean after the fixes.
 
+**PR #10 review (Shyam), 2026-07-21:** one more correctness finding, caught
+after the self-review above had already gone out — `snapping.ts`'s
+`snapPosition` merged `walls` and `others` into one flat target list before
+building the per-axis candidate lists (`targets = [...walls, ...others]`),
+feeding every wall's full AABB into *both* axes uniformly. A wall's AABB is
+only thin (a real face) along the axis its face actually points on; the
+other axis is just the wall run's extent — its endpoints/corners, not a
+face. For a horizontal wall (e.g. `x:[0,400]`, `z:[-5,5]`), that meant an
+item near `x=0` or `x=400` could snap its X there even with no actual
+X-facing wall present, purely because that's where the wall run happens to
+end — masked in the existing tests, which only ever exercised a wall on
+its own real (thin) axis. Fixed: walls now contribute only to the axis
+they're thin on; `others` (real furniture items, which do have a genuine
+face on every side) are unaffected. Two new regression tests in
+`snapping.test.ts` reproduce the exact failure (confirmed failing against
+the pre-fix code, passing after) for both a horizontal and a vertical
+wall's spurious cross-axis endpoint. `npx vitest run` (82 tests), `npx tsc
+-b`, `npm run build`, and `oxlint` all clean after the fix.
+
 ## D4/D5 — not started
 
 Blocked on Shyam's inputs (D4's rug photo; D5's FAL_KEY plus item/

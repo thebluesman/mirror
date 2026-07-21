@@ -64,4 +64,36 @@ describe("snapPosition", () => {
     expect(result.snappedX).toBe(true);
     expect(result.snappedZ).toBe(true);
   });
+
+  it("does not snap X to a horizontal wall's run endpoint (code-review finding)", () => {
+    // A horizontal wall (long in X, thin in Z) — its AABB is x:[0,400],
+    // z:[-5,5]. x=0 is just where the wall run happens to end, not a face
+    // perpendicular to X; only its z:[-5,5] band is a real face. An item
+    // dragged near x=0 (far from any actual X-facing wall) must not snap
+    // its X to the wall's endpoint.
+    const room: Pick<Room, "walls"> = { walls: [{ name: "north", from: [0, 0], to: [400, 0] }] };
+    const walls = wallFootprintAABBs(room);
+    const item = box("a", 100, 60);
+    // Centered so its west edge (minX) sits 3cm from x=0 -- well within
+    // SNAP_THRESHOLD_CM if the endpoint were (wrongly) treated as a target
+    // -- but far from the wall's actual z:[-5,5] face (z=500).
+    const position: [number, number, number] = [53, 0, 500];
+    const aabb = itemFootprintAABB(item, position, 0);
+    const result = snapPosition(aabb, position, walls, [], SNAP_THRESHOLD_CM);
+    expect(result.snappedX).toBe(false);
+    expect(result.position[0]).toBe(53);
+  });
+
+  it("does not snap Z to a vertical wall's run endpoint (code-review finding)", () => {
+    // A vertical wall (long in Z, thin in X) — its AABB is x:[-5,5],
+    // z:[0,400]. z=0 is just where the run ends, not a real Z-facing face.
+    const room: Pick<Room, "walls"> = { walls: [{ name: "west", from: [0, 0], to: [0, 400] }] };
+    const walls = wallFootprintAABBs(room);
+    const item = box("a", 60, 100);
+    const position: [number, number, number] = [500, 0, 53];
+    const aabb = itemFootprintAABB(item, position, 0);
+    const result = snapPosition(aabb, position, walls, [], SNAP_THRESHOLD_CM);
+    expect(result.snappedZ).toBe(false);
+    expect(result.position[2]).toBe(53);
+  });
 });
