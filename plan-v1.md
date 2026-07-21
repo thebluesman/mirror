@@ -271,6 +271,20 @@ the riskiest flow in v1. Whichever of 3/4 merges second rebases.
 **Exit:** one real furniture item goes photo → Meshy → placed in the rendered
 room, in-app, with a paid generation Shyam approved.
 
+**Handoff note (2026-07-21):** Shyam is out of usage budget for this session;
+realladygrey (GitHub collaborator) is picking up all four checklist items
+above. Nothing in the build itself requires Shyam specifically — the fal.ai
+key used for dev/testing can be hers, and any photo works for building/
+testing the flow. Only the **exit criterion** is Shyam-specific: the final
+acceptance run needs his real furniture photo and his approval to pay for
+that generation. Recommended split: she builds + tests the full flow
+end-to-end on her own key/test photo through a `v1/import` branch (worktree,
+per this plan's branch discipline), following the same phase-interruption
+convention as Phase 3 (`HANDOFF.md` if she doesn't finish in one sitting,
+`/code-review` before merge); Shyam runs the real photo → paid generation →
+exit-criterion check himself once her branch is ready, since that step is
+what the exit criterion actually requires him for.
+
 ### Phase 5 — View polish + acceptance (`v1/polish`)
 
 - [ ] Named camera viewpoints (save/recall), viewport chrome per PRD §9
