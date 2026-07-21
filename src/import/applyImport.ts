@@ -3,7 +3,7 @@
 // item + ensure it has a placement" logic is unit-testable without a
 // browser/IndexedDB/OPFS in the loop.
 
-import type { Dims, FurnitureItem, PlaceCommand, SceneFile } from "../schema/scene";
+import type { Dims, FurnitureItem, ModelRotation, PlaceCommand, SceneFile } from "../schema/scene";
 
 export interface ImportResult {
   /** Existing item id to attach the import to, or a fresh id for a brand-new
@@ -15,6 +15,10 @@ export interface ImportResult {
   dimsCm: Dims;
   sourcePhotoHash: string;
   glbHash: string;
+  /** Pre-scale orientation correction for a Meshy GLB that came out lying
+   *  on its side or facing backwards (see loadFurnitureModel.ts). Omitted
+   *  (or all-zero) means the model needs no correction. */
+  modelRotationDeg?: ModelRotation;
 }
 
 /**
@@ -38,6 +42,10 @@ export function applyFurnitureImport(scene: SceneFile, result: ImportResult): Sc
         dimsCm: result.dimsCm,
         sourcePhotoHash: result.sourcePhotoHash,
         glbHash: result.glbHash,
+        // Full replace, not merge: a re-import onto an existing item (e.g.
+        // fixing a wrong source photo) clears a stale correction from the
+        // old model rather than carrying it onto the new one.
+        modelRotationDeg: result.modelRotationDeg,
       } as FurnitureItem;
     });
   } else {
@@ -48,6 +56,7 @@ export function applyFurnitureImport(scene: SceneFile, result: ImportResult): Sc
       dimsCm: result.dimsCm,
       sourcePhotoHash: result.sourcePhotoHash,
       glbHash: result.glbHash,
+      modelRotationDeg: result.modelRotationDeg,
     };
     items = [...scene.items, newItem];
   }

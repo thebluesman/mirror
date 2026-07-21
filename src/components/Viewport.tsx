@@ -151,7 +151,7 @@ export const Viewport = forwardRef<
       loadFurnitureModel(glbHash)
         .then((model) => {
           if (cancelled) return;
-          fitModelToDims(model, furnitureOverallDims(item));
+          fitModelToDims(model, furnitureOverallDims(item), item.modelRotationDeg);
           group.add(model);
         })
         .catch((err) => {

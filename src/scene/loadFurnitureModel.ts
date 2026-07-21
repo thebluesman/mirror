@@ -9,7 +9,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { getAsset } from "../storage/assets";
-import type { Dims } from "../schema/scene";
+import type { Dims, ModelRotation } from "../schema/scene";
 
 /** Decodes a stored GLB into a fresh THREE.Object3D. Throws if the hash isn't
  *  in the asset store — callers should already know it's there (it came from
@@ -35,8 +35,38 @@ export async function loadFurnitureModel(glbHash: string): Promise<THREE.Object3
  * whatever native units the loaded GLB uses (glTF convention is meters, but
  * this only cares about the ratio, not the unit name) and to land directly
  * in the app's cm-scaled scene coordinates. Mutates `model` in place.
+ *
+ * `modelRotationDeg`, if given, is applied *before* the bounding box is
+ * measured — Meshy doesn't guarantee a generated GLB comes out upright or
+ * forward-facing (spike 3 hit this same class of bug), so a model that's
+ * lying on its side or facing backwards needs correcting before its local
+ * axes are read as width/height/depth, not after (a post-hoc yaw on an
+ * already axis-fit model can't undo a bad axis assignment).
+ *
+ * The correction rotation goes on an inner wrapper, not on `model` itself:
+ * `Object3D.scale` is applied in the node's *own* local axes (scale, then
+ * rotation, then translation, in that composition order), so if `model`
+ * carried both the correction rotation and the fitted scale, `model.scale`
+ * would still act along the pre-rotation axes — not the post-rotation axes
+ * the bounding box below is measured in. Keeping `model`'s own rotation at
+ * identity and pushing the correction into a child means `model.scale` (set
+ * further down) operates in the same frame the box was measured in.
  */
-export function fitModelToDims(model: THREE.Object3D, dims: Dims): void {
+export function fitModelToDims(model: THREE.Object3D, dims: Dims, modelRotationDeg?: ModelRotation): void {
+  if (modelRotationDeg) {
+    const wrapper = new THREE.Group();
+    wrapper.rotation.set(
+      THREE.MathUtils.degToRad(modelRotationDeg.x),
+      THREE.MathUtils.degToRad(modelRotationDeg.y),
+      THREE.MathUtils.degToRad(modelRotationDeg.z),
+    );
+    while (model.children.length > 0) {
+      wrapper.add(model.children[0]);
+    }
+    model.add(wrapper);
+    model.updateMatrixWorld(true);
+  }
+
   const box = new THREE.Box3().setFromObject(model);
   const size = new THREE.Vector3();
   box.getSize(size);

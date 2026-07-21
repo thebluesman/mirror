@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { Dims, FurnitureItem, SceneFile } from "../schema/scene";
+import type { Dims, FurnitureItem, ModelRotation, SceneFile } from "../schema/scene";
 import { loadFalKey } from "../storage/settings";
 import { putAsset } from "../storage/assets";
 import { generateFurnitureGlb, FalKeyMissingError, type GenerationPhase } from "../import/falClient";
@@ -11,12 +11,18 @@ type Stage =
   | { kind: "pick" }
   | { kind: "confirm-cost"; photo: File }
   | { kind: "generating"; photo: File; phase: GenerationPhase; message?: string }
-  | { kind: "confirm-dims"; glbBlob: Blob; photoBlob: Blob | File; dims: Dims }
+  | { kind: "confirm-dims"; glbBlob: Blob; photoBlob: Blob | File; dims: Dims; modelRotationDeg: ModelRotation }
   | { kind: "error"; message: string; photo: File; photoUrl: string | null };
 
 function dimsOf(item: FurnitureItem | undefined): Dims {
   if (item?.dimsCm) return item.dimsCm;
   return { w: 50, d: 50, h: 50 };
+}
+
+const ZERO_ROTATION: ModelRotation = { x: 0, y: 0, z: 0 };
+
+function modelRotationOf(item: FurnitureItem | undefined): ModelRotation {
+  return item?.modelRotationDeg ?? ZERO_ROTATION;
 }
 
 const PROGRESS_LABEL: Record<GenerationPhase, string> = {
@@ -33,7 +39,10 @@ export function ImportPanel({
   sceneFile: SceneFile;
   onImported: (next: SceneFile) => void;
 }) {
-  const importableItems = sceneFile.items.filter((i) => !i.glbHash);
+  // All items are selectable, including ones with a glbHash already —
+  // picking an already-imported item re-runs the import and replaces its
+  // photo/model/dims/orientation (fixes a wrong source photo without
+  // needing a separate "delete and re-add" flow).
   const [selection, setSelection] = useState<string>("__new__");
   const [newName, setNewName] = useState("");
   const [hasFalKey, setHasFalKey] = useState<boolean | null>(null);
@@ -43,16 +52,6 @@ export function ImportPanel({
   useEffect(() => {
     loadFalKey().then((key) => setHasFalKey(key !== null));
   }, []);
-
-  // Once the selected item picks up a glbHash (via a completed import) it
-  // drops out of importableItems on the next render — keep the dropdown
-  // pointed at something that still exists instead of a stale id.
-  useEffect(() => {
-    if (selection !== "__new__" && !importableItems.some((i) => i.id === selection)) {
-      setSelection("__new__");
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-check when the importable set changes
-  }, [importableItems.length]);
 
   const selectedItem = selection === "__new__" ? undefined : sceneFile.items.find((i) => i.id === selection);
 
@@ -74,14 +73,20 @@ export function ImportPanel({
           uploadedUrl = url;
         },
       );
-      setStage({ kind: "confirm-dims", glbBlob, photoBlob: photo, dims: dimsOf(selectedItem) });
+      setStage({
+        kind: "confirm-dims",
+        glbBlob,
+        photoBlob: photo,
+        dims: dimsOf(selectedItem),
+        modelRotationDeg: modelRotationOf(selectedItem),
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setStage({ kind: "error", message, photo, photoUrl: uploadedUrl });
     }
   }
 
-  async function handleConfirmDims(dims: Dims) {
+  async function handleConfirmDims(dims: Dims, modelRotationDeg: ModelRotation) {
     if (stage.kind !== "confirm-dims") return;
     const { glbBlob, photoBlob } = stage;
 
@@ -95,12 +100,15 @@ export function ImportPanel({
           )
         : selection;
 
+    const isZeroRotation = modelRotationDeg.x === 0 && modelRotationDeg.y === 0 && modelRotationDeg.z === 0;
+
     const next = applyFurnitureImport(sceneFile, {
       itemId,
       newItemName: selection === "__new__" ? newName || "New item" : undefined,
       dimsCm: dims,
       sourcePhotoHash,
       glbHash,
+      modelRotationDeg: isZeroRotation ? undefined : modelRotationDeg,
     });
     onImported(next);
     setStage({ kind: "pick" });
@@ -131,9 +139,10 @@ export function ImportPanel({
             <span>Item</span>
             <select value={selection} onChange={(e) => setSelection(e.target.value)}>
               <option value="__new__">+ New item…</option>
-              {importableItems.map((item) => (
+              {sceneFile.items.map((item) => (
                 <option key={item.id} value={item.id}>
                   {item.name}
+                  {item.glbHash ? " (re-import, replaces current model)" : ""}
                 </option>
               ))}
             </select>
@@ -198,7 +207,11 @@ export function ImportPanel({
       )}
 
       {stage.kind === "confirm-dims" && (
-        <DimsConfirmForm initial={stage.dims} onConfirm={(dims) => void handleConfirmDims(dims)} />
+        <DimsConfirmForm
+          initialDims={stage.dims}
+          initialRotation={stage.modelRotationDeg}
+          onConfirm={(dims, modelRotationDeg) => void handleConfirmDims(dims, modelRotationDeg)}
+        />
       )}
 
       {stage.kind === "error" && (
@@ -232,8 +245,19 @@ function isValidDim(n: number): boolean {
   return Number.isFinite(n) && n > 0;
 }
 
-function DimsConfirmForm({ initial, onConfirm }: { initial: Dims; onConfirm: (dims: Dims) => void }) {
-  const [dims, setDims] = useState(initial);
+const ROTATION_STEPS = [0, 90, 180, 270] as const;
+
+function DimsConfirmForm({
+  initialDims,
+  initialRotation,
+  onConfirm,
+}: {
+  initialDims: Dims;
+  initialRotation: ModelRotation;
+  onConfirm: (dims: Dims, modelRotationDeg: ModelRotation) => void;
+}) {
+  const [dims, setDims] = useState(initialDims);
+  const [rotation, setRotation] = useState(initialRotation);
   const invalid = (["w", "d", "h"] as const).filter((axis) => !isValidDim(dims[axis]));
   return (
     <div className="import-panel-dims">
@@ -257,11 +281,34 @@ function DimsConfirmForm({ initial, onConfirm }: { initial: Dims; onConfirm: (di
           {invalid.map((a) => a.toUpperCase()).join(", ")} must be a positive number.
         </p>
       )}
+
+      <p className="import-panel-dims-hint">
+        If the model is lying on its side or facing the wrong way, correct it here before
+        placing — Meshy doesn't always output the model upright/forward-facing.
+      </p>
+      <div className="import-panel-dims-row">
+        {(["x", "y", "z"] as const).map((axis) => (
+          <label key={axis} className="import-field">
+            <span>Rotate {axis.toUpperCase()}</span>
+            <select
+              value={rotation[axis]}
+              onChange={(e) => setRotation({ ...rotation, [axis]: Number(e.target.value) })}
+            >
+              {ROTATION_STEPS.map((deg) => (
+                <option key={deg} value={deg}>
+                  {deg}°
+                </option>
+              ))}
+            </select>
+          </label>
+        ))}
+      </div>
+
       <button
         type="button"
         className="import-panel-button"
         disabled={invalid.length > 0}
-        onClick={() => onConfirm(dims)}
+        onClick={() => onConfirm(dims, rotation)}
       >
         Confirm and place
       </button>
