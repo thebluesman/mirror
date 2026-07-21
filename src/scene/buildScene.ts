@@ -259,6 +259,12 @@ function addFurniture(
   const group = new THREE.Group();
   group.position.set(position[0], position[1], position[2]);
   group.rotation.y = THREE.MathUtils.degToRad(rotationDeg);
+  // v2 spike (W-A, spike-v2/): tags the group with its item id so
+  // Viewport's raycast-based selection/drag can walk up from a hit mesh to
+  // "which placed item is this" without a parallel lookup structure, and so
+  // a selection-outline helper (added directly to the scene, not parented
+  // under the group) can never be misidentified as a furniture hit itself.
+  group.userData.itemId = item.id;
 
   // Phase 4: an item with a completed Meshy import (glbHash set) renders its
   // real generated mesh instead of the box placeholder — but that's an async
@@ -305,6 +311,12 @@ export interface BuiltScene {
   cameras: CameraPosition[];
   shell: ShellMeshes;
   pendingModels: PendingFurnitureModel[];
+  /** v2 spike (W-A): every placed item's live THREE.Group, keyed by itemId —
+   *  the seam Viewport's drag/rotate/selection code mutates directly during
+   *  a gesture (position/rotation.y) without touching React state or
+   *  rebuilding the scene graph. Populated from the same currentLayout walk
+   *  that places each item, so it always matches what's actually in `scene`. */
+  furnitureGroups: Map<string, THREE.Group>;
 }
 
 export function buildScene(sceneFile: SceneFile): BuiltScene {
@@ -344,10 +356,12 @@ export function buildScene(sceneFile: SceneFile): BuiltScene {
   const currentLayout = sceneFile.layouts.find((l) => l.id === sceneFile.current);
   const itemsById = new Map(sceneFile.items.map((item) => [item.id, item]));
   const pendingModels: PendingFurnitureModel[] = [];
+  const furnitureGroups = new Map<string, THREE.Group>();
   currentLayout?.commands.forEach((cmd) => {
     const item = itemsById.get(cmd.itemId);
     if (!item) return;
     const group = addFurniture(scene, item, cmd.position, cmd.rotationDeg);
+    furnitureGroups.set(item.id, group);
     if (item.glbHash) pendingModels.push({ item, group });
   });
 
@@ -359,5 +373,5 @@ export function buildScene(sceneFile: SceneFile): BuiltScene {
     floorMeshes,
   };
 
-  return { scene, cameras: sceneFile.cameras, shell, pendingModels };
+  return { scene, cameras: sceneFile.cameras, shell, pendingModels, furnitureGroups };
 }
