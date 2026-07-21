@@ -212,7 +212,7 @@ function App() {
               <ShellPanel shell={sceneFile.room.shell} onUpdateSurface={updateShellSurface} />
             )}
             {sceneFile && tab === "Import" && <ImportPanel sceneFile={sceneFile} onImported={handleImported} />}
-            {tab === "Settings" && <SettingsPanel />}
+            {tab === "Settings" && <SettingsPanel sceneFile={sceneFile} />}
           </div>
         </aside>
       </div>
