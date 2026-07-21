@@ -205,29 +205,59 @@ function furnitureFootprint(item: FurnitureItem): Array<{ w: number; d: number; 
   return [{ w: item.dimsCm.w, d: item.dimsCm.d, h: item.dimsCm.h, offsetX: 0, offsetZ: 0 }];
 }
 
+/** Overall bounding dims (cm) for an item — what a generated GLB is fit to
+ *  (src/scene/loadFurnitureModel.ts's fitModelToDims). A plain box item's
+ *  `dimsCm` already is this; a compound sofa's bounding box is derived from
+ *  its main+chaise sub-footprints (or `dimsCm` if authored explicitly). */
+export function furnitureOverallDims(item: FurnitureItem): { w: number; d: number; h: number } {
+  if (item.shape === "compound-sofa") {
+    if (item.dimsCm) return item.dimsCm;
+  } else if (item.dimsCm) {
+    return item.dimsCm;
+  }
+  const parts = furnitureFootprint(item);
+  const minX = Math.min(...parts.map((p) => p.offsetX - p.w / 2));
+  const maxX = Math.max(...parts.map((p) => p.offsetX + p.w / 2));
+  const minZ = Math.min(...parts.map((p) => p.offsetZ - p.d / 2));
+  const maxZ = Math.max(...parts.map((p) => p.offsetZ + p.d / 2));
+  const h = Math.max(...parts.map((p) => p.h));
+  return { w: maxX - minX, d: maxZ - minZ, h };
+}
+
 function addFurniture(
   scene: THREE.Scene,
   item: FurnitureItem,
   position: [number, number, number],
   rotationDeg: number,
-) {
+): THREE.Group {
   const group = new THREE.Group();
   group.position.set(position[0], position[1], position[2]);
   group.rotation.y = THREE.MathUtils.degToRad(rotationDeg);
 
-  // Elevation is already baked into `position[1]` by the layout command (see
-  // e.g. table-lamp/tv-samsung-frame in seed/living-room.json) — don't add
-  // item.elevationCm again here, or items with both end up floating 2x high.
-  furnitureFootprint(item).forEach((part) => {
-    const geo = new THREE.BoxGeometry(part.w, part.h, part.d);
-    const mesh = new THREE.Mesh(geo, MAT.furniture);
-    mesh.position.set(part.offsetX, part.h / 2, part.offsetZ);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    group.add(mesh);
-  });
+  // Phase 4: an item with a completed Meshy import (glbHash set) renders its
+  // real generated mesh instead of the box placeholder — but that's an async
+  // decode from OPFS (see src/scene/loadFurnitureModel.ts), so buildScene
+  // itself (synchronous) leaves the group empty here and returns it via
+  // BuiltScene.furnitureGroups; Viewport's structural effect loads the model
+  // into it after the synchronous scene graph is up, the same async-after-
+  // build pattern Phase 3 established for shell textures.
+  if (!item.glbHash) {
+    // Elevation is already baked into `position[1]` by the layout command
+    // (see e.g. table-lamp/tv-samsung-frame in seed/living-room.json) —
+    // don't add item.elevationCm again here, or items with both end up
+    // floating 2x high.
+    furnitureFootprint(item).forEach((part) => {
+      const geo = new THREE.BoxGeometry(part.w, part.h, part.d);
+      const mesh = new THREE.Mesh(geo, MAT.furniture);
+      mesh.position.set(part.offsetX, part.h / 2, part.offsetZ);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      group.add(mesh);
+    });
+  }
 
   scene.add(group);
+  return group;
 }
 
 /** Shell mesh/material handles Phase 3's live calibration (src/scene/
@@ -245,10 +275,19 @@ export interface ShellMeshes {
   floorMeshes: THREE.Mesh[];
 }
 
+/** An item awaiting its generated GLB (Phase 4) — the placeholder group is
+ *  already in the scene at the right position/rotation; Viewport loads and
+ *  attaches the model into it asynchronously (see loadFurnitureModel.ts). */
+export interface PendingFurnitureModel {
+  item: FurnitureItem;
+  group: THREE.Group;
+}
+
 export interface BuiltScene {
   scene: THREE.Scene;
   cameras: CameraPosition[];
   shell: ShellMeshes;
+  pendingModels: PendingFurnitureModel[];
 }
 
 export function buildScene(sceneFile: SceneFile): BuiltScene {
@@ -287,10 +326,12 @@ export function buildScene(sceneFile: SceneFile): BuiltScene {
 
   const currentLayout = sceneFile.layouts.find((l) => l.id === sceneFile.current);
   const itemsById = new Map(sceneFile.items.map((item) => [item.id, item]));
+  const pendingModels: PendingFurnitureModel[] = [];
   currentLayout?.commands.forEach((cmd) => {
     const item = itemsById.get(cmd.itemId);
     if (!item) return;
-    addFurniture(scene, item, cmd.position, cmd.rotationDeg);
+    const group = addFurniture(scene, item, cmd.position, cmd.rotationDeg);
+    if (item.glbHash) pendingModels.push({ item, group });
   });
 
   const shell: ShellMeshes = {
@@ -301,5 +342,5 @@ export function buildScene(sceneFile: SceneFile): BuiltScene {
     floorMeshes,
   };
 
-  return { scene, cameras: sceneFile.cameras, shell };
+  return { scene, cameras: sceneFile.cameras, shell, pendingModels };
 }

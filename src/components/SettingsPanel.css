@@ -1,0 +1,109 @@
+.settings-panel {
+  height: 100%;
+  overflow-y: auto;
+  padding: var(--space-16);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+}
+
+.settings-panel-title {
+  font: var(--text-feature-heading);
+  color: var(--color-ink);
+  margin: 0;
+}
+
+.settings-row {
+  background: var(--color-canvas);
+  border: 1px solid var(--color-card-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-12);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.settings-row-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.settings-row-title {
+  font: var(--text-body);
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+.settings-row-status {
+  font: var(--text-mono-label);
+  font-size: 11px;
+  padding: var(--space-2) var(--space-8);
+  border-radius: var(--radius-pill);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.settings-row-status--set {
+  background: var(--color-deep-green);
+  color: var(--color-canvas);
+}
+
+.settings-row-status--unset {
+  background: var(--color-soft-stone);
+  color: var(--color-muted-slate);
+}
+
+.settings-row-hint {
+  font: var(--text-body);
+  font-size: 12px;
+  color: var(--color-body-muted);
+  margin: 0;
+}
+
+.settings-row-hint-url {
+  font: var(--text-mono-label);
+  font-size: 11px;
+}
+
+.settings-row-input {
+  font: var(--text-body);
+  font-size: 13px;
+  padding: var(--space-8);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-xs);
+  background: var(--color-canvas);
+  color: var(--color-ink);
+}
+
+.settings-row-actions {
+  display: flex;
+  gap: var(--space-8);
+}
+
+.settings-row-save-button {
+  font: var(--text-button);
+  background: var(--color-primary);
+  color: var(--color-canvas);
+  border: none;
+  border-radius: var(--radius-pill);
+  padding: var(--space-8) var(--space-16);
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.settings-row-save-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.settings-row-clear-button {
+  font: var(--text-button);
+  background: none;
+  color: var(--color-error);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-pill);
+  padding: var(--space-8) var(--space-16);
+  cursor: pointer;
+  align-self: flex-start;
+}

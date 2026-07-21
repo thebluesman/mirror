@@ -2,9 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import { buildScene, type BuiltScene } from "../scene/buildScene";
+import { buildScene, furnitureOverallDims, type BuiltScene } from "../scene/buildScene";
 import { applyShellSurface, updateSurfaceCalibrationInPlace, type ShellSurface } from "../scene/shellMaterials";
 import { loadShellTexture } from "../scene/loadShellTexture";
+import { fitModelToDims, loadFurnitureModel } from "../scene/loadFurnitureModel";
 import { DEFAULT_SURFACE_CALIBRATION, type ShellCalibration, type SurfaceCalibration } from "../schema/scene";
 import type { SceneFile } from "../scene/types";
 import "./Viewport.css";
@@ -100,6 +101,28 @@ export function Viewport({
     // treat this as a first-ever apply for all three surfaces.
     lastAppliedCalibRef.current = {};
     appliedTexturesRef.current = {};
+
+    // Phase 4: items with a completed Meshy import get their real GLB loaded
+    // and fit into the placeholder group buildScene already positioned —
+    // async, same pattern as the shell-texture load below, so a slow OPFS
+    // read doesn't block the first frame. `cancelled` guards against
+    // attaching a model after this effect's cleanup has already torn the
+    // scene down (fast structural rebuild, or unmount, while a load is
+    // in flight).
+    let cancelled = false;
+    built.pendingModels.forEach(({ item, group }) => {
+      if (!item.glbHash) return;
+      const glbHash = item.glbHash;
+      loadFurnitureModel(glbHash)
+        .then((model) => {
+          if (cancelled) return;
+          fitModelToDims(model, furnitureOverallDims(item));
+          group.add(model);
+        })
+        .catch((err) => {
+          console.error(`[Viewport] failed to load furniture GLB for "${item.id}"`, err);
+        });
+    });
     setBuildVersion((v) => v + 1);
     const { scene, cameras } = built;
 
@@ -145,6 +168,7 @@ export function Viewport({
     animate();
 
     return () => {
+      cancelled = true;
       cancelAnimationFrame(frameId);
       resizeObserver.disconnect();
       controls.dispose();

@@ -7,38 +7,9 @@
 // older schemaVersion migrates on the way out, same as a file open would.
 
 import { parseScene, type SceneFile } from "../schema/scene";
+import { openDB, runTx, PROJECT_STORE } from "./db";
 
-const DB_NAME = "mirror";
-const DB_VERSION = 1;
-const STORE = "project";
 const KEY = "current";
-
-function openDB(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = () => {
-      if (!req.result.objectStoreNames.contains(STORE)) {
-        req.result.createObjectStore(STORE);
-      }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-function runTx<T>(
-  db: IDBDatabase,
-  mode: IDBTransactionMode,
-  op: (store: IDBObjectStore) => IDBRequest<T>,
-): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE, mode);
-    const req = op(tx.objectStore(STORE));
-    tx.oncomplete = () => resolve(req.result);
-    tx.onerror = () => reject(tx.error);
-    tx.onabort = () => reject(tx.error);
-  });
-}
 
 /** Persist the project immediately. */
 export async function saveProjectNow(scene: SceneFile): Promise<void> {
@@ -46,7 +17,7 @@ export async function saveProjectNow(scene: SceneFile): Promise<void> {
   try {
     // scene is always a zod-parsed SceneFile (plain numbers/strings/arrays),
     // already safe for IndexedDB's own structured clone in store.put.
-    await runTx(db, "readwrite", (store) => store.put(scene, KEY));
+    await runTx(db, PROJECT_STORE, "readwrite", (store) => store.put(scene, KEY));
   } finally {
     db.close();
   }
@@ -56,7 +27,7 @@ export async function saveProjectNow(scene: SceneFile): Promise<void> {
 export async function loadProject(): Promise<SceneFile | null> {
   const db = await openDB();
   try {
-    const raw = await runTx<unknown>(db, "readonly", (store) => store.get(KEY));
+    const raw = await runTx<unknown>(db, PROJECT_STORE, "readonly", (store) => store.get(KEY));
     if (raw == null) return null;
     return parseScene(raw);
   } finally {
@@ -68,7 +39,7 @@ export async function loadProject(): Promise<SceneFile | null> {
 export async function clearProject(): Promise<void> {
   const db = await openDB();
   try {
-    await runTx(db, "readwrite", (store) => store.delete(KEY));
+    await runTx(db, PROJECT_STORE, "readwrite", (store) => store.delete(KEY));
   } finally {
     db.close();
   }

@@ -47,4 +47,22 @@ describe("OPFS asset store (fake OPFS)", () => {
     expect(h1).toBe(h2);
     expect(await hasAsset(h1)).toBe(true);
   });
+
+  it("re-writes over a stale 0-byte stub left by an interrupted write", async () => {
+    installFakeOpfs();
+    const blob = new Blob(["real-bytes"]);
+    const hash = await hashBlob(blob);
+    // Simulate a write that got cut off mid-createWritable: a file handle was
+    // created for this hash (e.g. an interrupted GLB import) but never
+    // written to, leaving a 0-byte stub under the target hash.
+    const dir = await navigator.storage.getDirectory();
+    const stubHandle = await dir.getFileHandle(hash, { create: true });
+    const stubFile = await stubHandle.getFile();
+    expect(stubFile.size).toBe(0);
+
+    const written = await putAsset(blob);
+    expect(written).toBe(hash);
+    const got = await getAsset(hash);
+    expect(await got!.text()).toBe("real-bytes");
+  });
 });

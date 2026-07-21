@@ -23,12 +23,21 @@ export async function hashBlob(blob: Blob): Promise<string> {
     .join("");
 }
 
-/** Store a blob; returns its content hash. Idempotent — skips the write if the
- *  same bytes are already present. */
+/** Store a blob; returns its content hash. Idempotent — skips the write if
+ *  the same bytes are already present. Checks the existing file's *size*
+ *  against `blob.size` before trusting it, not just its presence (Phase 2
+ *  code-review finding, closed here now that Phase 4 has real imports to
+ *  interrupt): a write that got cut off mid-`createWritable` — e.g. the tab
+ *  closed during a large GLB import — can leave a 0-byte (or partial) stub
+ *  under the target hash, which the old presence-only check would then mask
+ *  as "already stored" forever. A size mismatch re-runs the write instead;
+ *  a size match is trusted without re-hashing the existing bytes, same as
+ *  the original design already trusted existence. */
 export async function putAsset(blob: Blob): Promise<string> {
   const hash = await hashBlob(blob);
   const dir = await assetsDir();
-  if (await handleExists(dir, hash)) return hash;
+  const existingSize = await handleSize(dir, hash);
+  if (existingSize === blob.size) return hash;
   const fileHandle = await dir.getFileHandle(hash, { create: true });
   const writable = await fileHandle.createWritable();
   await writable.write(blob);
@@ -60,6 +69,18 @@ async function handleExists(dir: FileSystemDirectoryHandle, name: string): Promi
     return true;
   } catch (err) {
     if (isNotFound(err)) return false;
+    throw err;
+  }
+}
+
+/** The stored file's byte size, or null if it doesn't exist. */
+async function handleSize(dir: FileSystemDirectoryHandle, name: string): Promise<number | null> {
+  try {
+    const fileHandle = await dir.getFileHandle(name);
+    const file = await fileHandle.getFile();
+    return file.size;
+  } catch (err) {
+    if (isNotFound(err)) return null;
     throw err;
   }
 }
