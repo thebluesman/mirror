@@ -22,6 +22,14 @@ export const SCHEMA_VERSION = "v1" as const;
 const Dims = z.object({ w: z.number(), d: z.number(), h: z.number() });
 const SubFootprint = z.object({ w: z.number(), d: z.number() });
 
+// Meshy doesn't guarantee a generated GLB comes out upright/forward-facing
+// (OUTCOME-3's "+Z-at-yaw-0 convention" finding) — applied to the raw model
+// *before* loadFurnitureModel.ts's fitModelToDims computes its bounding box,
+// so an axis-swap (item lying on its side) or a backwards yaw both correct
+// before the box-to-dims rescale, not after. Distinct from PlaceCommand's
+// rotationDeg, which is world-space placement of an already-correct model.
+const ModelRotation = z.object({ x: z.number(), y: z.number(), z: z.number() }).loose();
+
 // WallOpening.type gained "glass-door" in Phase 2: the seed's full-height
 // balcony door is glazed edge-to-edge, and typing it "door" rendered it as
 // an opaque leaf (Phase 1 code-review finding). The value is the schema
@@ -131,6 +139,7 @@ const BoxFurniture = z
     elevationCm: z.number().optional(),
     sourcePhotoHash: z.string().optional(),
     glbHash: z.string().optional(),
+    modelRotationDeg: ModelRotation.optional(),
     notes: z.string().optional(),
     purchaseInfo: z.string().optional(),
   })
@@ -148,6 +157,7 @@ const CompoundSofaFurniture = z
     elevationCm: z.number().optional(),
     sourcePhotoHash: z.string().optional(),
     glbHash: z.string().optional(),
+    modelRotationDeg: ModelRotation.optional(),
     notes: z.string().optional(),
     purchaseInfo: z.string().optional(),
   })
@@ -204,6 +214,7 @@ export const SceneFileSchema = z.object({
 });
 
 export type Dims = z.infer<typeof Dims>;
+export type ModelRotation = z.infer<typeof ModelRotation>;
 export type WallOpening = z.infer<typeof WallOpeningSchema>;
 export type WallDef = z.infer<typeof WallDefSchema>;
 export type Room = z.infer<typeof RoomSchema>;

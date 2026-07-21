@@ -56,6 +56,31 @@ describe("applyFurnitureImport", () => {
     expect(command).toEqual({ type: "place", itemId: "reading-chair", position: [0, 0, 0], rotationDeg: 0 });
   });
 
+  it("re-importing an existing item replaces its modelRotationDeg (full replace, not merge)", () => {
+    const corrected = applyFurnitureImport(seedScene, {
+      itemId: "swivel-chair",
+      dimsCm: { w: 100, d: 91, h: 73 },
+      sourcePhotoHash: "photo-hash",
+      glbHash: "glb-hash",
+      modelRotationDeg: { x: 0, y: 180, z: 0 },
+    });
+    expect(corrected.items.find((i) => i.id === "swivel-chair")?.modelRotationDeg).toEqual({
+      x: 0,
+      y: 180,
+      z: 0,
+    });
+
+    // a follow-up re-import with a fresh (correct) photo/model clears the
+    // stale correction instead of carrying it onto the new model
+    const reimported = applyFurnitureImport(corrected, {
+      itemId: "swivel-chair",
+      dimsCm: { w: 100, d: 91, h: 73 },
+      sourcePhotoHash: "photo-hash-2",
+      glbHash: "glb-hash-2",
+    });
+    expect(reimported.items.find((i) => i.id === "swivel-chair")?.modelRotationDeg).toBeUndefined();
+  });
+
   it("does not mutate the input scene", () => {
     const before = JSON.parse(JSON.stringify(seedScene));
     applyFurnitureImport(seedScene, {
