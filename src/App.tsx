@@ -1,10 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import seedRaw from "../seed/living-room.json";
-import { Viewport } from "./components/Viewport";
+import { Viewport, type ViewportHandle } from "./components/Viewport";
+import { ViewportChrome } from "./components/ViewportChrome";
 import { ShellPanel } from "./components/ShellPanel";
 import { ImportPanel } from "./components/ImportPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
-import { parseScene, type SceneFile, type SurfaceCalibration } from "./schema/scene";
+import { parseScene, type CameraPosition, type SceneFile, type SurfaceCalibration } from "./schema/scene";
+import { makeCameraPosition } from "./scene/cameraViewpoints";
 import { loadProject, saveProjectDebounced, saveProjectNow } from "./storage/autosave";
 import "./App.css";
 
@@ -68,6 +70,31 @@ function App() {
     void saveProjectNow(next);
   }
 
+  const viewportRef = useRef<ViewportHandle>(null);
+
+  // A saved/deleted viewpoint is a discrete, deliberate action (like an
+  // import commit) — persist immediately rather than debouncing.
+  function handleSaveView(name: string) {
+    const view = viewportRef.current?.getCurrentView();
+    if (!view) return;
+    setSceneFile((prev) => {
+      if (!prev) return prev;
+      const cam: CameraPosition = makeCameraPosition(name, view.eye, view.lookAt, view.fovDeg, prev.cameras);
+      const next: SceneFile = { ...prev, cameras: [...prev.cameras, cam] };
+      void saveProjectNow(next);
+      return next;
+    });
+  }
+
+  function handleDeleteView(id: string) {
+    setSceneFile((prev) => {
+      if (!prev) return prev;
+      const next: SceneFile = { ...prev, cameras: prev.cameras.filter((c) => c.id !== id) };
+      void saveProjectNow(next);
+      return next;
+    });
+  }
+
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -76,7 +103,15 @@ function App() {
       <div className="app-body">
         <main className="app-viewport">
           {sceneFile ? (
-            <Viewport sceneFile={sceneFile} shellCalibration={sceneFile.room.shell} />
+            <>
+              <Viewport ref={viewportRef} sceneFile={sceneFile} shellCalibration={sceneFile.room.shell} />
+              <ViewportChrome
+                cameras={sceneFile.cameras}
+                onRecall={(preset) => viewportRef.current?.flyTo(preset)}
+                onSave={handleSaveView}
+                onDelete={handleDeleteView}
+              />
+            </>
           ) : (
             <div className="app-status">{error ? `Failed to load: ${error}` : "Loading…"}</div>
           )}

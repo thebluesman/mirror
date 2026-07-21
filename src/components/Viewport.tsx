@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
@@ -6,9 +6,26 @@ import { addFurnitureBoxMeshes, buildScene, furnitureOverallDims, type BuiltScen
 import { applyShellSurface, updateSurfaceCalibrationInPlace, type ShellSurface } from "../scene/shellMaterials";
 import { loadShellTexture } from "../scene/loadShellTexture";
 import { fitModelToDims, loadFurnitureModel } from "../scene/loadFurnitureModel";
-import { DEFAULT_SURFACE_CALIBRATION, type ShellCalibration, type SurfaceCalibration } from "../schema/scene";
+import {
+  DEFAULT_SURFACE_CALIBRATION,
+  type CameraPosition,
+  type ShellCalibration,
+  type SurfaceCalibration,
+} from "../schema/scene";
 import type { SceneFile } from "../scene/types";
 import "./Viewport.css";
+
+/** Imperative handle for Phase 5's named-viewpoint save/recall (ViewportChrome
+ *  drives this) — the live camera/controls only exist inside this component's
+ *  Three.js build, so reading/setting them has to go through a ref rather
+ *  than props. */
+export interface ViewportHandle {
+  /** Current eye/lookAt/fov, or null before the first structural build. */
+  getCurrentView(): { eye: [number, number, number]; lookAt: [number, number, number]; fovDeg: number } | null;
+  /** Snaps the live camera/controls to a saved viewpoint. No-op before the
+   *  first structural build. */
+  flyTo(preset: CameraPosition): void;
+}
 
 const HUMAN_FOV = 38; // ~35mm-equivalent, per spike 2's C2 feedback
 const SHELL_SURFACES: ShellSurface[] = ["wall", "floor", "ceiling"];
@@ -21,18 +38,20 @@ const SHELL_SURFACES: ShellSurface[] = ["wall", "floor", "ceiling"];
 const MIN_POLAR_ANGLE = 0.1;
 const MAX_POLAR_ANGLE = Math.PI - 0.1;
 
-export function Viewport({
-  sceneFile,
-  shellCalibration,
-}: {
-  sceneFile: SceneFile;
-  /** Live calibration, applied without rebuilding the scene/renderer — see
-   *  the shell-update effect below. Defaults to sceneFile.room.shell. */
-  shellCalibration?: ShellCalibration;
-}) {
+export const Viewport = forwardRef<
+  ViewportHandle,
+  {
+    sceneFile: SceneFile;
+    /** Live calibration, applied without rebuilding the scene/renderer — see
+     *  the shell-update effect below. Defaults to sceneFile.room.shell. */
+    shellCalibration?: ShellCalibration;
+  }
+>(function Viewport({ sceneFile, shellCalibration }, handleRef) {
   const containerRef = useRef<HTMLDivElement>(null);
   const builtRef = useRef<BuiltScene | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const controlsRef = useRef<OrbitControls | null>(null);
 
   // Per-surface tracking for the calibration effect below: the last
   // calibration actually applied (so it can diff and skip no-op work) and
@@ -68,6 +87,12 @@ export function Viewport({
   // left alone — exactly the "shell changes don't churn the renderer"
   // guarantee this component has always made, just now correctly combined
   // with reacting to everything else.
+  // `cameras` deliberately isn't a dep: saved viewpoints are recall-only
+  // metadata (ViewportChrome's flyTo), not scene geometry. Rebuilding on
+  // every save (Phase 5) would tear down the live camera/controls the user
+  // just framed a shot with and reset it to cameras[0] — the opposite of
+  // "save your current view." Only the initial mount reads `cameras[0]` as
+  // a starting position; later additions/deletions don't need to touch it.
   const structuralSceneFile = useMemo(
     () => sceneFile,
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: this is the memo's whole purpose, see comment above
@@ -76,7 +101,6 @@ export function Viewport({
       sceneFile.room.floor,
       sceneFile.room.walls,
       sceneFile.items,
-      sceneFile.cameras,
       sceneFile.layouts,
       sceneFile.current,
     ],
@@ -153,6 +177,8 @@ export function Viewport({
       controls.target.set(...preset.lookAt);
     }
     controls.update();
+    cameraRef.current = camera;
+    controlsRef.current = controls;
 
     function resize() {
       if (!container) return;
@@ -182,12 +208,41 @@ export function Viewport({
       container.removeChild(renderer.domElement);
       builtRef.current = null;
       rendererRef.current = null;
+      cameraRef.current = null;
+      controlsRef.current = null;
       // Any texture the calibration effect had applied belonged to this
       // build's materials — dispose them all now rather than leak.
       Object.values(appliedTexturesRef.current).forEach((textures) => textures?.forEach((t) => t.dispose()));
       appliedTexturesRef.current = {};
     };
   }, [structuralSceneFile]);
+
+  useImperativeHandle(
+    handleRef,
+    (): ViewportHandle => ({
+      getCurrentView() {
+        const camera = cameraRef.current;
+        const controls = controlsRef.current;
+        if (!camera || !controls) return null;
+        return {
+          eye: [camera.position.x, camera.position.y, camera.position.z],
+          lookAt: [controls.target.x, controls.target.y, controls.target.z],
+          fovDeg: camera.fov,
+        };
+      },
+      flyTo(preset) {
+        const camera = cameraRef.current;
+        const controls = controlsRef.current;
+        if (!camera || !controls) return;
+        camera.position.set(...preset.eye);
+        camera.fov = preset.fovDeg ?? HUMAN_FOV;
+        camera.updateProjectionMatrix();
+        controls.target.set(...preset.lookAt);
+        controls.update();
+      },
+    }),
+    [],
+  );
 
   // Live shell-texture/calibration updates: mutates the materials the
   // structural effect already created, in place — no renderer/camera churn,
@@ -277,4 +332,4 @@ export function Viewport({
   }, [calibration, buildVersion]);
 
   return <div ref={containerRef} className="viewport" />;
-}
+});

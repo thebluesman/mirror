@@ -389,9 +389,9 @@ also covers `applyFurnitureImport`'s silent no-op on a corrupted
 
 ### Phase 5 — View polish + acceptance (`v1/polish`)
 
-- [ ] Named camera viewpoints (save/recall), viewport chrome per PRD §9
+- [x] Named camera viewpoints (save/recall), viewport chrome per PRD §9
       (near-black floating control bar, pill buttons). *Agent: Sonnet.*
-- [ ] Surface the Figma-seeding staleness limitation in-app (PRD §7.1b: layout
+- [x] Surface the Figma-seeding staleness limitation in-app (PRD §7.1b: layout
       changes require redoing the MCP session manually — the app should say so,
       e.g. a note near the room/placement info, rather than silently going
       stale). *Agent: Sonnet — small, but the PRD assigns it and no phase owned
@@ -399,6 +399,25 @@ also covers `applyFurnitureImport`'s silent no-op on a corrupted
 - [ ] Acceptance run: Shyam sets up his actual room shell, imports his actual
       furniture, judges against OUTCOME-3's "that's my room" bar. Fix-forward on
       whatever it surfaces. *Human-in-the-loop.*
+
+**Progress (2026-07-21):** First two checklist items done. `Viewport.tsx` now
+exposes an imperative `getCurrentView`/`flyTo` handle (camera/controls live
+inside its Three.js build, not in props/state); `ViewportChrome.tsx` is the
+new floating pill control bar (near-black, per PRD §9) — save-current-view,
+recall, and delete, backed by a pure `scene/cameraViewpoints.ts` (unit
+tested) for id/slug generation. Saved viewpoints deliberately stay out of
+Viewport's structural-rebuild dependency list (`sceneFile.cameras` was
+removed from that memo's deps) — recall is metadata, not scene geometry, and
+rebuilding on every save would reset the camera to `cameras[0]`, undoing the
+save. `ImportPanel.tsx` got a staleness note near the item/placement
+controls. DESIGN.md/Cohere-fidelity check (folded in from the Phase 4
+handoff note): re-reviewed the app with the chrome in place — the floating
+near-black pill bar was the missing signature the earlier flat viewport
+lacked; panels already matched DESIGN.md's pill-button/soft-stone-card/
+hairline language. No further fixes needed. Verified in-browser via
+Playwright (save/orbit-away/recall round-trip, staleness note render);
+`npx vitest run` (51 tests) and `npx tsc --noEmit` both clean.
+Acceptance run remains for Shyam.
 
 **Handoff note (2026-07-21):** realladygrey picking this phase up fresh.
 Branch off `main` as `v1/polish` (worktree), same `HANDOFF.md`-if-interrupted

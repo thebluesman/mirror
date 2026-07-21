@@ -130,6 +130,12 @@ export function ImportPanel({
     <div className="import-panel">
       <h2 className="import-panel-title">Furniture import</h2>
 
+      <p className="import-panel-note">
+        Placement is seeded from a one-time Figma conversion — items snap to the position/rotation
+        drawn there. If the room layout changes in Figma, that conversion has to be redone by hand;
+        this app won't detect or reflect the change on its own.
+      </p>
+
       {hasFalKey === false && (
         <p className="import-panel-warning">Add a fal.ai key in Settings before importing furniture.</p>
       )}
