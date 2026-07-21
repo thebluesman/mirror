@@ -1,0 +1,50 @@
+import { describe, it, expect, afterEach, vi } from "vitest";
+import { installFakeOpfs } from "../test/fakeOpfs";
+import { hashBlob, putAsset, getAsset, hasAsset } from "./assets";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("hashBlob", () => {
+  it("is deterministic and content-addressed", async () => {
+    const a = await hashBlob(new Blob(["hello"]));
+    const b = await hashBlob(new Blob(["hello"]));
+    const c = await hashBlob(new Blob(["world"]));
+    expect(a).toBe(b);
+    expect(a).not.toBe(c);
+  });
+
+  it("matches the known SHA-256 of 'hello' as lowercase hex", async () => {
+    const hash = await hashBlob(new Blob(["hello"]));
+    expect(hash).toBe("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
+  });
+});
+
+describe("OPFS asset store (fake OPFS)", () => {
+  it("stores and retrieves a blob by its hash", async () => {
+    installFakeOpfs();
+    const blob = new Blob(["glb-bytes"]);
+    const hash = await putAsset(blob);
+    expect(hash).toBe(await hashBlob(blob));
+
+    expect(await hasAsset(hash)).toBe(true);
+    const got = await getAsset(hash);
+    expect(got).not.toBeNull();
+    expect(await got!.text()).toBe("glb-bytes");
+  });
+
+  it("returns null / false for an absent hash", async () => {
+    installFakeOpfs();
+    expect(await getAsset("deadbeef")).toBeNull();
+    expect(await hasAsset("deadbeef")).toBe(false);
+  });
+
+  it("is idempotent — putting the same bytes twice yields the same hash", async () => {
+    installFakeOpfs();
+    const h1 = await putAsset(new Blob(["same"]));
+    const h2 = await putAsset(new Blob(["same"]));
+    expect(h1).toBe(h2);
+    expect(await hasAsset(h1)).toBe(true);
+  });
+});
