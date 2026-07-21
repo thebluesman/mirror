@@ -100,6 +100,32 @@ function App() {
     void saveProjectNow(next);
   }
 
+  // v2 spike (W-A, `v2/spike-arrange`): Viewport's drag-release/rotate-step
+  // gesture handlers call this exactly once per gesture (never per-frame —
+  // see Viewport.tsx's mutate-during-gesture seam) with the item's final
+  // position/rotation. Folds that into the current layout's PlaceCommand
+  // and persists immediately, same "discrete, deliberate commit" treatment
+  // handleSaveView/handleImported give a save/import — not the debounced
+  // path updateShellSurface uses for a continuously-dragged slider, since a
+  // drop/rotate-release is itself the discrete moment, there's nothing
+  // after it to coalesce. Same closed-over-`sceneFile`-not-functional-
+  // updater pattern as handleSaveView, for the same StrictMode
+  // double-invoke reason.
+  function commitPlacement(itemId: string, position: [number, number, number], rotationDeg: number) {
+    if (!sceneFile) return;
+    const layouts = sceneFile.layouts.map((layout) =>
+      layout.id === sceneFile.current
+        ? {
+            ...layout,
+            commands: layout.commands.map((cmd) => (cmd.itemId === itemId ? { ...cmd, position, rotationDeg } : cmd)),
+          }
+        : layout,
+    );
+    const next: SceneFile = { ...sceneFile, layouts };
+    setSceneFile(next);
+    void saveProjectNow(next);
+  }
+
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -109,7 +135,12 @@ function App() {
         <main className="app-viewport">
           {sceneFile ? (
             <>
-              <Viewport ref={viewportRef} sceneFile={sceneFile} shellCalibration={sceneFile.room.shell} />
+              <Viewport
+                ref={viewportRef}
+                sceneFile={sceneFile}
+                shellCalibration={sceneFile.room.shell}
+                onCommitPlacement={commitPlacement}
+              />
               <ViewportChrome
                 cameras={sceneFile.cameras}
                 onRecall={(preset) => viewportRef.current?.flyTo(preset)}
