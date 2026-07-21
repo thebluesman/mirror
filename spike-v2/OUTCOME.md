@@ -53,7 +53,85 @@ fresh repro) per plan §8.6 — still outstanding.
 
 ## D1 — W-A core (selection, floor-plane drag, rotate)
 
-Status: started, see `v2/spike-arrange` branch.
+**Status: built, evidence captured, awaiting C1 (Shyam driving it
+hands-on).** Branch: `v2/spike-arrange`. Screenshots + a machine-readable
+persistence check: `spike-v2/w-a-screenshots/` (captured by
+`spike-v2/w-a-drive.mjs`, a Playwright driver against the real dev server
+and a clean seeded scene — not a test suite, a one-off evidence script).
+
+**What's there:**
+- **Selection**: click a placed item (raycast, not screen-space) to select
+  it; a cyan `THREE.BoxHelper` wireframe outline indicates it (cheapest
+  option per the plan — a scene-level object, not a shared-material swap,
+  since `buildScene.ts`'s box-shape material is one instance shared across
+  every box item). Click empty space (or the shell) to deselect.
+- **Move**: floor-plane drag via ray-plane intersection at the item's own
+  height (not a screen-space delta) — tracks the cursor 1:1, no jump/jitter
+  in testing. Position commits to the current layout's `PlaceCommand` on
+  pointer-release.
+- **Rotate**: keyboard step (`q`/`e` or `[`/`]`, 15deg increments) rather
+  than a drag handle — tradeoff recorded in `Viewport.tsx` (simpler and
+  exactly precise, e.g. fixing the three known orientation bugs in §3 is a
+  few keypresses; no free-angle rotate). Commits on each keypress.
+- **Persistence**: confirmed end-to-end — `w-a-drive.mjs` drags, rotates,
+  reads IndexedDB, reloads the page, reads IndexedDB again, and diffs; the
+  two reads match. A moved/rotated item survives a reload where you left
+  it, through the same autosave path (`saveProjectNow`) import/save-view
+  already use.
+
+**The seam** (the plan's "most likely source of ugly-but-instructive spike
+code," §6): `Viewport.tsx`'s structural-rebuild memo (`structuralSceneFile`)
+now excludes `sceneFile.layouts` as a dependency — a move/rotate commit no
+longer tears down the renderer/camera/OrbitControls the way it would if
+layouts fed the full `buildScene()` rebuild (the same class of regression
+Phase 5 hit and fixed for camera-viewpoint recall). Drag/rotate handlers
+mutate a live `THREE.Group`'s position/rotation directly, read from a new
+`BuiltScene.furnitureGroups` map (itemId → Group, added to `buildScene.ts`);
+a separate placement-reconciliation effect reads `sceneFile.layouts`
+unmemoized and pushes committed values onto those groups in place — the
+hook D2 (collision/snap) and D3 (persistence/replace, named layouts) can
+extend without re-deriving "push a placement into the live scene."
+`sceneFile.current` deliberately stays a rebuild trigger, so a future
+layout *switch* (D3) still gets a real rebuild.
+
+**Rough edges found (surfacing per §6, not hiding them):**
+- No collision/bounds checking (correctly out of scope — D2): a drag can
+  push an item behind or into a wall with no feedback, which happened
+  during evidence capture with a larger test drag and just silently
+  hid the item from that camera angle. Not a bug in the seam, but a real
+  gap Shyam will hit immediately without D2.
+- The selection outline initially rendered but was invisible — it sits
+  exactly on the wrapped mesh's own surface and z-fought against it.
+  Fixed with a depth-test-disabled, late-`renderOrder` material (an
+  "always-on-top overlay," the standard fix), but it's a reminder that a
+  BoxHelper wrapping a mesh 1:1 isn't a drop-in selection indicator.
+- Keyboard rotate is window-level (so focus doesn't need to be on the
+  canvas) and has a blunt guard against firing while a Shell/Import/
+  Settings text input has focus — fine for a spike, would want a more
+  deliberate ownership model (e.g. explicit viewport focus) before v2
+  proper.
+- Rotate-release and pointer-cancel aren't distinguished from a normal
+  drop — a cancelled gesture (browser steals the pointer) commits
+  wherever the item currently sits rather than reverting. Acceptable for
+  a prototype; a real build would want an explicit revert path.
+- No visible drag affordance until you're already dragging (no cursor
+  change, no hover highlight) — fine for evidence capture, worth deciding
+  on for a real build.
+
+**My read (not the C1 call — that's Shyam's):** move + rotate + persist
+feel decision-grade for the core gesture itself — the drag tracks
+precisely, the commit-on-drop seam avoids the camera-reset regression the
+plan worried about, and the three known orientation bugs are trivially
+fixable with the keyboard step. But the *arrangement experience* as a
+whole is tech-demo-grade until D2 lands: without collision/bounds
+feedback, dragging in 3D with no top-down reference is easy to get
+subtly wrong (an item behind a wall, overlapping another, no way to tell
+without orbiting to check) — which is exactly the failure mode the plan's
+top-down-orthographic fallback exists for. Whether that's "go" or
+"go-with-constraints" depends on how much D2's snapping/collision closes
+that gap; recommend Shyam's C1 pass explicitly try a few drags that would
+be ambiguous without collision feedback (behind furniture, into a wall)
+before judging.
 
 ## R1 — Hunyuan3D (fal.ai) endpoint/pricing survey
 
