@@ -122,15 +122,35 @@ Merged, reviewed, journaled.
 
 ### Phase 2 — Storage layer (`v1/storage`, parallel with 3)
 
-- [ ] Versioned JSON project schema — formalize the Phase 0 (G2) draft: Room,
+- [x] Versioned JSON project schema — formalize the Phase 0 (G2) draft: Room,
       Furniture Item, Camera Position, and the `layouts: [{name, base,
       commands[]}]` / `current` branch shape from day one (PRD §8). Schema module
       + validation + migration stub; the committed seed JSON must validate
       against it (or ship with a migration from the draft shape). *Agent: Opus.*
-- [ ] OPFS content-addressed asset store (hash → blob), IndexedDB autosave,
+- [x] OPFS content-addressed asset store (hash → blob), IndexedDB autosave,
       File System Access API save/load with download/upload fallback, zip export.
       *Agent: Opus (store design), Sonnet (zip/fallback plumbing).*
-- [ ] Unit tests for schema round-trip, hashing, autosave restore. *Agent: Sonnet.*
+- [x] Unit tests for schema round-trip, hashing, autosave restore. *Agent: Sonnet.*
+
+**Resolved 2026-07-21:** `src/schema/scene.ts` formalizes the draft with zod
+(runtime validation + `z.infer` types, replacing the hand-kept
+`src/scene/types.ts` mirror) and a `v1-draft` → `v1` `migrate()` path; the
+committed seed still ships at `v1-draft` so every load exercises migration.
+Folds in the two Phase 1 code-review findings assigned here: `WallOpening.type`
+gained `"glass-door"` (seed's balcony door updated to use it; `buildScene.ts`
+routes it through the existing door branch unchanged — Phase 3 owns the real
+glazing) and `FurnitureItem` is now a box-vs-compound-sofa union so
+`furnitureFootprint()` dispatches on `shape` instead of an unguarded
+`main`/`chaise` presence-check. Added `src/storage/{assets,autosave,
+projectFile,zipExport}.ts` (OPFS content-addressed store, IndexedDB autosave,
+File System Access save/load with download/upload fallback, fflate zip
+export/import) and `App.tsx` now loads from the autosave store — seeding from
+`living-room.json` through `parseScene` on first run — instead of a static
+import. 29 Vitest tests (fake-indexeddb + an in-memory OPFS shim) cover
+schema/migration/round-trip, hashing, and autosave restore; `npm run build`
+and `oxlint` are clean. Verified in-browser via Playwright: 0 console errors
+before/after reload, IDB round-trips `schemaVersion "v1"`, and a
+mutate-then-reload survives — the persistence exit criterion holds.
 
 **Exit:** project persists across a browser restart (PRD §10's persistence
 criterion, testable before flows exist); Phase 1 viewport reads from the store
