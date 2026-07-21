@@ -706,6 +706,447 @@ coffee table either way).
 cases), `npx tsc -b`, `npm run build`, and `oxlint src/` all clean after
 this fix.
 
-## D5 — not started
+**C2 verdict (Shyam, 2026-07-22): pass.** "Yes much better." Three-round C2
+(texture quality → orientation → crop) closes clean — the rug's flat-
+textured-plane approach is the final W-B answer for this item, no lever 3
+needed. Merged via PR #11.
 
-Blocked on Shyam's inputs (FAL_KEY plus item/multi-angle photos).
+## C1 — Checkpoint: Shyam drives the W-A branch, 2026-07-21
+
+Driven against `main` post-#10 (D1+D2+D3), against Shyam's own imported room
+data. Per-item results against the §2 bar:
+
+- **Move** — good.
+- **Rotate** — keyboard step works; no visible UI handle for rotate. Bar
+  technically clears ("handle *or* keyboard step"), but Shyam wants a
+  handle added — **new follow-up scoped below, not blocking this record.**
+- **Collision/overlap** — flags correctly. Surfaced a real question in the
+  process: no way to move an item vertically (Shyam wanted to lift a table
+  lamp clear of a bookshelf collision). This is not a bug — §9 explicitly
+  excludes it ("floor-plane placement + yaw rotation only; no vertical
+  stacking, no tilt, no physics engine") — **recorded as a new finding for
+  a future scope conversation, intentionally left as-is for now.**
+- **Snapping** — good.
+- **Replace** — good (re-import via existing flow, placement/scale/identity
+  preserved).
+- **Multi-layout** — good (save/switch/reload all work as intended).
+
+**Bookshelf — model defect, not an orientation bug.** Screenshot evidence:
+the cubby holes sit on the model's narrow end, not the wide end, and there's
+no backboard (cubbies are visible through the far side). Rotating in W-A
+cannot fix this — it's a bad Meshy generation, structurally wrong rather
+than misoriented. This lands squarely on why bookshelf is already in W-C's
+(D5) comparison slate — OUTCOME-3 flagged it as the weakest Meshy pass, "the
+most room to show a difference" against Hunyuan — so this finding is
+concrete evidence for that comparison, not a new problem to solve in W-A.
+Until D5 resolves it (or the asset is otherwise replaced), the bookshelf
+can't be placed correctly regardless of arrangement quality — noted as a
+known-bad-asset caveat on the verdict below, not counted against W-A itself.
+
+**Verdict: Go-with-constraints.** Core interactions (move, collision,
+snapping, replace, multi-layout) are decision-grade. Two named gaps keep it
+short of a clean go: (1) rotate has no UI handle (fix scoped immediately
+below), (2) no vertical placement axis (intentionally out of scope per §9,
+flagged for a possible future scope reopen, not fixed now). The bookshelf's
+bad geometry is a generation-quality issue outside W-A's remit, tracked via
+D5.
+
+**Follow-up spawned from C1: rotate UI handle.** A drag handle for rotating
+the selected item (alongside the existing keyboard step) — scoped and
+tracked as its own build pass on top of `main` post-#10; see the PR for
+implementation and evidence once it lands.
+
+## C1 follow-up — rotate UI handle
+
+**Status: built, evidence captured.** Branch: `v2/spike-arrange-rotate-handle`
+(off `main` post-C1). Screenshots:
+`spike-v2/d1-followup-rotate-handle-screenshots/`, captured by
+`spike-v2/d1-followup-rotate-handle-drive.mjs` (same one-off-Playwright-driver
+shape as D1/D2/D3's evidence scripts).
+
+**What's there:**
+- **The handle itself**: a small sphere, offset along the selected item's
+  local +Z from its center (`ROTATE_HANDLE_MARGIN_CM = 25` beyond the item's
+  own half-depth), reusing `SELECTION_COLOR` so it reads as part of the same
+  selection affordance as the existing outline, not a new unrelated UI
+  element. Shares the outline's depth-test-disabled/late-`renderOrder`
+  overlay treatment, for the same reason: a selection control should never be
+  occluded by the furniture it's attached to, and that overlay treatment
+  doubles as making it a reliable click target. Created/destroyed alongside
+  `selectionHelperRef`'s `THREE.BoxHelper` in the same lifecycle effect.
+- **The math**: `src/scene/rotateHandle.ts` — two pure, framework-free
+  functions (`yawDegFromPointer`, `rotateHandleWorldXZ`), same "pure
+  algorithm, no THREE dependency" shape as `collision.ts`/`snapping.ts`.
+  `yawDegFromPointer` takes the item's center and the pointer's current
+  floor-plane hit and returns the yaw that points the item's local +Z (where
+  the handle rests at yaw 0) at the pointer — direction only, independent of
+  distance from center, so it's exactly what a rotate-drag sets
+  `group.rotation.y` to on every `pointermove`. `rotateHandleWorldXZ` is its
+  inverse (used to position the handle itself). Both verified against the
+  same `THREE.Object3D.rotation.y` convention D2's `itemFootprintAABB` fix
+  pinned down, and round-trip-tested against each other.
+- **Not parented under the item's group.** The handle's world position is
+  recomputed from the group's live position/rotation at three points: its own
+  creation, the placement-reconciliation effect (a committed layout change
+  from outside this component's own drag code, e.g. a future undo), and
+  every `animate()` frame (so a live translate-drag, rotate-drag, or keyboard
+  step all keep it glued to the item with no extra bookkeeping). Mirrors why
+  the selection outline isn't parented either — a translate-drag mutates
+  `group.position` directly, and re-deriving the handle's world (x, z) from
+  that every frame is simpler than fighting THREE's parent-transform update
+  timing for a value only ever read, never authored, by the handle itself.
+- **Its own raycast target.** `onPointerDown` checks the handle mesh in
+  isolation, first, before the general `scene.children` walk that decides
+  between "clicked the selected item" (start a translate-drag) and "clicked
+  empty space" (deselect). A hit here starts a `rotateDrag` gesture and
+  returns immediately, so clicking the handle can never be read as a
+  translate-drag on the item it's attached to — the two gestures
+  (`drag`/`rotateDrag`) are mutually exclusive per pointer-down, same
+  "gesture owns the pointer, controls are disabled" treatment translate
+  already uses.
+- **Same seam, same commit path.** Dragging the handle mutates
+  `group.rotation.y` live (mutate-during-gesture) via `onPointerMove`'s new
+  `rotateDrag` branch — a floor-plane raycast at the item's height, exactly
+  like translate-drag's `dragPlane` technique, feeding `yawDegFromPointer`
+  instead of a position delta. `updateCollisionHighlight()` fires on every
+  move, same as translate-drag and keyboard-rotate already do. On
+  pointer-up/pointer-cancel/mid-drag structural rebuild, `commitRotateDrag()`
+  fires through the identical `onCommitPlacementRef` path move and
+  keyboard-step rotate use, normalizing degrees the same way (`normalizeDeg`)
+  — no new commit machinery.
+- **Keyboard step untouched** — `ROTATE_STEP_DEG`, `onKeyDown`, and its
+  `evt.repeat` guard are unchanged; the handle is additive.
+
+**Tests**: `src/scene/rotateHandle.test.ts` — the four cardinal directions
+(0/90/180/270deg), distance-independence (only direction matters), a
+non-origin center, and a round-trip through both functions for an arbitrary
+yaw/center/offset. `npx vitest run` — 91 tests, all passing (82 pre-existing +
+9 new in `rotateHandle.test.ts`). `npx tsc -b`, `npm run build`, and
+`oxlint src/` all clean.
+
+**Evidence** (`d1-followup-rotate-handle-drive.mjs`, against a running dev
+server and the real seed):
+- Selecting `shoe-rack` shows the cyan handle sphere appear next to it
+  (`1-selected-handle-visible.png`); dragging it toward a +40deg target
+  screenshots mid-drag with the item visibly rotated partway
+  (`2-mid-drag-40deg.png`) and after release at 38.97deg — within tolerance
+  of the 40deg drag target, the small gap being the synthetic mouse path's
+  step count rather than the rotation math itself
+  (`3-after-release.png`). A page reload confirms the commit persisted
+  (`PERSISTENCE OK`), same discipline D1 used for translate/keyboard-rotate.
+- A keyboard-step regression check (`e` key) still steps exactly 15deg after
+  the handle code landed (`KEYBOARD ROTATE OK`), confirming the two rotate
+  paths don't interfere.
+- Dragging `water-cooler`'s handle toward the neighboring
+  `billy-hogadal-shelving` (7cm apart at rest, close enough that any
+  noticeable yaw swings a footprint corner into it) recolors the selection
+  outline red mid-drag (`4-collision-mid-handle-drag.png`), confirming
+  `updateCollisionHighlight()` stays live during a handle-drag exactly as it
+  does for translate-drag and keyboard-rotate.
+
+**Rough edges found (surfacing per plan §6's discipline, not hiding them):**
+- **No visual rotation gradient/ring** — the handle is a plain sphere with no
+  indication of "which way is 0deg" or a snapping ring at 15deg increments
+  (the keyboard step's granularity). Free-angle drag and 15deg-stepped
+  keyboard rotate can now disagree by a few degrees if used interleaved on
+  the same item — not a bug (both commit through the same path, and
+  `normalizeDeg` keeps values sane), but a real inconsistency in how precise
+  each control is. Worth deciding, if this becomes real UI, whether the
+  handle should snap to the same 15deg steps or stay free-angle.
+- **Handle grab target is small and floats in open space** — 6cm-radius
+  sphere with no camera-relative size compensation (a far-zoomed-out view
+  makes it a tiny screen-space target; very close-up it can dominate the
+  frame). The depth-test-disabled overlay treatment means it's always
+  clickable regardless of occlusion by nearer geometry, which is consistent
+  but also means it can be clicked "through" furniture that visually should
+  be in front of it — acceptable for a selection affordance, worth a second
+  look before a real build.
+- **No visible drag affordance until already dragging** — same gap D1 flagged
+  for translate-drag (no cursor change, no hover highlight on the handle
+  itself before pointerdown) — inherited, not newly introduced, but now
+  applies to a second control.
+- **Feel, hands-on**: not yet driven by Shyam directly (this is a same-day
+  follow-up build, evidence captured via the Playwright script above, not a
+  live hands-on session) — the numeric/screenshot evidence shows the
+  mechanism works correctly, but whether the drag *feels* good (grab-target
+  size, drag sensitivity, handle placement) is exactly the kind of judgment
+  that needs Shyam's own hand on the mouse, same as C1's original bar. Recorded
+  here so that's an explicit next step, not an assumed pass.
+
+**Hands-on verdict (Shyam, 2026-07-21): works.** Confirms the mechanism
+holds up under an actual hand on the mouse, not just Playwright-driven
+evidence. UI polish (grab-target sizing, a 0deg/snap-angle affordance) is
+explicitly deferred, not blocking — merged as-is via PR #12.
+
+## C3 — Checkpoint: Meshy vs. Hunyuan side-by-sides, 2026-07-22
+
+Shyam judged the `spike-v2/d5-contact-sheets/` side-by-sides in-app (real
+lighting, not a provider preview viewer).
+
+**Verdict: Hunyuan wins significantly.** Most items render at meaningfully
+higher quality than the Meshy equivalent. Two caveats, neither of which
+Shyam considers blocking for the overall call:
+
+- **Rug — bad on both providers.** The rug's mesh geometry itself is wrong
+  regardless of provider. **Resolved, not just moot**: PR #11's flat-
+  textured-plane fix (D4, above) merged after a clean C2 pass — the rug
+  bypasses mesh generation entirely now, so it no longer depends on either
+  provider's mesh output at all.
+- **Bookshelf — same structural defect on both providers** (cubby holes on
+  the model's narrow end instead of the wide end, matching the C1 finding).
+  Reproducing identically across two independent generation providers is
+  strong evidence this is an **input-photo problem** (the source photo's
+  framing/angle), not something either provider mis-modeled — fixing it
+  needs a better source photo, not a provider swap.
+
+**Answering §2's three W-C questions**, per what C3 actually established
+vs. what's still open:
+- *(a) Is Hunyuan's edge real under app lighting, or viewer flattery?* —
+  **Real.** Judged inside the app's own renderer/lighting per OUTCOME-3's
+  rule, not a fal preview viewer. This settles the flattery concern the
+  plan called out.
+- *(b) Does multi-angle input materially help?* — **Inconclusive**, per D5's
+  own caveat: the only real second angle available for the table was a 3/4
+  front-right shot, no genuine back/side photo, so this test couldn't
+  actually probe Hunyuan's back-view fidelity claim, only whether a second
+  front-ish angle helps at all. Left open — would need real back/side
+  photos of a test item to answer properly.
+- *(c) Adoption cost* — answered by D5/R1: real spend confirmed at ~$0.53-0.68
+  per item (cheaper than Meshy's ~$0.80), browser-direct CORS path expected
+  to hold (same fal platform/client as Meshy, per R1 — not independently
+  re-verified beyond D5's successful live calls).
+
+**Next step, not yet done:** per `v2-spike-plan.md` §5, adopting Hunyuan
+requires a new ADR superseding/amending ADR-0001 before PRD-v2 assumes it —
+this verdict alone doesn't change what the app calls today. Flagged here so
+it doesn't get silently assumed.
+
+## D5 — W-C: Meshy vs. Hunyuan generation comparison
+
+**Status: evidence captured, awaiting C3 (Shyam judging the side-by-sides
+in-app).** Branch: `v2/spike-c-generation`. Per the plan, this section is
+evidence, not a verdict — the three W-C questions from §2 are stated at the
+end with only the parts that have hard evidence answered; the quality
+question itself is explicitly left for C3.
+
+### Endpoint — confirmed live, not guessed
+
+R1 flagged `fal-ai/hunyuan-3d/v3.1/pro/image-to-3d` as its best-fit guess for
+what Shyam's informal test used, but unconfirmed, and recommended checking a
+live call before writing any harness code. Did that first, at $0 cost, before
+spending on generations:
+
+- Fetched `fal.ai`'s public per-model OpenAPI schema
+  (`https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/hunyuan-3d/v3.1/pro/image-to-3d`
+  — no auth required) and cross-checked it with a `fal.subscribe` call using
+  deliberately empty `input: {}`, which fal rejects with a 422 validation
+  error listing the real required/optional fields — free, no generation
+  runs, same "let a schema mismatch fail loud" discipline `falClient.ts`
+  already uses.
+- This **corrects two things R1's triangulated memo got wrong**, found before
+  any paid call:
+  - The single-image input field is **`input_image_url`**, not `image_url`
+    as the memo guessed.
+  - The output GLB lives at **`model_glb.url`**, not `model_mesh.url` as the
+    memo guessed. This happens to not matter for code — `falClient.ts`'s
+    `GLB_URL_KEY_CANDIDATES` already lists `"model_glb.url"` as its #2
+    candidate — but it's worth recording as a correction, not just luck.
+  - **There is no separate multi-view endpoint for v3.1.** Unlike the v2
+    family (`hunyuan3d/v2/multi-view` is a genuinely different endpoint),
+    v3.1 Pro's *one* endpoint takes up to 8 optional named view-angle fields
+    (`back_image_url`, `left_image_url`, `right_image_url`, `top_image_url`,
+    `bottom_image_url`, `left_front_image_url`, `right_front_image_url`)
+    alongside the required `input_image_url` (front) — multi-view is just
+    filling in more of the same request, not a different request shape. This
+    simplified D5's harness relative to R1's expectation of two separate code
+    paths.
+- Script: `spike-v2/d5-generate.mjs` (a small standalone module, per R1's
+  "don't generalize `falClient.ts`" recommendation — parallels
+  `spike/import/generate-item.py`'s shape, not app code).
+
+### Real pricing — confirmed, replacing R1's triangulated table (for this endpoint)
+
+Fetched fal's own public model page
+(`https://fal.ai/models/fal-ai/hunyuan-3d/v3.1/pro/image-to-3d`) and read the
+billing note fal shows in its own playground UI, verbatim:
+
+> Your request will cost $0.375 per generation... Enabling PBR materials
+> adds $0.15. Using multi-view images adds $0.15. Custom face count adds
+> $0.15.
+
+So, for what D5 actually ran (PBR on, default face count throughout):
+
+| Run | Fields used | Price |
+|---|---|---|
+| Single-image (water-cooler, bookshelf, sonderod-rug) | `input_image_url` + `enable_pbr` | $0.375 + $0.15 = **$0.525** each |
+| Multi-view (table) | `input_image_url` + `right_front_image_url` + `enable_pbr` | $0.375 + $0.15 (PBR) + $0.15 (multi-view) = **$0.675** |
+
+**Total real spend: 3 × $0.525 + $0.675 = $2.25** — well under the plan's
+$10–20 W-C budget, and confirms R1's "every Hunyuan variant is cheaper than
+Meshy's ~$0.80" finding with real, not triangulated, numbers for this
+endpoint. Generation wall-clock time was consistent across all four runs:
+135.6s, 142.4s, 155.9s, 138.3s (`spike-v2/d5-generation-log.json` — request
+IDs and timings recorded, no key or billing-account info).
+
+### What ran
+
+Three items, single image, matching Meshy's original input photo exactly
+(the same `*-source.png`/`.webp` files staged from Shyam's real project
+export — no new photos, no re-shoot):
+
+- **Water Cooler** (34×30×105cm)
+- **Bookshelf** (40×143.5×72cm)
+- **SONDEROD Rug** (240×170×2cm)
+
+One multi-view probe, **dining table** (153×92×76cm) — separate from the
+3-item comparison slate per the plan, Hunyuan-only (no Meshy counterpart to
+compare against, since Meshy doesn't take multi-view input).
+
+GLBs generated: `spike-v2/d5-assets/generated/*.glb` (not committed — see
+below). Meshy's pre-existing GLBs (Shyam's real project export, not
+regenerated) staged at `spike-v2/d5-assets/existing-assets/` alongside their
+source photos.
+
+**Not committed to git**: the raw GLB binaries (both Meshy's pre-existing
+ones and the newly generated Hunyuan ones), ~8–50MB each — regenerable
+(Meshy's are already in Shyam's own project export; Hunyuan's are
+reproducible from the committed source photos via `d5-generate.mjs` for
+~$2.25) and would otherwise be the bulk of this branch's diff.
+`.gitignore` covers both directories. What *is* committed: the source
+photos (small, and the only irreproducible input), the generation log
+(pricing/timing, no secrets), the render harness/scripts, and every
+screenshot the contact sheets reference.
+
+### Multi-view coverage — an honest limitation, not hidden
+
+The staged `table-angles/` inputs are `angle-1.png`/`angle-2.png`
+(near-duplicate straight-on shots), `angle-3.png` (a 3/4 perspective showing
+the table's right end + front face), and `angle-4.png` (a low-res duplicate
+of angle-1) — **no genuine back or left-side photo exists**. D5 mapped:
+
+- `angle-1.png` → `input_image_url` (front, required)
+- `angle-3.png` → `right_front_image_url` (the closest of the 8 named fields
+  to what that photo actually shows — a right-front 45° angle)
+
+That's it — one real angle beyond the front. R1 flagged that Hunyuan's
+multi-view value proposition is specifically fixing **back-view** fidelity;
+this test cannot speak to that at all, since no back photo was available to
+feed it. What it *can* speak to: whether a second, off-axis angle
+(front-right) helps proportion/depth accuracy versus front-only — visible in
+the contact sheet's `table.html` page, but still a probe of "does a second
+angle help," not "does back-view multi-view work," and the outcome doc
+doesn't overstate it as the latter. This is also, per the plan, "the
+cheapest possible probe of PRD §11's multi-state furniture idea" — it shows
+multi-view *input* works end-to-end and is cheap, without saying anything
+about a multi-state *feature*.
+
+### In-app render harness — reused, not hand-rolled
+
+Per OUTCOME-3's "viewer flattery" rule: nothing here was judged from fal's
+own preview viewer. Built `spike-v2/render-harness.html`/`.ts`, a standalone
+page (not part of the running app, lives in `spike-v2/` per §4) that:
+
+- Calls the real `buildScene()` (`src/scene/buildScene.ts`) — same sun
+  `DirectionalLight` + hemisphere bounce light + shell materials every real
+  scene gets — against a minimal but schema-valid synthetic room (a single
+  item, generously sized so the camera never ends up outside a wall — see
+  "rough edges" below), rather than hand-rolling a separate lighting setup.
+- Replicates Viewport.tsx's renderer/tonemap config line-for-line
+  (`antialias`, `SRGBColorSpace`, `ACESFilmicToneMapping`,
+  `PCFSoftShadowMap`) and its `PMREMGenerator(RoomEnvironment)` IBL setup —
+  the same reflections every real furniture item in the app gets.
+- Calls the real `fitModelToDims()` (`src/scene/loadFurnitureModel.ts`) to
+  rescale/floor-snap/recenter each loaded GLB to the item's actual
+  `dimsCm` from `project.json` — the same transform every Meshy import
+  already gets at load time, unmodified (no separate rescale script needed
+  for this comparison — D5 reuses the live-load-time version rather than
+  spike 3's offline `process-glb.mjs`/`gltf-transform` path, since the app
+  already has this covered and it's the more current of the two).
+- Driven by `spike-v2/d5-render-drive.mjs` (Playwright, same one-off-driver
+  shape as `w-a-drive.mjs`/`d2-collision-snap-drive.mjs`/etc.) — for each
+  item, loads the Meshy GLB then the Hunyuan GLB into the same scene/camera
+  setup and captures 5 identical camera views: 4 azimuths around the item
+  (0°/45°/90°/180° — 180° stands in for OUTCOME-3's back-view convention)
+  plus a top-down shot (added after the rug's flat 2cm profile made every
+  eye-level view a grazing edge-on sliver not worth judging).
+
+**Rough edges found (surfacing per plan §6 discipline, not hiding them):**
+- A freshly generated GLB (Meshy or Hunyuan) has no established "front"
+  convention the way a seeded, `modelRotationDeg`-corrected app item does —
+  so the 4 azimuth views are labeled by camera position (view A/B/C/D), not
+  by claimed front/back/side, since guessing which way each mesh "faces"
+  is exactly the kind of unearned precision this spike avoids. What's held
+  constant is the comparison: both providers' renders of the same item get
+  the identical 5 camera positions and identical lighting.
+- First attempt used a small (600×600cm) harness room; the rug's 240cm
+  width put the camera *outside* the wall for its widest framing, producing
+  a blank grey frame (the wall's own back face filling the screen, no
+  error). Fixed by sizing the harness room generously (4000×4000cm)
+  relative to any single item.
+- The top-down view initially rendered blank too, for an unrelated reason:
+  the camera's height for a steep look-down exceeded the harness room's
+  ceiling — same failure signature (blank grey, no error), different cause
+  (camera physically above the opaque ceiling mesh, blocking its own view
+  straight down). Fixed by giving the harness room a tall (1500cm, not a
+  real room's ~270cm) ceiling — this room only exists to give `buildScene()`
+  something to light, not to be realistic.
+- Separately, `Object3D.lookAt` degenerates when the view direction is
+  nearly parallel to `camera.up` — the same top-down view exposed this too:
+  even after the ceiling fix, a steep look-down needs `camera.up` set to a
+  horizontal reference (not the default world +Y) or the camera basis comes
+  out degenerate. Both fixes are in `render-harness.ts`, commented at the
+  fix site for whoever next needs a top-down framing in a Three.js scene.
+
+### Side-by-side contact sheet
+
+`spike-v2/d5-contact-sheets/index.html` (open directly in a browser — fully
+static, no build step, links to one page per item):
+`water-cooler.html`, `bookshelf.html`, `sonderod-rug.html`, `table.html`.
+Each item page is a Meshy-row/Hunyuan-row table, 5 matching-view columns,
+images pulled directly from `spike-v2/d5-render-screenshots/<item>/`.
+
+Non-binding observations from building the harness (not a verdict — C3 is):
+water-cooler's Meshy texture has a visible warped/rippled artifact across
+the dispenser front that Hunyuan's doesn't share; both providers reproduce
+the *same* bookshelf structural defect C1 already flagged (cubbies on the
+narrow end, no backboard) — suggesting that's an input-photo ambiguity
+(a bookshelf photographed lying on its side) rather than a Meshy-specific
+failure, since an independent model made the same mistake; the rug's
+top-down view shows Meshy holding a straighter rectangular silhouette while
+Hunyuan's came out visibly more warped/bowed despite deeper color
+saturation. These are exactly the kind of read that needs Shyam's own C3
+pass to confirm or overturn, not a spike-author's judgment call.
+
+### The three W-C questions (§2) — answered only where D5 has hard evidence
+
+(a) **Is Hunyuan's quality edge real under app lighting, or viewer
+flattery?** Not answered here — this is C3's call, by design. The contact
+sheet exists specifically so that question can be judged under identical
+in-app lighting rather than fal's preview viewer.
+
+(b) **Does multi-angle input materially fix back-view/fidelity failures?**
+Not answered — the available test inputs had no genuine back photo (see
+coverage caveat above), so this spike cannot speak to Hunyuan's actual
+back-view value proposition either way. What it does show: a second
+off-axis (front-right) angle is cheap ($0.15) and the request plumbing
+works end-to-end. Whether that specific input materially changed the
+table's fidelity versus a hypothetical front-only run is also left to C3,
+since no front-only Hunyuan run of the table exists to compare against (out
+of budget scope for this probe).
+
+(c) **What would adoption cost?** Answered, with real numbers: **$0.525 per
+single-image generation, $0.675 with a second view angle** — cheaper than
+Meshy's ~$0.80 either way, confirming R1's directional finding with live
+data. Browser-direct CORS feasibility: **not independently re-verified from
+a browser origin in this pass** — `d5-generate.mjs` ran from Node (matching
+`spike/import/generate-item.py`'s script-based precedent, not
+`falClient.ts`'s browser path), so this doesn't repeat ADR-0001's exact
+"real browser, real CORS preflight" check the way R1 recommended. What *is*
+confirmed: the same `@fal-ai/client` package, the same `fal.storage.upload`
++ `fal.subscribe` calls, against the same fal queue-job platform Meshy uses
+— R1's "no reason to expect this to differ" inference still stands, now
+with a real successful round-trip behind it (not just a schema check), but
+the literal three-leg-from-a-browser-tab verification ADR-0001 did for
+Meshy remains open if Hunyuan adoption is pursued for real. Any adoption
+decision still requires its own ADR superseding/amending ADR-0001, per §5 —
+not assumed here.
