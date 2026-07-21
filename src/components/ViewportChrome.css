@@ -88,3 +88,13 @@
   color: var(--color-ink);
   width: 140px;
 }
+
+.viewport-chrome-naming-error {
+  font: var(--text-mono-label);
+  font-size: 11px;
+  color: var(--color-error);
+  background: var(--color-canvas);
+  padding: var(--space-2) var(--space-8);
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
+}

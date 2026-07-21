@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { IDBFactory } from "fake-indexeddb";
 import seedRaw from "../../seed/living-room.json";
 import { parseScene, SCHEMA_VERSION, type SceneFile } from "../schema/scene";
-import { saveProjectNow, loadProject, clearProject } from "./autosave";
+import { saveProjectNow, saveProjectDebounced, loadProject, clearProject } from "./autosave";
 
 // Fresh in-memory IndexedDB per test.
 beforeEach(() => {
@@ -45,5 +45,26 @@ describe("IndexedDB autosave", () => {
     await saveProjectNow(edited);
     const restored = await loadProject();
     expect(restored!.meta.source).toBe("edited");
+  });
+
+  // Code-review finding: an immediate save (e.g. saving a camera viewpoint)
+  // used to be clobberable by a pending saveProjectDebounced write scheduled
+  // just before it (e.g. a ShellPanel calibration drag) — the debounce
+  // timer's closed-over, now-stale `scene` would fire later and overwrite
+  // the immediate save. saveProjectNow now cancels any pending debounced
+  // write first.
+  it("an immediate save cancels a pending debounced write instead of racing it", async () => {
+    const stale = JSON.parse(JSON.stringify(seedScene)) as SceneFile;
+    stale.meta.source = "stale-debounced";
+    saveProjectDebounced(stale, 20); // schedules a write of `stale` ~20ms out
+
+    const fresh = JSON.parse(JSON.stringify(seedScene)) as SceneFile;
+    fresh.meta.source = "fresh-immediate";
+    await saveProjectNow(fresh); // should cancel the pending debounce timer above
+
+    await new Promise((resolve) => setTimeout(resolve, 50)); // let the (now-cancelled) debounce window pass
+
+    const restored = await loadProject();
+    expect(restored!.meta.source).toBe("fresh-immediate");
   });
 });

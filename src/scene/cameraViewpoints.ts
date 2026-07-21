@@ -4,27 +4,13 @@
 // WebGL context in the loop — same split as import/applyImport.ts.
 
 import type { CameraPosition } from "../schema/scene";
-
-function slugify(name: string): string {
-  const base = name
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  return base || "view";
-}
-
-function uniqueId(base: string, existingIds: Set<string>): string {
-  if (!existingIds.has(base)) return base;
-  let n = 2;
-  while (existingIds.has(`${base}-${n}`)) n++;
-  return `${base}-${n}`;
-}
+import { slugify, uniqueId } from "../util/slug";
 
 /** Builds a new named CameraPosition from a live eye/lookAt/fov reading,
  *  deriving a unique id from the given name (same slug-then-number-suffix
- *  scheme as ImportPanel's item ids) so two views named e.g. "Couch" don't
- *  collide. Pure — caller appends the result to `sceneFile.cameras`. */
+ *  scheme as ImportPanel's item ids — see util/slug.ts) so two views named
+ *  e.g. "Couch" don't collide. Pure — caller appends the result to
+ *  `sceneFile.cameras`. */
 export function makeCameraPosition(
   name: string,
   eye: readonly [number, number, number],
@@ -32,7 +18,7 @@ export function makeCameraPosition(
   fovDeg: number,
   existingCameras: readonly CameraPosition[],
 ): CameraPosition {
-  const id = uniqueId(slugify(name), new Set(existingCameras.map((c) => c.id)));
+  const id = uniqueId(slugify(name, "view"), new Set(existingCameras.map((c) => c.id)));
   return {
     id,
     name: name.trim() || id,

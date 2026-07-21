@@ -30,6 +30,17 @@ export interface ViewportHandle {
 const HUMAN_FOV = 38; // ~35mm-equivalent, per spike 2's C2 feedback
 const SHELL_SURFACES: ShellSurface[] = ["wall", "floor", "ceiling"];
 
+/** Applies a saved/seed CameraPosition to a live camera+controls pair —
+ *  shared by the structural effect's initial-mount framing and
+ *  ViewportHandle.flyTo's recall, so the two never drift apart. */
+function applyCameraPreset(camera: THREE.PerspectiveCamera, controls: OrbitControls, preset: CameraPosition) {
+  camera.position.set(...preset.eye);
+  camera.fov = preset.fovDeg ?? HUMAN_FOV;
+  camera.updateProjectionMatrix();
+  controls.target.set(...preset.lookAt);
+  controls.update();
+}
+
 // Clamps how far OrbitControls can orbit vertically — without this, an
 // unclamped orbit can pass under the floor or over the ceiling and show the
 // scene background color through them (belt-and-suspenders alongside the
@@ -161,22 +172,17 @@ export const Viewport = forwardRef<
 
     const camera = new THREE.PerspectiveCamera(HUMAN_FOV, 1, 5, 3000);
     const preset = cameras[0];
-    if (preset) {
-      camera.position.set(...preset.eye);
-      camera.fov = preset.fovDeg ?? HUMAN_FOV;
-      camera.updateProjectionMatrix();
-    } else {
-      camera.position.set(0, 300, 600);
-    }
+    if (!preset) camera.position.set(0, 300, 600);
 
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.screenSpacePanning = true;
     controls.minPolarAngle = MIN_POLAR_ANGLE;
     controls.maxPolarAngle = MAX_POLAR_ANGLE;
     if (preset) {
-      controls.target.set(...preset.lookAt);
+      applyCameraPreset(camera, controls, preset);
+    } else {
+      controls.update();
     }
-    controls.update();
     cameraRef.current = camera;
     controlsRef.current = controls;
 
@@ -234,11 +240,7 @@ export const Viewport = forwardRef<
         const camera = cameraRef.current;
         const controls = controlsRef.current;
         if (!camera || !controls) return;
-        camera.position.set(...preset.eye);
-        camera.fov = preset.fovDeg ?? HUMAN_FOV;
-        camera.updateProjectionMatrix();
-        controls.target.set(...preset.lookAt);
-        controls.update();
+        applyCameraPreset(camera, controls, preset);
       },
     }),
     [],

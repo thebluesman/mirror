@@ -11,8 +11,19 @@ import { openDB, runTx, PROJECT_STORE } from "./db";
 
 const KEY = "current";
 
-/** Persist the project immediately. */
+let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** Persist the project immediately. Cancels any pending debounced write
+ *  first — otherwise that write's closed-over (and now stale) `scene` could
+ *  fire after this one and silently clobber it in IndexedDB, even though
+ *  this call's `scene` is the newer one the caller actually wants persisted
+ *  (code-review finding: a debounced ShellPanel calibration write racing an
+ *  immediate save/delete of a camera viewpoint). */
 export async function saveProjectNow(scene: SceneFile): Promise<void> {
+  if (debounceTimer) {
+    clearTimeout(debounceTimer);
+    debounceTimer = undefined;
+  }
   const db = await openDB();
   try {
     // scene is always a zod-parsed SceneFile (plain numbers/strings/arrays),
@@ -44,8 +55,6 @@ export async function clearProject(): Promise<void> {
     db.close();
   }
 }
-
-let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 
 /** Debounced autosave — coalesces rapid changes into one write. */
 export function saveProjectDebounced(scene: SceneFile, delayMs = 500): void {

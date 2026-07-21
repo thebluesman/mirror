@@ -73,26 +73,31 @@ function App() {
   const viewportRef = useRef<ViewportHandle>(null);
 
   // A saved/deleted viewpoint is a discrete, deliberate action (like an
-  // import commit) — persist immediately rather than debouncing.
-  function handleSaveView(name: string) {
+  // import commit) — persist immediately rather than debouncing. Computed
+  // from `sceneFile` directly and passed to setSceneFile, same as
+  // handleImported below — not the setSceneFile(prev => ...) functional-
+  // update form updateShellSurface uses, because saveProjectNow (unlike
+  // saveProjectDebounced) isn't idempotent-by-timer: React 18 StrictMode
+  // double-invokes functional updaters in dev, which would fire two real
+  // IndexedDB writes per click if the write lived inside the updater
+  // (code-review finding). ViewportChrome only renders once `sceneFile` is
+  // loaded, so it's never null here.
+  function handleSaveView(name: string): boolean {
+    if (!sceneFile) return false;
     const view = viewportRef.current?.getCurrentView();
-    if (!view) return;
-    setSceneFile((prev) => {
-      if (!prev) return prev;
-      const cam: CameraPosition = makeCameraPosition(name, view.eye, view.lookAt, view.fovDeg, prev.cameras);
-      const next: SceneFile = { ...prev, cameras: [...prev.cameras, cam] };
-      void saveProjectNow(next);
-      return next;
-    });
+    if (!view) return false;
+    const cam: CameraPosition = makeCameraPosition(name, view.eye, view.lookAt, view.fovDeg, sceneFile.cameras);
+    const next: SceneFile = { ...sceneFile, cameras: [...sceneFile.cameras, cam] };
+    setSceneFile(next);
+    void saveProjectNow(next);
+    return true;
   }
 
   function handleDeleteView(id: string) {
-    setSceneFile((prev) => {
-      if (!prev) return prev;
-      const next: SceneFile = { ...prev, cameras: prev.cameras.filter((c) => c.id !== id) };
-      void saveProjectNow(next);
-      return next;
-    });
+    if (!sceneFile) return;
+    const next: SceneFile = { ...sceneFile, cameras: sceneFile.cameras.filter((c) => c.id !== id) };
+    setSceneFile(next);
+    void saveProjectNow(next);
   }
 
   return (

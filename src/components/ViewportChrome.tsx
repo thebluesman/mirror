@@ -14,17 +14,26 @@ export function ViewportChrome({
 }: {
   cameras: CameraPosition[];
   onRecall: (preset: CameraPosition) => void;
-  onSave: (name: string) => void;
+  /** Returns whether the save actually happened (false if the viewport isn't
+   *  ready yet) — commitSave only clears/closes the form on success, so a
+   *  failed save doesn't silently read as done. */
+  onSave: (name: string) => boolean;
   onDelete: (id: string) => void;
 }) {
   const [naming, setNaming] = useState(false);
   const [name, setName] = useState("");
+  const [saveFailed, setSaveFailed] = useState(false);
 
   function commitSave() {
     const trimmed = name.trim();
-    onSave(trimmed || `View ${cameras.length + 1}`);
-    setName("");
-    setNaming(false);
+    const saved = onSave(trimmed || `View ${cameras.length + 1}`);
+    if (saved) {
+      setName("");
+      setNaming(false);
+      setSaveFailed(false);
+    } else {
+      setSaveFailed(true);
+    }
   }
 
   return (
@@ -66,12 +75,14 @@ export function ViewportChrome({
                 if (e.key === "Escape") {
                   setNaming(false);
                   setName("");
+                  setSaveFailed(false);
                 }
               }}
             />
             <button type="submit" className="viewport-chrome-pill viewport-chrome-pill--outline">
               Save
             </button>
+            {saveFailed && <span className="viewport-chrome-naming-error">Viewport not ready — try again</span>}
           </form>
         ) : (
           <button
