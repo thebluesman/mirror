@@ -28,6 +28,7 @@
 .app-viewport {
   flex: 1 1 auto;
   min-width: 0;
+  position: relative;
 }
 
 .app-panel {

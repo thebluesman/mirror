@@ -4,6 +4,7 @@ import { loadFalKey } from "../storage/settings";
 import { putAsset } from "../storage/assets";
 import { generateFurnitureGlb, FalKeyMissingError, type GenerationPhase } from "../import/falClient";
 import { applyFurnitureImport } from "../import/applyImport";
+import { slugify, uniqueId } from "../util/slug";
 import "./ImportPanel.css";
 
 type Stage =
@@ -12,22 +13,6 @@ type Stage =
   | { kind: "generating"; photo: File; phase: GenerationPhase; message?: string }
   | { kind: "confirm-dims"; glbBlob: Blob; photoBlob: Blob | File; dims: Dims }
   | { kind: "error"; message: string; photo: File; photoUrl: string | null };
-
-function slugify(name: string): string {
-  const base = name
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  return base || "item";
-}
-
-function uniqueId(base: string, existingIds: Set<string>): string {
-  if (!existingIds.has(base)) return base;
-  let n = 2;
-  while (existingIds.has(`${base}-${n}`)) n++;
-  return `${base}-${n}`;
-}
 
 function dimsOf(item: FurnitureItem | undefined): Dims {
   if (item?.dimsCm) return item.dimsCm;
@@ -105,7 +90,7 @@ export function ImportPanel({
     const itemId =
       selection === "__new__"
         ? uniqueId(
-            slugify(newName || "new-item"),
+            slugify(newName || "new-item", "item"),
             new Set(sceneFile.items.map((i) => i.id)),
           )
         : selection;
@@ -129,6 +114,12 @@ export function ImportPanel({
   return (
     <div className="import-panel">
       <h2 className="import-panel-title">Furniture import</h2>
+
+      <p className="import-panel-note">
+        Placement is seeded from a one-time Figma conversion — items snap to the position/rotation
+        drawn there. If the room layout changes in Figma, that conversion has to be redone by hand;
+        this app won't detect or reflect the change on its own.
+      </p>
 
       {hasFalKey === false && (
         <p className="import-panel-warning">Add a fal.ai key in Settings before importing furniture.</p>

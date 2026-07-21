@@ -20,6 +20,19 @@
   margin: 0;
 }
 
+.import-panel-note {
+  font: var(--text-mono-label);
+  font-size: 11px;
+  color: var(--color-muted-slate);
+  background: var(--color-soft-stone);
+  border-radius: var(--radius-sm);
+  padding: var(--space-8) var(--space-12);
+  margin: 0;
+  text-transform: none;
+  letter-spacing: normal;
+  line-height: 1.5;
+}
+
 .import-field {
   display: flex;
   flex-direction: column;

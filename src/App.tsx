@@ -1,10 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import seedRaw from "../seed/living-room.json";
-import { Viewport } from "./components/Viewport";
+import { Viewport, type ViewportHandle } from "./components/Viewport";
+import { ViewportChrome } from "./components/ViewportChrome";
 import { ShellPanel } from "./components/ShellPanel";
 import { ImportPanel } from "./components/ImportPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
-import { parseScene, type SceneFile, type SurfaceCalibration } from "./schema/scene";
+import { parseScene, type CameraPosition, type SceneFile, type SurfaceCalibration } from "./schema/scene";
+import { makeCameraPosition } from "./scene/cameraViewpoints";
 import { loadProject, saveProjectDebounced, saveProjectNow } from "./storage/autosave";
 import "./App.css";
 
@@ -68,6 +70,36 @@ function App() {
     void saveProjectNow(next);
   }
 
+  const viewportRef = useRef<ViewportHandle>(null);
+
+  // A saved/deleted viewpoint is a discrete, deliberate action (like an
+  // import commit) — persist immediately rather than debouncing. Computed
+  // from `sceneFile` directly and passed to setSceneFile, same as
+  // handleImported below — not the setSceneFile(prev => ...) functional-
+  // update form updateShellSurface uses, because saveProjectNow (unlike
+  // saveProjectDebounced) isn't idempotent-by-timer: React 18 StrictMode
+  // double-invokes functional updaters in dev, which would fire two real
+  // IndexedDB writes per click if the write lived inside the updater
+  // (code-review finding). ViewportChrome only renders once `sceneFile` is
+  // loaded, so it's never null here.
+  function handleSaveView(name: string): boolean {
+    if (!sceneFile) return false;
+    const view = viewportRef.current?.getCurrentView();
+    if (!view) return false;
+    const cam: CameraPosition = makeCameraPosition(name, view.eye, view.lookAt, view.fovDeg, sceneFile.cameras);
+    const next: SceneFile = { ...sceneFile, cameras: [...sceneFile.cameras, cam] };
+    setSceneFile(next);
+    void saveProjectNow(next);
+    return true;
+  }
+
+  function handleDeleteView(id: string) {
+    if (!sceneFile) return;
+    const next: SceneFile = { ...sceneFile, cameras: sceneFile.cameras.filter((c) => c.id !== id) };
+    setSceneFile(next);
+    void saveProjectNow(next);
+  }
+
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -76,7 +108,15 @@ function App() {
       <div className="app-body">
         <main className="app-viewport">
           {sceneFile ? (
-            <Viewport sceneFile={sceneFile} shellCalibration={sceneFile.room.shell} />
+            <>
+              <Viewport ref={viewportRef} sceneFile={sceneFile} shellCalibration={sceneFile.room.shell} />
+              <ViewportChrome
+                cameras={sceneFile.cameras}
+                onRecall={(preset) => viewportRef.current?.flyTo(preset)}
+                onSave={handleSaveView}
+                onDelete={handleDeleteView}
+              />
+            </>
           ) : (
             <div className="app-status">{error ? `Failed to load: ${error}` : "Loading…"}</div>
           )}
