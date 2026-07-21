@@ -11,12 +11,13 @@ the first implementation plan post-spike.
    `HANDOFF.md` note at the branch root; nothing lives only in a conversation.
    A fresh session resumes from: this doc's checkboxes → the phase branch →
    `HANDOFF.md`.
-2. **Multiagent orchestration, sized to the work.** The primary session (Fable)
-   orchestrates: decomposes phases, spawns subagents into worktrees, reviews and
-   merges. Subagents get the cheapest model that reliably does their kind of work
-   (assignments per phase below). Historian stays on its existing Stop-hook
-   trigger — orchestration sessions on branches are gated out by design; journal
-   entries land when work merges to `main`.
+2. **Multiagent orchestration, sized to the work.** The primary session (Sonnet,
+   since Fable access was lost 2026-07-21) orchestrates: decomposes phases,
+   spawns subagents into worktrees, reviews and merges. Subagents get the
+   cheapest model that reliably does their kind of work (assignments per phase
+   below) — this is independent of the primary session's model. Historian stays
+   on its existing Stop-hook trigger — orchestration sessions on branches are
+   gated out by design; journal entries land when work merges to `main`.
 3. **Branch discipline.** Implementation phases run on `v1/<phase>` branches
    (worktrees for parallel streams). Docs and this plan's checkbox updates commit
    directly to `main`, per existing workflow. `/code-review` runs on each phase
@@ -26,7 +27,7 @@ the first implementation plan post-spike.
 
 | Work type | Model | Why |
 |---|---|---|
-| Orchestration, integration review, architectural decisions | Fable (primary session) | Judgment-heavy, holds full context |
+| Orchestration, integration review, architectural decisions | Sonnet (primary session) — Fable access lost 2026-07-21; Opus subagents still used for the riskiest per-task work below | Judgment-heavy, holds full context |
 | Three.js core port, storage/schema architecture, Meshy async-job flow | Opus | Complex, correctness-critical, cross-cutting |
 | Standard feature work, UI components from `DESIGN.md` tokens, texture-pipeline port | Sonnet | Well-specified implementation against existing patterns |
 | Scaffolding, config, test boilerplate, doc/research lookups (e.g. CORS behavior, API docs) | Haiku (Explore/general-purpose) | Mechanical or read-only; speed and cost win |
