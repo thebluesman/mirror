@@ -112,6 +112,16 @@ positioned to fix it properly rather than patched ad-hoc in Phase 1:
   leaking one full scene's worth of GPU buffers on React 19 StrictMode's
   dev-mode double-invoke); `camera.fov = preset.fovDeg || HUMAN_FOV` uses
   `||` instead of `??` (silently drops a legitimate `fovDeg: 0` preset).
+  **Extended by Phase 4's code-review (2026-07-21):** the same
+  never-disposed gap now also applies to furniture GLBs loaded via
+  `loadFurnitureModel` — every structural rebuild or unmount drops loaded
+  geometries/materials/textures without `.dispose()`. Also flagging a
+  distinct-but-related perf gap for this same hardening pass: `Viewport.tsx`'s
+  `structuralSceneFile` memo depends on `sceneFile.items`, so completing one
+  furniture import tears down and rebuilds the *entire* renderer/scene and
+  re-decodes *every* already-imported item's GLB from OPFS, not just the new
+  one — wasted work (and a visible flash) that scales with total furniture
+  count on every single import.
 - **Phase 4 (furniture import) altitude note**: `furnitureFootprint()`
   dispatches the compound-sofa case on `item.main && item.chaise` presence
   rather than a modeled shape discriminant — fine for now, but Phase 4's
@@ -182,6 +192,12 @@ phases positioned to fix them:
   silently validates as a plain box (`FurnitureItemSchema`'s union tries
   `CompoundSofaFurniture` first but falls through on the missing literal) —
   narrow edge case, no current data triggers it.
+  **Extended by Phase 4's code-review (2026-07-21):** `applyFurnitureImport`
+  silently adds an item to `items[]` with no placement command if
+  `scene.current` doesn't match any `layouts[].id` — reachable only via a
+  hand-edited/corrupted project file (no in-app flow produces this
+  mismatch), same "narrow edge case, no current data triggers it" shape as
+  the finding above.
 
 **Exit:** project persists across a browser restart (PRD §10's persistence
 criterion, testable before flows exist); Phase 1 viewport reads from the store
@@ -284,6 +300,48 @@ convention as Phase 3 (`HANDOFF.md` if she doesn't finish in one sitting,
 `/code-review` before merge); Shyam runs the real photo → paid generation →
 exit-criterion check himself once her branch is ready, since that step is
 what the exit criterion actually requires him for.
+
+**`/code-review` pass, 2026-07-21:** 8 findings (6 CONFIRMED, 2 PLAUSIBLE), 3
+fixed directly on the branch — `ImportPanel.tsx`'s confirm-dims form accepted
+zero/negative/non-finite cm values with no guard (schema's `Dims` has no
+positivity constraint either, so a bad value would persist forever with no
+in-app fix in v1); now validated inline, "Confirm and place" disabled until
+all three are positive finite numbers. `buildScene.ts`/`Viewport.tsx`: an
+item whose GLB failed to load (missing/corrupted OPFS asset) stayed
+permanently invisible — `addFurniture`'s box-placeholder logic is now a
+shared `addFurnitureBoxMeshes` helper Viewport falls back to on load
+failure, so a bad asset degrades to "looks unimported" instead of
+"vanishes with only a console trace." `assets.ts`'s `putAsset` (already
+tightened once this phase from presence-only to size-only) still trusted a
+same-size corrupted stub forever; now re-hashes the existing file's content
+on a size match before trusting it, closing the gap fully.
+
+The other 5 are deferred: 2 extend already-existing deferred buckets above
+(Phase 1's "Viewport hardening" note now also covers furniture-GLB disposal
+and the full-rebuild-per-import cost; Phase 2's schema-robustness note now
+also covers `applyFurnitureImport`'s silent no-op on a corrupted
+`current`/`layouts` mismatch) — see those entries. The remaining 2:
+
+- **Phase 1 origin, no owning phase yet**: `furnitureFootprint()`'s
+  compound-sofa chaise offset (`-(main.w / 2) - chaise.w / 2`) leaves a
+  145cm gap instead of abutting the chaise to the main body — main's own
+  offset (`main.w / 2`) already accounts for its half-width, so subtracting
+  it again from the chaise's offset double-counts. Harmless as long as the
+  sofa only ever renders as a box placeholder, but Phase 4's new
+  `furnitureOverallDims` (which a GLB import would fit to) inherits the gap
+  and computes a ~38% too-wide bounding box (526cm vs. an expected ~381cm)
+  for the seed's `applaryd-sofa`. Predates this phase and touches
+  already-verified Phase 1 render output (the sofa's on-screen position),
+  so not patched ad hoc here — fix before anyone runs this specific item
+  through the import flow.
+- **Live-API-dependent, same gap HANDOFF.md already flags**: `falClient.ts`'s
+  `findGlbUrlAnywhere` fallback returns the first `.glb`-suffixed URL found
+  in an unordered scan if none of the named response-key candidates match —
+  fine if fal's response only ever carries one GLB URL, silently wrong if it
+  ever carries more than one (e.g. a preview alongside the final mesh).
+  Unverifiable without a live call (see HANDOFF.md); whoever runs the real
+  key/photo/paid-generation exit-criterion check should also confirm which
+  key the real response uses and that this fallback isn't silently needed.
 
 ### Phase 5 — View polish + acceptance (`v1/polish`)
 

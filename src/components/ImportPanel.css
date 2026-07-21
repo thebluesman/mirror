@@ -1,0 +1,121 @@
+.import-panel {
+  height: 100%;
+  overflow-y: auto;
+  padding: var(--space-16);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+}
+
+.import-panel-title {
+  font: var(--text-feature-heading);
+  color: var(--color-ink);
+  margin: 0;
+}
+
+.import-panel-warning {
+  font: var(--text-body);
+  font-size: 12px;
+  color: var(--color-error);
+  margin: 0;
+}
+
+.import-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font: var(--text-body);
+  font-size: 12px;
+  color: var(--color-body-muted);
+}
+
+.import-field select,
+.import-field input {
+  font: var(--text-body);
+  font-size: 13px;
+  padding: var(--space-8);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-xs);
+  background: var(--color-canvas);
+  color: var(--color-ink);
+}
+
+.import-panel-file-input {
+  display: none;
+}
+
+.import-panel-button {
+  font: var(--text-button);
+  background: var(--color-primary);
+  color: var(--color-canvas);
+  border: none;
+  border-radius: var(--radius-pill);
+  padding: var(--space-8) var(--space-16);
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.import-panel-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.import-panel-button-secondary {
+  font: var(--text-button);
+  background: none;
+  color: var(--color-body-muted);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-pill);
+  padding: var(--space-8) var(--space-16);
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.import-panel-confirm,
+.import-panel-progress,
+.import-panel-dims,
+.import-panel-error {
+  background: var(--color-canvas);
+  border: 1px solid var(--color-card-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-12);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  font: var(--text-body);
+  font-size: 13px;
+  color: var(--color-ink);
+}
+
+.import-panel-progress-detail {
+  font: var(--text-mono-label);
+  font-size: 11px;
+  color: var(--color-body-muted);
+  margin: 0;
+  word-break: break-word;
+}
+
+.import-panel-actions {
+  display: flex;
+  gap: var(--space-8);
+}
+
+.import-panel-error {
+  color: var(--color-error);
+}
+
+.import-panel-dims-row {
+  display: flex;
+  gap: var(--space-8);
+}
+
+.import-panel-dims-row .import-field {
+  flex: 1;
+}
+
+.import-panel-dims-error {
+  font: var(--text-body);
+  font-size: 12px;
+  color: var(--color-error);
+  margin: 0;
+}

@@ -2,9 +2,14 @@ import { useEffect, useState } from "react";
 import seedRaw from "../seed/living-room.json";
 import { Viewport } from "./components/Viewport";
 import { ShellPanel } from "./components/ShellPanel";
+import { ImportPanel } from "./components/ImportPanel";
+import { SettingsPanel } from "./components/SettingsPanel";
 import { parseScene, type SceneFile, type SurfaceCalibration } from "./schema/scene";
 import { loadProject, saveProjectDebounced, saveProjectNow } from "./storage/autosave";
 import "./App.css";
+
+const TABS = ["Shell", "Import", "Settings"] as const;
+type Tab = (typeof TABS)[number];
 
 // Load order (Phase 2 exit criterion — persists across a browser restart):
 // restore the autosaved project from IndexedDB if present; otherwise seed
@@ -21,6 +26,7 @@ async function loadInitialScene(): Promise<SceneFile> {
 function App() {
   const [sceneFile, setSceneFile] = useState<SceneFile | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [tab, setTab] = useState<Tab>("Shell");
 
   useEffect(() => {
     let cancelled = false;
@@ -54,6 +60,14 @@ function App() {
     });
   }
 
+  // Import completion is a discrete, deliberate commit (not a drag gesture
+  // like the shell sliders) — persist immediately rather than debouncing, so
+  // a newly-generated GLB's hashes are never lost to a closed tab.
+  function handleImported(next: SceneFile) {
+    setSceneFile(next);
+    void saveProjectNow(next);
+  }
+
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -68,7 +82,25 @@ function App() {
           )}
         </main>
         <aside className="app-panel">
-          {sceneFile && <ShellPanel shell={sceneFile.room.shell} onUpdateSurface={updateShellSurface} />}
+          <nav className="app-panel-tabs">
+            {TABS.map((t) => (
+              <button
+                key={t}
+                type="button"
+                className={`app-panel-tab${tab === t ? " app-panel-tab--active" : ""}`}
+                onClick={() => setTab(t)}
+              >
+                {t}
+              </button>
+            ))}
+          </nav>
+          <div className="app-panel-body">
+            {sceneFile && tab === "Shell" && (
+              <ShellPanel shell={sceneFile.room.shell} onUpdateSurface={updateShellSurface} />
+            )}
+            {sceneFile && tab === "Import" && <ImportPanel sceneFile={sceneFile} onImported={handleImported} />}
+            {tab === "Settings" && <SettingsPanel />}
+          </div>
         </aside>
       </div>
     </div>
