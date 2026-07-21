@@ -231,8 +231,19 @@ export function ImportPanel({
   );
 }
 
+// Code-review finding: the `min={1}` on the number inputs below is only an
+// HTML hint — it doesn't stop a cleared/negative value from reaching
+// onConfirm (Number("") is 0, not NaN, so isNaN alone wouldn't catch it
+// either). A 0/negative/non-finite dim would fitModelToDims to a
+// zero/mirrored/degenerate scale and, since the schema's Dims has no
+// positivity constraint, persist that way with no in-app fix in v1.
+function isValidDim(n: number): boolean {
+  return Number.isFinite(n) && n > 0;
+}
+
 function DimsConfirmForm({ initial, onConfirm }: { initial: Dims; onConfirm: (dims: Dims) => void }) {
   const [dims, setDims] = useState(initial);
+  const invalid = (["w", "d", "h"] as const).filter((axis) => !isValidDim(dims[axis]));
   return (
     <div className="import-panel-dims">
       <p>Model generated — confirm its real-world size (cm) before placing it.</p>
@@ -242,7 +253,7 @@ function DimsConfirmForm({ initial, onConfirm }: { initial: Dims; onConfirm: (di
             <span>{axis.toUpperCase()}</span>
             <input
               type="number"
-              min={1}
+              min={0.1}
               step={0.1}
               value={dims[axis]}
               onChange={(e) => setDims({ ...dims, [axis]: Number(e.target.value) })}
@@ -250,7 +261,17 @@ function DimsConfirmForm({ initial, onConfirm }: { initial: Dims; onConfirm: (di
           </label>
         ))}
       </div>
-      <button type="button" className="import-panel-button" onClick={() => onConfirm(dims)}>
+      {invalid.length > 0 && (
+        <p className="import-panel-dims-error">
+          {invalid.map((a) => a.toUpperCase()).join(", ")} must be a positive number.
+        </p>
+      )}
+      <button
+        type="button"
+        className="import-panel-button"
+        disabled={invalid.length > 0}
+        onClick={() => onConfirm(dims)}
+      >
         Confirm and place
       </button>
     </div>

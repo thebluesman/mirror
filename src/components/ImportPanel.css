@@ -112,3 +112,10 @@
 .import-panel-dims-row .import-field {
   flex: 1;
 }
+
+.import-panel-dims-error {
+  font: var(--text-body);
+  font-size: 12px;
+  color: var(--color-error);
+  margin: 0;
+}

@@ -65,4 +65,23 @@ describe("OPFS asset store (fake OPFS)", () => {
     const got = await getAsset(hash);
     expect(await got!.text()).toBe("real-bytes");
   });
+
+  it("re-writes over a same-size but corrupted stub, not just a 0-byte one", async () => {
+    installFakeOpfs();
+    const blob = new Blob(["real-bytes"]); // 10 bytes
+    const hash = await hashBlob(blob);
+    // A same-length but wrong-content stub under the target hash — a size-only
+    // idempotency check would have trusted this forever.
+    const dir = await navigator.storage.getDirectory();
+    const stubHandle = await dir.getFileHandle(hash, { create: true });
+    const writable = await stubHandle.createWritable();
+    await writable.write(new Blob(["corrupted!"])); // also 10 bytes, different content
+    await writable.close();
+    expect((await stubHandle.getFile()).size).toBe(blob.size);
+
+    const written = await putAsset(blob);
+    expect(written).toBe(hash);
+    const got = await getAsset(hash);
+    expect(await got!.text()).toBe("real-bytes");
+  });
 });

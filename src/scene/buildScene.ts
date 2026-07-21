@@ -224,6 +224,24 @@ export function furnitureOverallDims(item: FurnitureItem): { w: number; d: numbe
   return { w: maxX - minX, d: maxZ - minZ, h };
 }
 
+// Elevation is already baked into a placement command's position[1] (see
+// e.g. table-lamp/tv-samsung-frame in seed/living-room.json) — don't add
+// item.elevationCm again here, or items with both end up floating 2x high.
+// Shared by addFurniture's synchronous placeholder path and Viewport's
+// GLB-load-failure fallback (src/components/Viewport.tsx) — an item must
+// never end up permanently invisible just because its Meshy mesh failed to
+// decode from OPFS (code-review finding, Phase 4).
+export function addFurnitureBoxMeshes(group: THREE.Group, item: FurnitureItem): void {
+  furnitureFootprint(item).forEach((part) => {
+    const geo = new THREE.BoxGeometry(part.w, part.h, part.d);
+    const mesh = new THREE.Mesh(geo, MAT.furniture);
+    mesh.position.set(part.offsetX, part.h / 2, part.offsetZ);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+  });
+}
+
 function addFurniture(
   scene: THREE.Scene,
   item: FurnitureItem,
@@ -240,20 +258,11 @@ function addFurniture(
   // itself (synchronous) leaves the group empty here and returns it via
   // BuiltScene.furnitureGroups; Viewport's structural effect loads the model
   // into it after the synchronous scene graph is up, the same async-after-
-  // build pattern Phase 3 established for shell textures.
+  // build pattern Phase 3 established for shell textures. If that load fails,
+  // Viewport falls back to addFurnitureBoxMeshes so the item never just
+  // vanishes.
   if (!item.glbHash) {
-    // Elevation is already baked into `position[1]` by the layout command
-    // (see e.g. table-lamp/tv-samsung-frame in seed/living-room.json) —
-    // don't add item.elevationCm again here, or items with both end up
-    // floating 2x high.
-    furnitureFootprint(item).forEach((part) => {
-      const geo = new THREE.BoxGeometry(part.w, part.h, part.d);
-      const mesh = new THREE.Mesh(geo, MAT.furniture);
-      mesh.position.set(part.offsetX, part.h / 2, part.offsetZ);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      group.add(mesh);
-    });
+    addFurnitureBoxMeshes(group, item);
   }
 
   scene.add(group);

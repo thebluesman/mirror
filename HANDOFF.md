@@ -74,12 +74,44 @@ correctly in the viewport. If the request schema turns out to be wrong,
 the fix is scoped to `REQUEST_DEFAULTS`/`GLB_URL_KEY_CANDIDATES` in
 `falClient.ts` — nothing else in the flow depends on the exact field names.
 
+## `/code-review` pass, 2026-07-21
+
+Run after the above (the earlier "not done in this session" note about no
+`/code-review` pass no longer applies). 8 angles → 1-vote verify → 8
+findings (6 CONFIRMED, 2 PLAUSIBLE). 3 fixed directly on this branch:
+
+- **No dims validation** — `ImportPanel.tsx`'s confirm-dims form accepted
+  zero/negative/non-finite cm values with nothing downstream to catch them
+  (the `Dims` schema has no positivity constraint, so a bad value would
+  persist forever with no in-app fix in v1). Now validated inline; "Confirm
+  and place" is disabled until W/D/H are all positive finite numbers.
+- **Item vanishes forever if its GLB fails to load** — a missing/corrupted
+  OPFS asset left the item's group permanently empty with only a
+  `console.error`. `addFurniture`'s box-placeholder logic is now a shared
+  `addFurnitureBoxMeshes` export Viewport falls back to on load failure, so
+  a bad asset degrades to "looks unimported" instead of "invisible."
+- **`putAsset`'s idempotency check** (already tightened once this phase from
+  presence-only to size-only) still trusted a same-size *corrupted* stub
+  forever. Now re-hashes the existing file's content on a size match before
+  trusting it — closes the gap fully instead of narrowing it. Regression
+  test added.
+
+The other 5 findings are deferred — see `plan-v1.md`'s Phase 4 section for
+the full writeup: 2 extend already-existing deferred buckets (furniture-GLB
+disposal + full-rebuild-per-import cost folded into Phase 1's "Viewport
+hardening" note; `applyFurnitureImport`'s corrupted-layout edge case folded
+into Phase 2's schema-robustness note), 1 is a pre-existing Phase 1
+`furnitureFootprint` bug newly consequential here (compound-sofa bounding
+box ~38% too wide — affects `applaryd-sofa` specifically if it's ever run
+through the import flow, not fixed here since it touches already-verified
+Phase 1 render output), and 1 is the same live-API-schema uncertainty this
+doc already flags below (`findGlbUrlAnywhere`'s fallback could pick the
+wrong URL if fal's response ever carries more than one `.glb` link).
+
+Build/lint/typecheck/tests (48/48) still clean after the fixes.
+
 ## Not done in this session
 
-- No `/code-review` pass — the interactive skill wasn't invocable from this
-  session; a thorough manual self-review was done instead (see commit
-  message), but a real `/code-review` pass is still recommended before
-  merging to `main`, per this repo's standing phase-branch convention.
 - This branch has **not** been merged to `main` — that's an explicit
   orchestrator action the harness scope for this session didn't authorize
   (push-to-designated-branch only). `plan-v1.md`'s Phase 4 checkboxes are

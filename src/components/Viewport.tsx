@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import { buildScene, furnitureOverallDims, type BuiltScene } from "../scene/buildScene";
+import { addFurnitureBoxMeshes, buildScene, furnitureOverallDims, type BuiltScene } from "../scene/buildScene";
 import { applyShellSurface, updateSurfaceCalibrationInPlace, type ShellSurface } from "../scene/shellMaterials";
 import { loadShellTexture } from "../scene/loadShellTexture";
 import { fitModelToDims, loadFurnitureModel } from "../scene/loadFurnitureModel";
@@ -121,6 +121,12 @@ export function Viewport({
         })
         .catch((err) => {
           console.error(`[Viewport] failed to load furniture GLB for "${item.id}"`, err);
+          // Code-review finding: a load failure used to leave the item's
+          // group permanently empty (no box, no signal) — fall back to the
+          // same placeholder box an item without a GLB gets, so a missing/
+          // corrupted OPFS asset degrades to "looks unimported" instead of
+          // "invisible."
+          if (!cancelled) addFurnitureBoxMeshes(group, item);
         });
     });
     setBuildVersion((v) => v + 1);
