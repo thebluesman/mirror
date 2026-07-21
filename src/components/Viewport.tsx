@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
@@ -50,29 +50,40 @@ export function Viewport({
   // camera, controls. Previously ran once per mount only (sceneFile
   // captured via useRef at mount) — restored here to react to structural
   // sceneFile changes (code review finding: any future structural mutation,
-  // e.g. furniture/walls/camera edits, silently stopped rebuilding). Shell-
-  // only changes (the only live mutation v1 actually makes post-mount) are
-  // still diverted to the calibration effect below without tearing down the
-  // WebGL context, by comparing every *other* top-level field by reference.
-  const prevSceneFileRef = useRef<SceneFile | null>(null);
+  // e.g. furniture/walls/camera edits, silently stopped rebuilding).
+  //
+  // The effect depends on `structuralSceneFile`, a useMemo'd reference to
+  // `sceneFile` that only changes when a *non-shell* top-level field
+  // changes — NOT on `sceneFile` directly. That distinction matters beyond
+  // "skip the work": an effect's cleanup always runs before its next
+  // invocation whenever its dependency changes, full stop, regardless of
+  // what the new invocation's body decides to do — so gating the rebuild
+  // with an early-return *inside* an effect keyed on raw `sceneFile` would
+  // still tear down the renderer/canvas on every shell-only calibration
+  // change (App.tsx's updateShellSurface creates a new sceneFile object per
+  // slider commit) and then not rebuild it, blanking the viewport. Keying
+  // on the memoized value instead means the effect doesn't re-run at all
+  // for a shell-only change, so no cleanup fires and the WebGL context is
+  // left alone — exactly the "shell changes don't churn the renderer"
+  // guarantee this component has always made, just now correctly combined
+  // with reacting to everything else.
+  const structuralSceneFile = useMemo(
+    () => sceneFile,
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: this is the memo's whole purpose, see comment above
+    [
+      sceneFile.room.ceilingHeightCm,
+      sceneFile.room.floor,
+      sceneFile.room.walls,
+      sceneFile.items,
+      sceneFile.cameras,
+      sceneFile.layouts,
+      sceneFile.current,
+    ],
+  );
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-
-    const prev = prevSceneFileRef.current;
-    const structuralChanged =
-      !prev ||
-      prev.room.ceilingHeightCm !== sceneFile.room.ceilingHeightCm ||
-      prev.room.floor !== sceneFile.room.floor ||
-      prev.room.walls !== sceneFile.room.walls ||
-      prev.items !== sceneFile.items ||
-      prev.cameras !== sceneFile.cameras ||
-      prev.layouts !== sceneFile.layouts ||
-      prev.current !== sceneFile.current;
-    prevSceneFileRef.current = sceneFile;
-
-    if (!structuralChanged) return; // shell-only change — the calibration effect handles it
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -81,7 +92,7 @@ export function Viewport({
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.appendChild(renderer.domElement);
 
-    const built = buildScene(sceneFile);
+    const built = buildScene(structuralSceneFile);
     builtRef.current = built;
     rendererRef.current = renderer;
     // Fresh materials (floor, at least) need every surface reapplied —
@@ -146,7 +157,7 @@ export function Viewport({
       Object.values(appliedTexturesRef.current).forEach((textures) => textures?.forEach((t) => t.dispose()));
       appliedTexturesRef.current = {};
     };
-  }, [sceneFile]);
+  }, [structuralSceneFile]);
 
   // Live shell-texture/calibration updates: mutates the materials the
   // structural effect already created, in place — no renderer/camera churn,
