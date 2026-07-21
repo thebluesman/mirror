@@ -24,6 +24,19 @@ describe("referencedHashes", () => {
     const hashes = referencedHashes(scene).sort();
     expect(hashes).toEqual(["aaa", "bbb"]);
   });
+
+  it("collects shell surface assetHashes (wall/floor/ceiling), deduped against items", () => {
+    const scene = JSON.parse(JSON.stringify(seedScene)) as any;
+    scene.items[0].sourcePhotoHash = "aaa";
+    scene.room.shell = {
+      wall: { assetHash: "wall-hash", tint: "#ffffff", repeat: [1, 1], roughnessScale: 1 },
+      floor: { assetHash: "floor-hash", tint: "#ffffff", repeat: [1, 1], roughnessScale: 1 },
+      // ceiling has no assetHash yet — still procedural, must not appear.
+      ceiling: { tint: "#ffffff", repeat: [1, 1], roughnessScale: 1 },
+    };
+    const hashes = referencedHashes(scene).sort();
+    expect(hashes).toEqual(["aaa", "floor-hash", "wall-hash"]);
+  });
 });
 
 describe("zip export/import round-trip (fake OPFS)", () => {
