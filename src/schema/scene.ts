@@ -139,6 +139,16 @@ const BoxFurniture = z
     elevationCm: z.number().optional(),
     sourcePhotoHash: z.string().optional(),
     glbHash: z.string().optional(),
+    // v2 spike D4 (W-B, rug fix ladder lever 2 — see spike-v2/OUTCOME.md):
+    // a photo-derived flat texture, for a box item rendered as a textured
+    // plane/box instead of a generated GLB. Deliberately restricted to
+    // BoxFurniture, not CompoundSofaFurniture — the only candidate (the
+    // SONDEROD rug) is a plain box, and a flat texture over a compound
+    // multi-part footprint has no obvious single "top face" to map it onto.
+    // Mutually exclusive with glbHash in practice (buildScene prefers
+    // glbHash when both are set), but the schema doesn't enforce that —
+    // an item simply never has both populated by any code path here.
+    flatTextureHash: z.string().optional(),
     modelRotationDeg: ModelRotation.optional(),
     notes: z.string().optional(),
     purchaseInfo: z.string().optional(),

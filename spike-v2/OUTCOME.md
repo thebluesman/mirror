@@ -405,7 +405,155 @@ the pre-fix code, passing after) for both a horizontal and a vertical
 wall's spurious cross-axis endpoint. `npx vitest run` (82 tests), `npx tsc
 -b`, `npm run build`, and `oxlint` all clean after the fix.
 
-## D4/D5 — not started
+## D4 — W-B: rug fix (flat textured plane)
 
-Blocked on Shyam's inputs (D4's rug photo; D5's FAL_KEY plus item/
-multi-angle photos).
+**Status: built, evidence captured, awaiting C2 (Shyam judging before/after
+against reference photos).** Branch: `v2/spike-quality`. Screenshots:
+`spike-v2/d4-screenshots/`, captured by `spike-v2/d4-rug-drive.mjs` (same
+one-off-Playwright-driver shape as the W-A scripts).
+
+**Ladder position:** lever 1 (re-generate from a better photo) was
+skipped — Shyam confirmed the photo provided for this pass is the exact
+photo already used for the original Meshy generation, so a re-run
+wouldn't change anything. This entry is lever 2: a flat textured plane/box
+with the photo-derived texture, replacing the generated mesh entirely for
+this one item. Lever 3 (CC0 fabric normal/roughness) wasn't attempted —
+per the plan, only run if lever 2 doesn't pass C2.
+
+**What's there:**
+- **`src/scene/flatItemTexture.ts`** — pure, framework-free math (no
+  THREE/Canvas/DOM dependency), the same shape as `src/texturing/tileable.ts`:
+  `computeCoverUV(imageAspect, targetAspect)` computes THREE.Texture
+  repeat/offset for a "cover" fit (CSS `background-size: cover;
+  background-position: center` — crop whichever axis the photo has "extra"
+  of, keep the rest full-bleed, centered), and `flatTextureBoxDims(dimsCm)`
+  restates `dimsCm` as a named width/height/depth triple. Deliberately
+  *not* reusing `tileable.ts`'s quadrant-swap/cross-fade pipeline — that
+  algorithm solves a different problem (an arbitrary-size floor/wall/
+  ceiling repeating a photo over and over needs its seams hidden); a rug
+  photo mapped once, 1:1, onto the rug's own real footprint never repeats,
+  so there's no seam to hide, only an aspect-ratio mismatch to fit without
+  stretching. The rug's actual case — a 1400x1400 square photo onto a
+  240x170 (~1.41:1) footprint — crops the photo's top/bottom symmetrically
+  and uses its full width, confirmed both in `flatItemTexture.test.ts` and
+  visually in the captured evidence.
+- **`src/schema/scene.ts`** — `flatTextureHash?: string` added to
+  `BoxFurniture` only (not `CompoundSofaFurniture` — the SONDEROD rug is
+  the only candidate and it's a plain box; a flat texture over a compound
+  multi-part footprint has no obvious single "top face" to map onto).
+  Smallest schema change that fits, per the task brief — no new
+  discriminant, no shape variant.
+- **`src/scene/buildScene.ts`** — a box item with `flatTextureHash` and no
+  `glbHash` gets `addFlatTexturedFurnitureMesh`: a single `THREE.Mesh`
+  sized to `dimsCm` (via `flatTextureBoxDims`) with a 6-material array —
+  five faces share the existing `MAT.furniture` instance (unseen for a
+  2cm-thick rug), the top face (+Y, index 2 in `BoxGeometry`'s default
+  material-group order) gets its own fresh `MeshStandardMaterial` instance
+  per item. `BuiltScene.pendingFlatTextures` carries `{item, material}`
+  pairs out of the synchronous builder, the same async-after-build shape
+  `pendingModels` already established for GLB loads — buildScene stays
+  synchronous (no OPFS reads), Viewport fills in the texture after.
+  `glbHash` wins if an item somehow had both (checked first in
+  `addFurniture`), though no code path here ever produces that combination.
+- **`src/components/Viewport.tsx`** — a new effect alongside the existing
+  GLB-load loop: for each `pendingFlatTextures` entry, `loadShellTexture`
+  (reused as-is from Phase 3's shell-texture path — it's just
+  `getAsset` + `createImageBitmap`, generic enough) decodes the stored
+  photo, `computeCoverUV` fits it to the item's `dimsCm.w / dimsCm.d`
+  aspect ratio, and the resulting repeat/offset go on a fresh
+  `THREE.Texture` (`ClampToEdgeWrapping`, not `RepeatWrapping` — the cover
+  fit never samples outside `[offset, offset+repeat] ⊆ [0,1]`, so there's
+  nothing to wrap) assigned to the material's `.map`. No box-mesh fallback
+  needed on a failed load (unlike the GLB path) — buildScene already left
+  a plain-color box mesh in the scene; a failed texture load just leaves
+  it that flat color instead of vanishing.
+
+**Tests:** `src/scene/flatItemTexture.test.ts` (cover-fit math: no-op when
+aspects match, crops width vs. height depending on which is "extra",
+centered offset, the rug's actual 1400x1400-onto-240x170 case, throws on
+non-positive/non-finite input) and `src/scene/buildScene.test.ts` (the
+flat-texture item renders a box sized to its real `dimsCm`, registers in
+`pendingFlatTextures` with a *distinct* per-item top material while the
+other five faces share the one `MAT.furniture` instance, two flat-texture
+items never share a top material with each other, `glbHash` wins over
+`flatTextureHash` if both are set, and a plain box with neither hash is
+unaffected — still the ordinary flat-color placeholder). `npx vitest run`
+(94 tests, up from 82), `npx tsc -b`, `npm run build`, and `oxlint` all
+clean.
+
+**Evidence** (`d4-rug-drive.mjs`, against a running dev server and the
+real seed): screenshots show the placeholder's flat tan box (indistinguishable
+from every other unphotographed box item) replaced by the actual SONDEROD
+rug photo — its blue/teal horizontal-gradient pattern — mapped cleanly onto
+the flat plane at the rug's real position and orientation, no stretching or
+visible seam. Captured from two angles: the seed's own shipped
+`couch-view` camera (`0b-before-couch-view.png` / `1b-after-couch-view.png`
+— identical either way, since the coffee table at `[713,0,561.5]` fully
+occludes the rug at `[683,0,540]` from that waist-height angle, confirming
+the change doesn't regress the one view Shyam's seed actually ships), and
+an evidence-only steep-angle camera injected at runtime as `cameras[0]`
+(`0-before-placeholder.png` / `1-after-flat-texture.png` — not added to the
+committed seed, purely a capture-time patch to the persisted IndexedDB
+record, since fighting OrbitControls with synthetic mouse drags risks
+re-selecting/dragging a furniture item instead of orbiting, the exact trap
+D2's own evidence capture hit).
+
+**Rough edges / limitations found, surfaced not hidden:**
+- **This sandbox cannot show the actual "before."** The real regression
+  this ladder is fixing is "worst-rendering Meshy mesh" vs. "flat plane" —
+  but the rug's real `glbHash` and its generated GLB asset live only in
+  Shyam's own browser profile (OPFS/IndexedDB), which this agent sandbox
+  has no access to, and the committed seed JSON never carries binary
+  hashes (those only exist in a live project's storage, not the
+  hand-authored seed — the same gap D0 traced through `applyImport.ts`).
+  So the "before" shown here is the seed's own current fallback for a
+  glbHash-less item — the flat-color placeholder box — not the actual bad
+  mesh Shyam flagged. The mechanism (photo -> real-time PBR flat plane) is
+  fully demonstrated and evidenced; the *comparison against the actual
+  complaint* is only possible in Shyam's own session, which is exactly
+  what C2 is for.
+- **No live UI to attach a `flatTextureHash` to an item.** There's no
+  rug-specific import affordance — matches the task brief (no fal.ai
+  calls, no new import UI in scope) but means adopting this for real
+  requires either a small dedicated upload control (mirroring
+  `ShellPanel.tsx`'s "Upload photo" pattern per surface) or a one-time
+  manual patch like this evidence script's. Worth a small follow-up if
+  this lever passes C2 — currently the only way to set the field is
+  editing the persisted project record directly.
+- **Side faces are flat-colored, not photo-derived.** For a 2cm-thick rug
+  this is imperceptible (the side faces are ~2cm of vertical sliver,
+  essentially never in frame) — noted rather than treated as a gap worth
+  closing.
+- **`computeCoverUV`'s crop is silent about which content gets trimmed.**
+  For the rug's actual photo (a straight-on shot with the rug roughly
+  centered and some floor margin around it, per the task brief), centered
+  cropping the square photo's top/bottom to fit the wider footprint
+  trims that floor margin, not the rug itself — confirmed by eye in the
+  evidence screenshot — but a differently-framed input photo (rug
+  off-center, or filling the frame edge-to-edge) could crop into the rug
+  pattern itself. No code guard against that; it would show up
+  immediately in a before/after screenshot, which is the intended check.
+- **Not attempted: lever 3 (CC0 fabric normal/roughness).** Per the plan's
+  discipline ("one iteration per lever, not a loop"), this stays out of
+  scope unless C2 finds lever 2 insufficient — the flat plane currently
+  has no normal map, so at a grazing angle or under strong directional
+  light it will read as a flat photo rather than a pile-textured rug
+  surface. Whether that matters enough to warrant lever 3 is exactly what
+  C2 should judge, not something to pre-empt here.
+
+**My read (not the C2 call — that's Shyam's):** the mechanism works
+cleanly and the photo's own pattern/color reads correctly in the app's
+real lighting once mapped 1:1 onto the rug's real footprint — a categorical
+improvement over an undifferentiated flat-color box, and worth judging
+against the actual bad-mesh complaint in Shyam's own session. The two
+limitations most likely to matter at C2 are the missing side/normal detail
+(lever 3's territory, if grazing-angle viewing makes the flat plane read
+as "a photo of a rug" rather than "a rug") and the fact that this
+evidence necessarily compares against a placeholder rather than the real
+bad mesh — worth Shyam pulling up his own project's current rug rendering
+side by side with `1-after-flat-texture.png` rather than trusting this
+doc's comparison alone.
+
+## D5 — not started
+
+Blocked on Shyam's inputs (FAL_KEY plus item/multi-angle photos).

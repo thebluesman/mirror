@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { CameraPosition, FurnitureItem, SceneFile, WallDef } from "./types";
+import { flatTextureBoxDims } from "./flatItemTexture";
 
 // Exported for src/scene/collision.ts (v2 spike D2 code-review finding):
 // collision/snap wall AABBs need the exact same thickness the renderer
@@ -258,11 +259,51 @@ export function addFurnitureBoxMeshes(group: THREE.Group, item: FurnitureItem): 
   });
 }
 
+// v2 spike D4 (W-B, rug fix ladder lever 2 — see spike-v2/OUTCOME.md): a box
+// item with `flatTextureHash` (currently only the SONDEROD rug) skips both
+// the generated-mesh path and the flat-color placeholder box, rendering
+// instead as a single box mesh whose top face (+Y) carries a distinct,
+// per-item material that Viewport fills in asynchronously with a
+// photo-derived texture (the same async-after-build pattern Phase 4 uses
+// for a GLB, and Phase 3 uses for shell textures — buildScene stays
+// synchronous, OPFS reads happen in Viewport). The other five faces reuse
+// the shared MAT.furniture instance (unseen for a 2cm-thick rug, and no
+// reason to give every face its own material). Returns the top-face
+// material so buildScene can hand it to Viewport via
+// BuiltScene.pendingFlatTextures, the same shape pendingModels already uses
+// for GLB loads.
+// Exported for src/components/Viewport.tsx (v2 spike D4): pendingFlatTextures
+// only ever holds box items (checked at push time in addFurniture below),
+// so its item field is typed narrowly rather than as the full FurnitureItem
+// union — a compound-sofa item's `.loose()` catchall makes `flatTextureHash`
+// resolve to an unhelpful `{}`-ish type on the wider union.
+export type BoxFurnitureItem = Extract<FurnitureItem, { shape?: "box" }>;
+
+function isBoxFurnitureItem(item: FurnitureItem): item is BoxFurnitureItem {
+  return item.shape === undefined || item.shape === "box";
+}
+
+function addFlatTexturedFurnitureMesh(group: THREE.Group, item: BoxFurnitureItem): THREE.MeshStandardMaterial {
+  const dims = flatTextureBoxDims(item.dimsCm);
+  const topMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85 });
+  const geo = new THREE.BoxGeometry(dims.width, dims.height, dims.depth);
+  // BoxGeometry's default material-group order is [+X, -X, +Y, -Y, +Z, -Z]
+  // (right, left, top, bottom, front, back) — index 2 is the top face.
+  const materials = [MAT.furniture, MAT.furniture, topMaterial, MAT.furniture, MAT.furniture, MAT.furniture];
+  const mesh = new THREE.Mesh(geo, materials);
+  mesh.position.set(0, dims.height / 2, 0);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  group.add(mesh);
+  return topMaterial;
+}
+
 function addFurniture(
   scene: THREE.Scene,
   item: FurnitureItem,
   position: [number, number, number],
   rotationDeg: number,
+  pendingFlatTextures: PendingFlatTexture[],
 ): THREE.Group {
   const group = new THREE.Group();
   group.position.set(position[0], position[1], position[2]);
@@ -283,7 +324,17 @@ function addFurniture(
   // build pattern Phase 3 established for shell textures. If that load fails,
   // Viewport falls back to addFurnitureBoxMeshes so the item never just
   // vanishes.
-  if (!item.glbHash) {
+  //
+  // v2 spike D4: a glbHash-less item with `flatTextureHash` instead gets the
+  // flat-textured box above (also async-filled by Viewport) rather than the
+  // plain-color placeholder — checked first since an item is never expected
+  // to carry both, but glbHash would still win if it somehow did.
+  if (item.glbHash) {
+    // handled by Viewport via pendingModels
+  } else if (isBoxFurnitureItem(item) && item.flatTextureHash) {
+    const topMaterial = addFlatTexturedFurnitureMesh(group, item);
+    pendingFlatTextures.push({ item, material: topMaterial });
+  } else {
     addFurnitureBoxMeshes(group, item);
   }
 
@@ -314,11 +365,22 @@ export interface PendingFurnitureModel {
   group: THREE.Group;
 }
 
+/** An item awaiting its photo-derived flat texture (v2 spike D4, W-B — see
+ *  spike-v2/OUTCOME.md): the flat box placeholder is already in the scene
+ *  with its own per-item top-face material; Viewport loads the photo from
+ *  OPFS and fills in that material's `.map` asynchronously, the same
+ *  async-after-build shape as PendingFurnitureModel above. */
+export interface PendingFlatTexture {
+  item: BoxFurnitureItem;
+  material: THREE.MeshStandardMaterial;
+}
+
 export interface BuiltScene {
   scene: THREE.Scene;
   cameras: CameraPosition[];
   shell: ShellMeshes;
   pendingModels: PendingFurnitureModel[];
+  pendingFlatTextures: PendingFlatTexture[];
   /** v2 spike (W-A): every placed item's live THREE.Group, keyed by itemId —
    *  the seam Viewport's drag/rotate/selection code mutates directly during
    *  a gesture (position/rotation.y) without touching React state or
@@ -364,11 +426,12 @@ export function buildScene(sceneFile: SceneFile): BuiltScene {
   const currentLayout = sceneFile.layouts.find((l) => l.id === sceneFile.current);
   const itemsById = new Map(sceneFile.items.map((item) => [item.id, item]));
   const pendingModels: PendingFurnitureModel[] = [];
+  const pendingFlatTextures: PendingFlatTexture[] = [];
   const furnitureGroups = new Map<string, THREE.Group>();
   currentLayout?.commands.forEach((cmd) => {
     const item = itemsById.get(cmd.itemId);
     if (!item) return;
-    const group = addFurniture(scene, item, cmd.position, cmd.rotationDeg);
+    const group = addFurniture(scene, item, cmd.position, cmd.rotationDeg, pendingFlatTextures);
     furnitureGroups.set(item.id, group);
     if (item.glbHash) pendingModels.push({ item, group });
   });
@@ -381,5 +444,5 @@ export function buildScene(sceneFile: SceneFile): BuiltScene {
     floorMeshes,
   };
 
-  return { scene, cameras: sceneFile.cameras, shell, pendingModels, furnitureGroups };
+  return { scene, cameras: sceneFile.cameras, shell, pendingModels, pendingFlatTextures, furnitureGroups };
 }

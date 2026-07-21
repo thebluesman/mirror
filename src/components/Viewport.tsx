@@ -6,6 +6,7 @@ import { addFurnitureBoxMeshes, buildScene, furnitureOverallDims, type BuiltScen
 import { applyShellSurface, updateSurfaceCalibrationInPlace, type ShellSurface } from "../scene/shellMaterials";
 import { loadShellTexture } from "../scene/loadShellTexture";
 import { fitModelToDims, loadFurnitureModel } from "../scene/loadFurnitureModel";
+import { computeCoverUV } from "../scene/flatItemTexture";
 import { checkCollisions, itemFootprintAABB, wallFootprintAABBs, type AABB } from "../scene/collision";
 import { snapPosition } from "../scene/snapping";
 import {
@@ -267,6 +268,44 @@ export const Viewport = forwardRef<
           if (!cancelled) addFurnitureBoxMeshes(group, item);
         });
     });
+
+    // v2 spike D4 (W-B, rug fix ladder lever 2 — see spike-v2/OUTCOME.md):
+    // an item with `flatTextureHash` gets its photo-derived texture loaded
+    // from OPFS here and dropped onto the top-face material buildScene
+    // already created and put in the scene — same async-after-build shape
+    // as the GLB load above, just filling in a `.map` instead of attaching
+    // a decoded model. `computeCoverUV` (pure math, unit-tested) fits the
+    // photo's own aspect ratio to the item's real w:d footprint without
+    // stretching, the same way CSS `background-size: cover` would.
+    built.pendingFlatTextures.forEach(({ item, material }) => {
+      const hash = item.flatTextureHash;
+      if (!hash) return;
+      loadShellTexture(hash)
+        .then((source) => {
+          if (cancelled || !source) return;
+          const dims = item.dimsCm;
+          if (!dims) return;
+          const targetAspect = dims.w / dims.d;
+          const imageAspect = source.bitmap.width / source.bitmap.height;
+          const { repeat, offset } = computeCoverUV(imageAspect, targetAspect);
+          const texture = new THREE.Texture(source.bitmap);
+          texture.colorSpace = THREE.SRGBColorSpace;
+          texture.wrapS = texture.wrapT = THREE.ClampToEdgeWrapping;
+          texture.repeat.set(repeat[0], repeat[1]);
+          texture.offset.set(offset[0], offset[1]);
+          texture.needsUpdate = true;
+          material.map = texture;
+          material.needsUpdate = true;
+        })
+        .catch((err) => {
+          // No box-mesh fallback needed here (unlike the GLB path above) —
+          // buildScene already put a plain-color box in the scene as this
+          // material's mesh; a failed texture load just leaves it that
+          // flat color instead of vanishing.
+          console.error(`[Viewport] failed to load flat texture for "${item.id}"`, err);
+        });
+    });
+
     setBuildVersion((v) => v + 1);
     const { scene, cameras } = built;
 
