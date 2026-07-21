@@ -26,5 +26,6 @@ What follows — costs accepted, doors closed, doors deliberately left open.
 ## Index
 
 - [ADR-0001](0001-fal-browser-direct.md) — fal.ai calls go browser-direct, no proxy
+- [ADR-0002](0002-switch-to-hunyuan3d.md) — switch image-to-3D provider from Meshy to Hunyuan3D
 
 (decisions made pre-ADR live in `PRD-v1.md` §8 and `product-review.md`)

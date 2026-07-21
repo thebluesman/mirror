@@ -1,8 +1,9 @@
 # mirror — home digital twin
 
 Local-first browser app to model Shyam's home: import furniture from photos
-(Meshy image-to-3D), texture the room shell from surface photos, view the
-assembled room in real-time PBR. Solo project, personal use, PoC-stage.
+(Hunyuan3D image-to-3D, per ADR-0002 — was Meshy in v1), texture the room
+shell from surface photos, view the assembled room in real-time PBR. Solo
+project, personal use, PoC-stage.
 
 ## Current state (2026-07-18)
 
@@ -34,7 +35,8 @@ do not pull them forward without Shyam re-opening scope.
 - **Placement (v1):** furniture positions/rotations are seeded by the one-time
   Figma MCP conversion (like spike 3's `geometry.json`); no in-app
   repositioning until v2.
-- **Only network call:** fal.ai Meshy (`fal-ai/meshy/v6/image-to-3d`).
+- **Only network call:** fal.ai Hunyuan3D (`fal-ai/hunyuan-3d/v3.1/pro/image-to-3d`,
+  per ADR-0002 — supersedes v1's Meshy call, `fal-ai/meshy/v6/image-to-3d`).
   Texturing and rendering are local.
 
 ## Workflow
