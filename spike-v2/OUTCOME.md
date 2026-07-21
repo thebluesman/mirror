@@ -118,6 +118,50 @@ layout *switch* (D3) still gets a real rebuild.
   change, no hover highlight) — fine for evidence capture, worth deciding
   on for a real build.
 
+**Code review (2026-07-21), fixed:**
+- **Mid-drag rebuild discarded the gesture silently.** `structuralSceneFile`
+  depends on `sceneFile.items`, which changes independent of any drag (e.g.
+  a background Meshy import completing while the user is mid-drag on a
+  different item) — the structural effect's cleanup then tore down the
+  canvas/listeners the live drag closure depended on, `commitDrag()` never
+  fired, and the item silently snapped back to its last-committed position
+  with no explanation. Fixed: the effect's cleanup now calls `commitDrag()`
+  first, so an interrupted gesture commits wherever it currently sits
+  (the same "commit wherever it is" behavior `onPointerCancel` already
+  accepts for a browser-stolen gesture) instead of vanishing.
+- **Keyboard rotate had no `evt.repeat` guard.** Holding a rotate key
+  triggers OS keyboard auto-repeat (~20-30 keydowns/sec), and each one
+  fired a full commit + immediate (non-debounced) IndexedDB write via
+  `commitPlacement` — many redundant writes for what the surrounding
+  comment intended as one discrete step per press. Fixed: auto-repeat
+  keydowns are now ignored (`if (evt.repeat) return`), so a held key is a
+  no-op past the first step rather than a write flood.
+
+**Code review (2026-07-21), deferred to D2/D3 rather than patched now**
+(architectural, not urgent — not reachable through any path the current app
+UI exposes):
+- The reconciliation effect's `if (!group) return` for a command whose item
+  isn't yet in `furnitureGroups` is silent-safe only because today's sole
+  producer of a new item+command pair (`applyFurnitureImport`) always
+  changes `sceneFile.items` in the same update that adds the command, which
+  forces the rebuild that would otherwise be needed. D2/D3 (collision
+  persistence, replace, named layouts, undo) will likely add paths that
+  mutate `layouts` without an accompanying `items`/`room`/`current` change —
+  worth an explicit look when those land, rather than guessing at the right
+  general fix now.
+- `commitPlacement` (App.tsx) duplicates the "find current layout, edit
+  commands, setSceneFile + saveProjectNow" shape already written separately
+  for `handleImported`/`handleSaveView`/`handleDeleteView` and again in
+  `applyImport.ts` — worth factoring into one helper once D3's persistence
+  work is touching all of these anyway, rather than as a standalone
+  refactor now.
+- Minor hot-path waste in the drag handler (`getBoundingClientRect()` on
+  every `pointermove` instead of cached at `pointerdown`) and a redundant
+  `selectionHelperRef.current?.update()` call in the reconciliation effect
+  (superseded by `animate()`'s per-frame call) — real but low-severity,
+  worth folding in as drive-by cleanup whenever D2/D3 next touches these
+  same functions rather than a dedicated pass.
+
 **My read (not the C1 call — that's Shyam's):** move + rotate + persist
 feel decision-grade for the core gesture itself — the drag tracks
 precisely, the commit-on-drop seam avoids the camera-reset regression the

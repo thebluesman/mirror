@@ -353,6 +353,13 @@ export const Viewport = forwardRef<
     // means it has to get out of the way of ordinary typing in the Shell/
     // Import/Settings panel's own inputs.
     function onKeyDown(evt: KeyboardEvent) {
+      // Code-review finding: without this, OS keyboard auto-repeat on a held
+      // rotate key fired a full commit + immediate IndexedDB write on every
+      // repeat tick (browsers commonly repeat at 20-30/sec), not once per
+      // step — the opposite of the "discrete step" semantics this control is
+      // meant to have. Auto-repeat keydowns set `evt.repeat`; ignoring them
+      // makes a held key a no-op past the first step rather than a flood.
+      if (evt.repeat) return;
       const active = document.activeElement;
       if (active && ["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName)) return;
       const itemId = selectedItemIdRef.current;
@@ -401,6 +408,18 @@ export const Viewport = forwardRef<
 
     return () => {
       cancelled = true;
+      // Code-review finding: a structural rebuild can land mid-drag — e.g. an
+      // unrelated background import completing changes `sceneFile.items`,
+      // which this effect depends on (via `structuralSceneFile`) independent
+      // of anything the drag itself did. Previously the drag's live position
+      // was silently lost: the canvas/listeners this gesture depended on get
+      // torn down below, `commitDrag()` never fires, and the next build
+      // re-derives the item's position from its last-*committed* placement,
+      // snapping it back with no explanation. Committing here first means an
+      // interrupted drag/rotate lands wherever it currently sits — same
+      // "commit wherever it is" behavior `onPointerCancel` already accepts
+      // for a browser-stolen gesture — rather than vanishing.
+      commitDrag();
       cancelAnimationFrame(frameId);
       resizeObserver.disconnect();
       renderer.domElement.removeEventListener("pointerdown", onPointerDown);
