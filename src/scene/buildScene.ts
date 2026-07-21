@@ -1,7 +1,10 @@
 import * as THREE from "three";
 import type { CameraPosition, FurnitureItem, SceneFile, WallDef } from "./types";
 
-const WALL_THICKNESS = 10;
+// Exported for src/scene/collision.ts (v2 spike D2 code-review finding):
+// collision/snap wall AABBs need the exact same thickness the renderer
+// draws, not an independently hardcoded copy that can drift out of sync.
+export const WALL_THICKNESS = 10;
 
 // Base (untextured) shell colors/roughness — Phase 3's calibration module
 // (src/scene/shellMaterials.ts) resets to these before multiplying in tint/
@@ -188,7 +191,12 @@ function addWall(scene: THREE.Scene, wallDef: WallDef, wallHeight: number): THRE
   return wallMeshes;
 }
 
-function furnitureFootprint(item: FurnitureItem): Array<{ w: number; d: number; h: number; offsetX: number; offsetZ: number }> {
+// Exported for src/scene/collision.ts (v2 spike D2): collision/snap AABBs
+// need the exact same per-part offsets the box placeholder renders with, not
+// a re-derived approximation.
+export function furnitureFootprint(
+  item: FurnitureItem,
+): Array<{ w: number; d: number; h: number; offsetX: number; offsetZ: number }> {
   // Dispatch on the `shape` discriminant the Phase 2 schema added, not on the
   // presence of `main`/`chaise` (Phase 1 code-review finding). The union
   // guarantees a box item has `dimsCm` and a compound sofa has `main`/`chaise`,

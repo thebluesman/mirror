@@ -208,6 +208,204 @@ module (single-image comparison, reusing the upload/extractGlbUrl helpers)
 plus a separate function for the multi-angle test, living in `spike-v2/`
 per §4 ("W-C is scripted"), not app code.
 
-## D2/D3/D4/D5 — not started
+## D2 — W-A rules: footprint collision flagging + wall/edge snapping
 
-Blocked on D1 (D2/D3) or R1 (D5), or on Shyam's inputs (D4's rug photo).
+**Status: built, evidence captured, awaiting C1 alongside D1/D3.** Branch:
+`v2/spike-arrange` (same branch as D1 — "after D1, same files" per the
+delegation map). Screenshots: `spike-v2/d2-screenshots/`, captured by
+`spike-v2/d2-collision-snap-drive.mjs` (a one-off Playwright driver, same
+shape as D1's `w-a-drive.mjs`).
+
+**What's there:**
+- **`src/scene/collision.ts`** — `itemFootprintAABB()` (world-space AABB for
+  a placed item, unioning compound-sofa sub-footprints), `wallFootprintAABBs()`
+  (one AABB per wall run, at `buildScene.ts`'s `WALL_THICKNESS`), and
+  `checkCollisions()` (item-vs-item and item-vs-wall AABB overlap). Pure,
+  framework-free functions — same shape as `src/texturing/tileable.ts` — so
+  Viewport.tsx's per-pointermove drag handler can call them with no THREE
+  overhead. Deliberately AABB, not true oriented-rectangle SAT: "footprint-
+  rectangle detection is enough ... decision support, not physics" per
+  v2-spike-plan.md §2. Exact at the 0/90/180/270deg placements the seed and
+  Figma conversion use; only ever over-flags (never under-flags) at W-A's
+  in-between 15deg rotate steps.
+- **`src/scene/snapping.ts`** — `snapPosition()`, independent per-axis
+  snapping against wall/item AABB edges (abut or edge-align, whichever's
+  closest within an 8cm threshold). Axis-aligned math is exact for the
+  axis-aligned walls `buildScene.ts` draws.
+- **Viewport.tsx wiring**: `onPointerMove`'s drag handler snaps the
+  candidate position (unless Shift is held — the plan's "must be escapable"
+  bar) before committing it live to the group, then recolors the selection
+  outline red via a new `updateCollisionHighlight()` helper if the item's
+  footprint now overlaps another item or a wall. The same helper fires on
+  keyboard rotate, on first selecting an already-overlapping item, and when
+  a committed layout change moves some *other* item the selection depends
+  on — so the highlight never lags behind what's actually on screen. Per
+  the plan's "decision support, not physics" framing, nothing is blocked —
+  overlapping placements are flagged, not prevented.
+- **Known simplification, flagged not hidden**: wall AABBs don't subtract
+  door/window openings — a furniture item positioned inside a doorway's
+  clear width reads as a wall collision even though the render shows an
+  open gap there. No current seed placement puts an item in a doorway;
+  reusing `addWall`'s segment-cutting logic just for this check risked
+  drifting from the renderer's own geometry for a case nothing hits yet.
+
+**Tests**: `src/scene/collision.test.ts` and `src/scene/snapping.test.ts` —
+AABB math (axis-aligned exactness, off-axis over-estimation, compound-sofa
+union, wall-run AABBs, overlap/no-overlap/flush-touching) and snap math
+(wall abutment, item-to-item edge alignment, independent x/z, no-snap
+outside threshold). `npx vitest run` — 75 tests, all passing (60 pre-
+existing + 15 new). `npx tsc -b`, `npm run build`, and `oxlint` all clean.
+
+**Evidence** (`d2-collision-snap-drive.mjs`, against a running dev server
+and the real seed): dragging `water-cooler` onto `billy-hogadal-shelving`
+recolors the selection outline red on overlap
+(`1-item-collision-mid-drag.png`). Dragging `floor-lamp` (28cm wide,
+seed position x=492) toward the west wall (inner face at x=479, so a flush
+placement centers it at x=493) from a raw drag target of x=498 pulls it to
+x=496 — visibly snapped closer to the wall than the raw cursor target,
+outline cyan (not yet overlapping) — while the same drag held with Shift
+lands at x=498.000004, matching the raw target with no adjustment,
+confirming the escape hatch. (The snapped result landed a few cm short of
+the hand-computed ideal of 493 — traced to the evidence script's synthetic
+pixel-rounded mouse path, not the app's snap math itself, which the unit
+tests exercise exactly; the qualitative result — snap-enabled pulls toward
+the wall, Shift-held doesn't move at all from the raw target — is what
+matters here and holds cleanly.)
+
+**Rough edges found (surfacing per §6, not hiding them):**
+- Framing a Playwright evidence shot for this feature turned out to be its
+  own small trap: a shallow waist-height camera let other, taller furniture
+  sitting between the camera and a drag target block the click raycast
+  entirely (the first evidence attempt's "collision" screenshot turned out
+  to be a much bigger neighboring item the ray had hit first, not the
+  intended target) — worth remembering for D3's own evidence capture.
+- Collision/snap targets are recomputed by walking every other placed
+  item's live group every pointermove (`built.furnitureGroups`) — fine at
+  the seed's ~13-item scale, but an obvious spot to revisit if D3's
+  multi-layout work or a larger real room makes per-move cost noticeable.
+
+## D3 — W-A persistence: named layouts + replace via re-import
+
+**Status: built, evidence captured, awaiting C1 alongside D1/D2.** Branch:
+`v2/spike-arrange`. Screenshots: `spike-v2/d3-screenshots/`, captured by
+`spike-v2/d3-layouts-drive.mjs` (same one-off-Playwright-driver shape as
+D1/D2's evidence scripts).
+
+**Replace via re-import — already done, not new work here.** Checked
+before building anything: Phase 5's acceptance-run fix (plan-v1.md, "Re-
+import blocked for already-imported items") already made every item a
+re-import target, with a warning before replacing an already-imported
+one's photo/model/dims/orientation (`ImportPanel.tsx`/`applyImport.ts`).
+Item identity (`itemId`) is separate from placement (`layouts[].commands`,
+keyed by `itemId`) and from the asset (`glbHash`) — so replacing an asset
+never touches any layout's placement commands, in the current layout or
+any other. Confirmed by reading `applyFurnitureImport`, not re-verified
+live here (no fal.ai key in this session — same gap D1/D4/D5 flag).
+
+**What's new for named layouts:**
+- **`src/scene/layouts.ts`** — `makeLayout()`, pure: snapshots a source
+  layout's current `commands` into a new named `Layout` (slugified,
+  de-duplicated id via the same `util/slug.ts` scheme `cameraViewpoints.ts`
+  uses for saved views), recording `base: source.id` per the schema's
+  documented intent (`schema/scene-schema-draft.md`: "base: parent layoutId").
+  A full copy, not a diff — `buildScene.ts`/`Viewport.tsx` read a layout's
+  `commands` directly with no base-merge step, so a diff-only layout
+  wouldn't render correctly yet; this proves the `layouts[]`/`current`
+  shape works as authored since v1, it doesn't redesign it.
+- **`src/components/LayoutChrome.tsx`** — a second floating pill bar
+  (top-center, via a `.viewport-chrome--top` CSS override so it doesn't
+  collide with `ViewportChrome`'s existing bottom-center camera-viewpoint
+  bar), same save/name/delete interaction pattern as `ViewportChrome`.
+  Clicking a layout's pill switches to it; the active layout's pill is
+  visually distinct; deleting the last remaining layout or the currently
+  active one is disabled (would leave `sceneFile.current` pointing at
+  nothing) rather than silently no-op'd.
+- **`App.tsx`** — `handleSwitchLayout`/`handleSaveLayout`/`handleDeleteLayout`,
+  same "discrete, deliberate action, persist immediately" treatment as
+  `handleSaveView`/`handleDeleteView` already use for camera viewpoints.
+  Switching layouts sets `sceneFile.current`, which was already a
+  structural-rebuild dependency in `Viewport.tsx` (D1's comment: "switching
+  to a different saved layout is a structural change... and should get a
+  real rebuild, unlike an in-place edit to the current layout's commands")
+  — so layout switching needed no Viewport changes at all, just proof the
+  existing wiring does what it was built for.
+
+**Tests**: `src/scene/layouts.test.ts` — command copy is a real copy (not
+a shared reference), `base` is recorded, id slugification/de-duplication,
+blank-name fallback. `npx vitest run` — 79 tests, all passing (75 pre-
+existing + 4 new). `npx tsc -b`, `npm run build`, and `oxlint` all clean.
+
+**Evidence** (`d3-layouts-drive.mjs`, against a running dev server and the
+real seed): starting from the seed's single `current` layout, saving a new
+"Weekend" layout shows both pills with "Weekend" active
+(`1-after-save-second-layout.png`); clicking "current" switches back
+(`2-switched-back-to-current.png`); reloading the page keeps both layouts
+and the active selection (`3-after-reload.png`) — IndexedDB read-back
+confirms `layouts` and `current` are byte-identical before and after
+reload (`PERSISTENCE OK`), the same persistence-proof discipline D1 used
+for move/rotate.
+
+**Rough edges found (surfacing per §6, not hiding them):**
+- `applyFurnitureImport`'s existing "add a default placement if the
+  current layout doesn't have one for this item" logic (Phase 4) only
+  ever checks `scene.current` — importing/replacing while a *non-default*
+  layout is active, for an item that layout hasn't placed yet, adds a
+  `[0,0,0]` default command to *that* layout only, leaving other layouts
+  as they were. This is arguably correct (each layout tracks its own
+  placement) but untested here — D3's evidence only exercises save/
+  switch/reload, not import-while-on-a-non-default-layout. Worth a
+  deliberate check at C1 if Shyam's hands-on drive touches it.
+- No UI affordance to rename a layout after saving (camera viewpoints have
+  the same gap) — save-as-new with a new name is the only path; not
+  required by the plan's bar ("save current arrangement as a named layout,
+  make a second one, switch between them") but a natural follow-up if D3's
+  branch becomes v2's real seed.
+
+**`/code-review` pass, 2026-07-21:** 3 findings (1 CONFIRMED, 1 duplication-
+risk, 1 PLAUSIBLE), 2 fixed directly on the branch — `itemFootprintAABB`'s
+corner-rotation math had its cross-term signs flipped relative to
+`THREE.Object3D`'s actual `rotation.y` convention (verified numerically
+against `THREE.Group.applyEuler`: the code computed a rotated offset that
+was the exact negation of the real one). Invisible for a symmetric plain
+box (which is why D2's own tests didn't catch it — none of them rotated an
+asymmetric footprint), but for the compound-sofa's off-center chaise
+sub-part, any rotation not a multiple of 180° would compute an AABB
+mirrored through the item's own center relative to how it actually
+renders — reachable today through the shipped keyboard-rotate control,
+even though no seed placement currently rotates the sofa away from 0°.
+Fixed, with a new regression test (`collision.test.ts`) pinning the
+correct rotated offset. Also fixed: `wallFootprintAABBs` had its own
+hardcoded copy of `buildScene.ts`'s `WALL_THICKNESS` instead of importing
+it (now exported, same drift-prevention reasoning that made
+`furnitureFootprint` exported for D2 in the first place). The third
+finding is deferred, not fixed: `snapping.ts`'s `bestSnapDelta` can, in the
+narrow case where a dragged item's edge already sits inside a wall's
+thickness band, snap toward the wall's far/outer face instead of back out
+to the room-facing side — cosmetically wrong-direction, but the item is
+already flagged as colliding in that state regardless of which way it
+snaps, so nothing is hidden from the user. `npx vitest run` (80 tests),
+`npx tsc -b`, `npm run build`, and `oxlint` all clean after the fixes.
+
+**PR #10 review (Shyam), 2026-07-21:** one more correctness finding, caught
+after the self-review above had already gone out — `snapping.ts`'s
+`snapPosition` merged `walls` and `others` into one flat target list before
+building the per-axis candidate lists (`targets = [...walls, ...others]`),
+feeding every wall's full AABB into *both* axes uniformly. A wall's AABB is
+only thin (a real face) along the axis its face actually points on; the
+other axis is just the wall run's extent — its endpoints/corners, not a
+face. For a horizontal wall (e.g. `x:[0,400]`, `z:[-5,5]`), that meant an
+item near `x=0` or `x=400` could snap its X there even with no actual
+X-facing wall present, purely because that's where the wall run happens to
+end — masked in the existing tests, which only ever exercised a wall on
+its own real (thin) axis. Fixed: walls now contribute only to the axis
+they're thin on; `others` (real furniture items, which do have a genuine
+face on every side) are unaffected. Two new regression tests in
+`snapping.test.ts` reproduce the exact failure (confirmed failing against
+the pre-fix code, passing after) for both a horizontal and a vertical
+wall's spurious cross-axis endpoint. `npx vitest run` (82 tests), `npx tsc
+-b`, `npm run build`, and `oxlint` all clean after the fix.
+
+## D4/D5 — not started
+
+Blocked on Shyam's inputs (D4's rug photo; D5's FAL_KEY plus item/
+multi-angle photos).
