@@ -554,6 +554,75 @@ bad mesh — worth Shyam pulling up his own project's current rug rendering
 side by side with `1-after-flat-texture.png` rather than trusting this
 doc's comparison alone.
 
+**D4 addendum — orientation bug found at C2, fixed (2026-07-22):** Shyam
+tried lever 2 hands-on and confirmed the texture quality/mapping read well
+but the rug's pattern ran the wrong way relative to how the real rug sits —
+not a fresh regression, a bug in the original mapping this doc's evidence
+didn't catch because the steep evidence-only camera happens to make a
+90°-rotated stripe pattern look plausible at a glance.
+
+Root cause: `computeCoverUV(imageAspect, targetAspect)` assumes the photo's
+own horizontal/vertical axes already line up with the item's world w/d
+footprint axes — it has no way to know the *photo itself* was shot in a
+different landscape/portrait orientation than the footprint. The SONDEROD
+photo (`spike-v2/assets/sonderod-rug-photo.png`) turned out to be a sharper
+case of this than first assumed from the raw file alone: its raw pixel
+dimensions are an exactly-square 1400x1400 canvas (product-photography
+convention — pad a rectangular photo out to a square tile), so
+`bitmap.width / bitmap.height` reports 1:1 and can't be compared against the
+rug's landscape footprint (`w=240 > d=170`, aspect ~1.41) at all. Trimming
+the canvas's white padding to find the actual rug content's bounding box
+puts its aspect at ~968:1343 (~0.72) — clearly portrait, confirming the
+photo really was shot with the rug's long edge running vertically in-frame,
+exactly as the PR review comment guessed, just not detectable from the raw
+bitmap dimensions the way that comment assumed.
+
+Fix, split the same way the module already is (`flatItemTexture.ts` pure
+math / `Viewport.tsx` THREE glue):
+- **`src/scene/flatItemTexture.ts`**: new `needsOrientationRotation(imageAspect,
+  targetAspect)` — returns true when the two disagree on landscape-vs-portrait
+  (`(imageAspect < 1) !== (targetAspect < 1)`, with an exactly-square input
+  (`=== 1`) always returning false — a square number alone can't tell you
+  which way to rotate). Pure and unit-tested (`flatItemTexture.test.ts`):
+  the real SONDEROD content-aspect case and its mirror (photo/footprint
+  swapped), same-orientation non-cases, the square-input edge case, and the
+  existing throw-on-bad-input behavior.
+- **`src/components/Viewport.tsx`**: new `detectContentAspect(bitmap)` —
+  downsamples the bitmap to a 64x64 canvas, finds the bounding box of
+  non-near-white pixels, and returns *that* box's aspect ratio instead of
+  the padded canvas's (falls back to the raw bitmap aspect if no
+  non-background pixel is found, so a detection miss can't throw or force a
+  bogus rotation). The flat-texture-fill effect now calls
+  `needsOrientationRotation(detectContentAspect(source.bitmap), targetAspect)`
+  to decide whether to rotate, and — if so — sets `texture.center.set(0.5,
+  0.5)` + `texture.rotation = Math.PI / 2` and feeds `computeCoverUV` the
+  *reciprocal* of the raw bitmap aspect (not the content aspect — the raw
+  bitmap is what's actually sampled in UV space once `texture.rotation` is
+  applied) so the crop/offset math still lines up post-rotation.
+- Concretely, for the real rug: photo content runs portrait (long pixel axis
+  = the rug's long floor axis, `w=240`; short pixel axis + white padding =
+  the rug's short floor axis, `d=170`). Rotating 90° makes the U axis (mapped
+  onto the footprint's `w`) sample the photo's original height (long,
+  padding-free) and the V axis (mapped onto `d`) sample the photo's original
+  width (short, where `computeCoverUV`'s crop trims almost exactly the
+  padding fraction away) — the bands now run across the rug's short axis and
+  repeat along its long axis, matching the physical photo.
+
+**Re-verified evidence:** re-ran `spike-v2/d4-rug-drive.mjs` against the
+fixed code. `spike-v2/d4-screenshots/1-after-flat-texture-wrong-orientation.png`
+preserves the original (pre-fix) capture for comparison — bands running
+horizontally, stacked along the rug's long axis, the bug Shyam flagged.
+`spike-v2/d4-screenshots/2-after-orientation-fix.png` is the same
+`rug-eval-view` camera angle after the fix — bands now run vertically in
+frame (across the rug's short `d=170` axis) and repeat left-to-right (along
+its long `w=240` axis), matching how the source photo itself reads. The
+originally-committed `1-after-flat-texture.png` and the couch-view captures
+are unchanged/regenerated identically (couch-view still fully occludes the
+rug behind the coffee table either way, confirming no regression there).
+
+`npx vitest run` (99 tests, up from 94), `npx tsc -b`, `npm run build`, and
+`oxlint src/` all clean after this fix.
+
 ## D5 — not started
 
 Blocked on Shyam's inputs (FAL_KEY plus item/multi-angle photos).

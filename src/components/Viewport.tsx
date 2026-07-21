@@ -6,7 +6,7 @@ import { addFurnitureBoxMeshes, buildScene, furnitureOverallDims, type BuiltScen
 import { applyShellSurface, updateSurfaceCalibrationInPlace, type ShellSurface } from "../scene/shellMaterials";
 import { loadShellTexture } from "../scene/loadShellTexture";
 import { fitModelToDims, loadFurnitureModel } from "../scene/loadFurnitureModel";
-import { computeCoverUV } from "../scene/flatItemTexture";
+import { computeCoverUV, needsOrientationRotation } from "../scene/flatItemTexture";
 import { checkCollisions, itemFootprintAABB, wallFootprintAABBs, type AABB } from "../scene/collision";
 import { snapPosition } from "../scene/snapping";
 import {
@@ -49,6 +49,53 @@ function applyCameraPreset(camera: THREE.PerspectiveCamera, controls: OrbitContr
   camera.updateProjectionMatrix();
   controls.target.set(...preset.lookAt);
   controls.update();
+}
+
+// v2 spike D4 orientation-bug follow-up (see spike-v2/OUTCOME.md's D4
+// addendum): the SONDEROD rug photo's raw pixel dimensions are an exactly
+// square 1400x1400 canvas — a product-photography convention that pads a
+// portrait or landscape photo out to a square tile — so `bitmap.width /
+// bitmap.height` reports 1:1 no matter which way the actual rug pattern
+// runs in-frame, and can't feed `needsOrientationRotation` a useful answer.
+// This samples the bitmap down to a small canvas and finds the bounding box
+// of non-background (near-white) pixels, returning that box's aspect ratio
+// instead of the padded canvas's — the same "trim the letterboxing" idea a
+// human would apply by eye. Falls back to the raw bitmap aspect if no
+// content is found (e.g. a genuinely blank photo) so a detection miss can't
+// throw or force a bogus rotation.
+const CONTENT_ASPECT_SAMPLE = 64;
+const CONTENT_BG_THRESHOLD = 245; // near-white; product photos shoot on white/light backgrounds
+function detectContentAspect(bitmap: ImageBitmap): number {
+  const rawAspect = bitmap.width / bitmap.height;
+  const canvas = document.createElement("canvas");
+  canvas.width = CONTENT_ASPECT_SAMPLE;
+  canvas.height = CONTENT_ASPECT_SAMPLE;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return rawAspect;
+  ctx.drawImage(bitmap, 0, 0, CONTENT_ASPECT_SAMPLE, CONTENT_ASPECT_SAMPLE);
+  const { data } = ctx.getImageData(0, 0, CONTENT_ASPECT_SAMPLE, CONTENT_ASPECT_SAMPLE);
+  let minX = CONTENT_ASPECT_SAMPLE;
+  let maxX = -1;
+  let minY = CONTENT_ASPECT_SAMPLE;
+  let maxY = -1;
+  for (let y = 0; y < CONTENT_ASPECT_SAMPLE; y++) {
+    for (let x = 0; x < CONTENT_ASPECT_SAMPLE; x++) {
+      const i = (y * CONTENT_ASPECT_SAMPLE + x) * 4;
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      if (r < CONTENT_BG_THRESHOLD || g < CONTENT_BG_THRESHOLD || b < CONTENT_BG_THRESHOLD) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < minX || maxY < minY) return rawAspect; // no non-background pixels found
+  const contentWidth = (maxX - minX + 1) * (bitmap.width / CONTENT_ASPECT_SAMPLE);
+  const contentHeight = (maxY - minY + 1) * (bitmap.height / CONTENT_ASPECT_SAMPLE);
+  return contentWidth / contentHeight;
 }
 
 // Clamps how far OrbitControls can orbit vertically — without this, an
@@ -286,11 +333,25 @@ export const Viewport = forwardRef<
           const dims = item.dimsCm;
           if (!dims) return;
           const targetAspect = dims.w / dims.d;
-          const imageAspect = source.bitmap.width / source.bitmap.height;
+          const rawImageAspect = source.bitmap.width / source.bitmap.height;
+          // D4 orientation-bug fix: decide "does the photo need a 90°
+          // rotation" from the bitmap's trimmed *content* aspect (robust to
+          // a photo padded to a square canvas, like the SONDEROD rug's —
+          // see detectContentAspect above and spike-v2/OUTCOME.md's D4
+          // addendum), but feed computeCoverUV the raw bitmap aspect (or its
+          // reciprocal if rotating) since that's what's actually sampled in
+          // UV space once texture.rotation is applied.
+          const contentAspect = detectContentAspect(source.bitmap);
+          const rotate = needsOrientationRotation(contentAspect, targetAspect);
+          const imageAspect = rotate ? 1 / rawImageAspect : rawImageAspect;
           const { repeat, offset } = computeCoverUV(imageAspect, targetAspect);
           const texture = new THREE.Texture(source.bitmap);
           texture.colorSpace = THREE.SRGBColorSpace;
           texture.wrapS = texture.wrapT = THREE.ClampToEdgeWrapping;
+          if (rotate) {
+            texture.center.set(0.5, 0.5);
+            texture.rotation = Math.PI / 2;
+          }
           texture.repeat.set(repeat[0], repeat[1]);
           texture.offset.set(offset[0], offset[1]);
           texture.needsUpdate = true;
