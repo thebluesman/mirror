@@ -119,7 +119,10 @@ function addWall(scene: THREE.Scene, wallDef: WallDef, wallHeight: number) {
 
   openings.forEach((o) => {
     const F = 6; // frame bar width
-    if (o.type === "door") {
+    if (o.type === "door" || o.type === "glass-door") {
+      // glass-door renders identically to door in Phase 1 (opaque leaf).
+      // Phase 3 owns swapping the leaf to a glazed material off this
+      // discriminant — Phase 2 only guarantees the type reaches here.
       addSegment(o.start, o.end, 210, wallHeight); // lintel
       addInWallSlab(o.start + 2, o.end - 2, 0, 208, 4, MAT.doorLeaf);
     } else if (o.type === "window") {
@@ -142,11 +145,14 @@ function addWall(scene: THREE.Scene, wallDef: WallDef, wallHeight: number) {
 }
 
 function furnitureFootprint(item: FurnitureItem): Array<{ w: number; d: number; h: number; offsetX: number; offsetZ: number }> {
-  const main = item.main as { w: number; d: number } | undefined;
-  const chaise = item.chaise as { w: number; d: number } | undefined;
-  if (main && chaise) {
+  // Dispatch on the `shape` discriminant the Phase 2 schema added, not on the
+  // presence of `main`/`chaise` (Phase 1 code-review finding). The union
+  // guarantees a box item has `dimsCm` and a compound sofa has `main`/`chaise`,
+  // so neither branch needs an unguarded fallback.
+  if (item.shape === "compound-sofa") {
     // Compound sofa: main + chaise sub-footprints, chaise on the west end.
-    const h = item.dimsCm?.h ?? (item.backHeightCm as number) ?? 80;
+    const { main, chaise } = item;
+    const h = item.dimsCm?.h ?? item.backHeightCm ?? 80;
     return [
       { w: main.w, d: main.d, h, offsetX: main.w / 2, offsetZ: 0 },
       { w: chaise.w, d: chaise.d, h, offsetX: -(main.w / 2) - chaise.w / 2, offsetZ: (main.d - chaise.d) / 2 },

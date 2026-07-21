@@ -35,3 +35,12 @@
   border-left: 1px solid var(--color-hairline);
   background: var(--color-soft-stone);
 }
+
+.app-status {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-muted, #6b6b70);
+  font: var(--text-body, 400 15px/1.5 system-ui);
+}

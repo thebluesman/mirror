@@ -27,7 +27,7 @@
       { "name": "hallway-north-wall", "from": [1130, 274], "to": [1499, 274] },
       { "name": "east-wall", "from": [1499, 274], "to": [1499, 702], "openings": [ { "name": "main-door", "along": "z", "start": 562, "size": 140, "type": "door" } ] },
       { "name": "south-wall", "from": [474, 702], "to": [1499, 702], "openings": [ { "name": "bedroom-door", "along": "x", "start": 892, "size": 108, "type": "door" }, { "name": "powder-room-door", "along": "x", "start": 1290, "size": 87, "type": "door" } ] },
-      { "name": "west-wall", "from": [474, 324], "to": [474, 702], "openings": [ { "name": "balcony-door", "along": "z", "start": 393, "size": 110, "type": "door", "sillHeightCm": 0, "headHeightCm": 210, "note": "full-height glass balcony door, charcoal aluminum frame" }, { "name": "window", "along": "z", "start": 533, "size": 110, "type": "window", "sillHeightCm": 90, "headHeightCm": 120, "note": "framed window, charcoal aluminum frame" } ] }
+      { "name": "west-wall", "from": [474, 324], "to": [474, 702], "openings": [ { "name": "balcony-door", "along": "z", "start": 393, "size": 110, "type": "glass-door", "sillHeightCm": 0, "headHeightCm": 210, "note": "full-height glass balcony door, charcoal aluminum frame" }, { "name": "window", "along": "z", "start": 533, "size": 110, "type": "window", "sillHeightCm": 90, "headHeightCm": 120, "note": "framed window, charcoal aluminum frame" } ] }
     ]
   },
   "items": [
