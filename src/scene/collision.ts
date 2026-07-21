@@ -10,12 +10,8 @@
 // 0/90/180/270deg placements the seed and Figma conversion actually use, and
 // only over-estimates (never under-estimates) at the in-between 15deg steps
 // W-A's rotate control allows — conservative, not wrong.
-import { furnitureFootprint } from "./buildScene";
+import { furnitureFootprint, WALL_THICKNESS } from "./buildScene";
 import type { FurnitureItem, Room } from "./types";
-
-// Mirrors buildScene.ts's WALL_THICKNESS — collision needs the same wall
-// geometry the renderer draws, not a re-derived guess.
-const WALL_THICKNESS = 10;
 
 // Below this, two edges/rects are treated as touching rather than
 // overlapping/colliding — without it, an item nudged to exactly flush
@@ -55,8 +51,16 @@ export function itemFootprintAABB(
       [part.offsetX - hw, part.offsetZ + hd],
     ];
     corners.forEach(([x, z]) => {
-      const rx = x * cos - z * sin;
-      const rz = x * sin + z * cos;
+      // Matches THREE.Object3D's actual rotation.y convention (verified
+      // against THREE.Group.applyEuler — a code-review finding: an earlier
+      // version of this had the cross-term signs flipped, rotating -θ
+      // instead of +θ. Invisible for a symmetric plain box, but for a
+      // compound-sofa's off-center chaise sub-part, the wrong sign puts the
+      // computed AABB's asymmetric parts on the mirror-opposite side of
+      // where the item actually renders whenever rotationDeg isn't a
+      // multiple of 180.
+      const rx = x * cos + z * sin;
+      const rz = -x * sin + z * cos;
       const wx = position[0] + rx;
       const wz = position[2] + rz;
       if (wx < minX) minX = wx;

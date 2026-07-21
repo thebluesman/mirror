@@ -361,6 +361,31 @@ for move/rotate.
   make a second one, switch between them") but a natural follow-up if D3's
   branch becomes v2's real seed.
 
+**`/code-review` pass, 2026-07-21:** 3 findings (1 CONFIRMED, 1 duplication-
+risk, 1 PLAUSIBLE), 2 fixed directly on the branch — `itemFootprintAABB`'s
+corner-rotation math had its cross-term signs flipped relative to
+`THREE.Object3D`'s actual `rotation.y` convention (verified numerically
+against `THREE.Group.applyEuler`: the code computed a rotated offset that
+was the exact negation of the real one). Invisible for a symmetric plain
+box (which is why D2's own tests didn't catch it — none of them rotated an
+asymmetric footprint), but for the compound-sofa's off-center chaise
+sub-part, any rotation not a multiple of 180° would compute an AABB
+mirrored through the item's own center relative to how it actually
+renders — reachable today through the shipped keyboard-rotate control,
+even though no seed placement currently rotates the sofa away from 0°.
+Fixed, with a new regression test (`collision.test.ts`) pinning the
+correct rotated offset. Also fixed: `wallFootprintAABBs` had its own
+hardcoded copy of `buildScene.ts`'s `WALL_THICKNESS` instead of importing
+it (now exported, same drift-prevention reasoning that made
+`furnitureFootprint` exported for D2 in the first place). The third
+finding is deferred, not fixed: `snapping.ts`'s `bestSnapDelta` can, in the
+narrow case where a dragged item's edge already sits inside a wall's
+thickness band, snap toward the wall's far/outer face instead of back out
+to the room-facing side — cosmetically wrong-direction, but the item is
+already flagged as colliding in that state regardless of which way it
+snaps, so nothing is hidden from the user. `npx vitest run` (80 tests),
+`npx tsc -b`, `npm run build`, and `oxlint` all clean after the fixes.
+
 ## D4/D5 — not started
 
 Blocked on Shyam's inputs (D4's rug photo; D5's FAL_KEY plus item/

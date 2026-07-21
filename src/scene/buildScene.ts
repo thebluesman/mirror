@@ -1,7 +1,10 @@
 import * as THREE from "three";
 import type { CameraPosition, FurnitureItem, SceneFile, WallDef } from "./types";
 
-const WALL_THICKNESS = 10;
+// Exported for src/scene/collision.ts (v2 spike D2 code-review finding):
+// collision/snap wall AABBs need the exact same thickness the renderer
+// draws, not an independently hardcoded copy that can drift out of sync.
+export const WALL_THICKNESS = 10;
 
 // Base (untextured) shell colors/roughness — Phase 3's calibration module
 // (src/scene/shellMaterials.ts) resets to these before multiplying in tint/

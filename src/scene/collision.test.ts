@@ -37,6 +37,25 @@ describe("itemFootprintAABB", () => {
     expect(offArea).toBeGreaterThanOrEqual(axisArea);
   });
 
+  it("rotates an off-center sub-part to match THREE.Object3D's actual rotation.y convention", () => {
+    // Code-review regression: an earlier version had the cross-term signs
+    // flipped, rotating -90deg instead of +90deg — invisible for a
+    // symmetric plain box, but not for the sofa's off-center chaise.
+    // Expected offset verified directly against THREE.Group.applyEuler for
+    // local offset (-55, -30) rotated 90deg: world offset (-30, 55) (up to
+    // floating-point noise) — the exact negation of what the sign-flipped
+    // version produced.
+    const aabb = itemFootprintAABB(sofa, [0, 0, 0], 90);
+    // main (offset 0,0, w200 d90) rotated 90 spans a 90-wide x 200-deep box
+    // centered at the origin: x[-45,45], z[-100,100]. The chaise (offset
+    // -55,-30 pre-rotation, w90 d150) rotated to world offset (-30,55)
+    // spans x[-30-75,-30+75]=[-105,45], z[55-45,55+45]=[10,100]. Union:
+    // minX = -105 (from the chaise), not +alternative from the sign-flipped
+    // bug, which would have produced a chaise offset of (30,-55) and a
+    // union minX of -45 (main's own edge) instead.
+    expect(aabb.minX).toBeCloseTo(-105, 5);
+  });
+
   it("unions a compound sofa's main+chaise sub-footprints", () => {
     const aabb = itemFootprintAABB(sofa, [0, 0, 0], 0);
     // main spans x[-100,100]; chaise offsetX = (90-200)/2 = -55, spans x[-100,-10]
