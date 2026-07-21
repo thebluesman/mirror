@@ -1,7 +1,7 @@
 # v2 Spike Plan — Arrangement + Quality (post-v1 acceptance)
 
-**Status: DRAFT (2026-07-21)** — for Shyam/Supritha review. Nothing here is a firm
-commitment until this line changes; nothing here is implemented.
+**Status: APPROVED (2026-07-21)** — reviewed and approved by Shyam (via Supritha),
+with the §3 and §8 answers folded in below. Nothing is implemented yet.
 
 Successor to the spike arc (`poc-plan.md` → `poc2-plan.md` → `poc3-plan.md`,
 outcomes in `spike/OUTCOME*.md`) and to the v1 build (`PRD-v1.md`, `plan-v1.md` —
@@ -38,6 +38,7 @@ expansion is a visible decision:
 | 5. Floor/wall/ceiling textures look bad as tiles | **W-B** — same explicit pull-in; this is Phase-3/texturing-pipeline territory, not arrangement — a visible scope choice, not a silent one |
 | 6. Missing kitchen-outer wall (shell-generation bug) | **OUT.** Shyam is fixing this himself in his own session. Not touched here |
 | 7. Hunyuan 3D beat Meshy in an informal test; supports multi-angle input | **W-C** — comparison spike; touches ADR-0001, see §5 |
+| 8. TV object not showing despite a completed image import (reported 2026-07-21, after the first triage) | **W-A (D0)** — likely the Phase 4 GLB-load-failure silent-fallback path or an asset-integrity miss; diagnose first, since a swallowed load error would also undermine W-A's replace flow |
 
 Net: three workstreams instead of one. The PRD's 3–5-week v2 estimate predates
 this expansion; §8 revises it.
@@ -130,18 +131,20 @@ the app's own lighting (the viewer-flattery risk, verbatim from poc3 §3).
 (fal hosts Hunyuan3D model endpoints; the spike verifies the same three CORS legs
 ADR-0001 verified for Meshy), and what's the per-generation price delta?
 
-## 3. Decision to make now: patch the seed orientation data, or let v2 absorb it?
+## 3. Seed orientation data: RESOLVED — no patch, v2's rotate absorbs it
 
-The handoff left this open. **Recommendation: patch now.** The fix is minutes —
-per-item `rotationDeg` edits in `seed/living-room.json`, the same class of edit as
-the window-units fix already made there — and until v2 ships, every render Shyam
-looks at has his sofa facing the wrong way, which quietly erodes the "that's my
-room" result v1 earned. In-app rotate makes the patch moot later, but moot-later
-is not a reason to look at wrong data for the weeks in between. The patch is a v1
-fix on `main`, independent of this spike; it is *not* a reason to descope rotate
-from W-A (rotate is core arrangement regardless).
+Shyam's call (2026-07-21): skip the seed patch; the wrong-facing renders are not
+an issue for the interim, and W-A's in-app rotate is the fix. The plan's earlier
+patch-now recommendation is overridden and D0 is repurposed (§7).
 
-*(Draft recommendation — Shyam decides.)*
+**Correct orientations, recorded here as the C1 acceptance reference** (Shyam
+fixes these himself via rotate when driving the W-A prototype — doing so *is*
+part of the C1 bar):
+
+- **ÄPPLARYD sofa** — faces the TV / media console / coffee table.
+- **Shoe rack** — same orientation as the sofa.
+- **Bookshelf** — the open cubbies (square holes) face the window; the closed
+  back faces the dining table.
 
 ## 4. Where the spike code lives
 
@@ -198,10 +201,12 @@ targets `src/texturing/` and real OPFS assets. So:
 - **Viewer flattery, round 2.** Shyam's informal Hunyuan test was almost
   certainly in a hosted preview viewer. OUTCOME-3's rule stands: nothing counts
   until it renders in the app's sun + IBL. The C3 gate exists for this.
-- **Which Hunyuan?** Shyam's test may have been Tencent's own service; fal hosts
-  specific Hunyuan3D versions. If fal's version underperforms the informal test,
-  the comparison must say *which* Hunyuan it judged — §7 asks Shyam to identify
-  what he used.
+- **Which Hunyuan? RESOLVED:** Shyam's test ran a fal-hosted Hunyuan3D endpoint
+  via the fal dashboard — so W-C compares the exact model it would adopt, and R1
+  narrows to identifying the endpoint/version/pricing plus the CORS-leg plan.
+  The viewer-flattery caveat stands in full: the dashboard's preview viewer is
+  precisely the flattering context OUTCOME-3 warns about, so the C3 in-app
+  judgment remains the only one that counts.
 - **Texture-pass rabbit hole.** "Agent-driven pass to make textures more
   realistic" is open-ended by nature. W-B is lever-per-iteration, one iteration
   each, hard-capped — the poc2 lesson (fidelity bottlenecks on authoring hours)
@@ -215,7 +220,7 @@ parallel-safe against it (different files/assets) once W-A is underway.
 
 | # | Task | Agent type | Runs | Inputs | Output / done criteria |
 |---|---|---|---|---|---|
-| D0 | Seed orientation patch (§3, if Shyam approves) — `rotationDeg` fixes for sofa/shoe rack/bookshelf | general-purpose (build), on `main` | first, tiny | `seed/living-room.json`, correct orientations from Shyam | patched seed + before/after renders |
+| D0 | **TV-not-showing diagnosis (#8)**: trace the TV item's import through asset store → GLB load → scene placement; the Phase 4 fallback intentionally degrades a failed GLB load to "looks unimported", so check whether the asset is corrupt/missing (OPFS), the load silently failed, or placement put it out of view. Fix if small; otherwise record cause for v2 | general-purpose (build) | first, tiny — before or alongside D1 | Shyam's project file/OPFS state (or a reproduction via the same TV image) | cause identified; TV visible or a recorded diagnosis with the fix scoped |
 | D1 | W-A core: selection + floor-plane drag + rotate in `Viewport.tsx`, mutate-during-gesture seam | general-purpose (build) | first, alone on the branch | v1 app, Shyam's room data | movable/rotatable items, screen-recording + Playwright-driven captures |
 | D2 | W-A rules: footprint collision flagging + wall/edge snapping | general-purpose (build) | after D1 (same files) | D1 branch | collision/snap behaviors per §2 bar |
 | D3 | W-A persistence: named layouts (save/switch/reload) + item replace via re-import | general-purpose (build) | after D2 | D2 branch, existing `layouts[]` schema, `applyImport.ts` | two persistent layouts + one successful asset swap |
@@ -233,19 +238,29 @@ the provider answer are worth having under any v2 interaction model.
 
 ## 8. Inputs needed from Shyam
 
-1. **Correct orientations** for the three misfacing items (D0) — a sentence each.
-2. **Which Hunyuan he tested** (Tencent hosted? a fal endpoint? local?) and
-   roughly what he fed it — needed at R1 so the comparison judges the right
-   thing.
-3. **Photos**: a better straight-on rug photo (D4); item photos for the W-C
+Answered 2026-07-21 (via Supritha):
+
+1. ~~**Correct orientations** for the three misfacing items~~ — **answered**,
+   recorded in §3 as the C1 acceptance reference.
+2. ~~**Which Hunyuan he tested**~~ — **answered**: fal-hosted Hunyuan3D, run
+   from the fal dashboard (see §6).
+3. **W-C item slate** (water cooler, rug, bookshelf) — **confirmed**.
+
+Still to arrive when the workstreams reach them:
+
+4. **Photos**: a better straight-on rug photo (D4); item photos for the W-C
    slate, ideally the same source photos Meshy got, plus 2–3 angles of 1–2 items
    for the multi-view test (D5); the correct water-cooler photo (fixes #3's
-   original complaint while serving W-C).
-4. **FAL_KEY** at D5 run time (inline, never committed), plus any separate
-   Hunyuan credential if R1 finds fal-hosted endpoints insufficient.
-5. **Hands-on time at C1** — unlike prior spikes' contact-sheet judgments,
+   original complaint while serving W-C). *Shyam has confirmed he can provide.*
+5. **FAL_KEY** at D5 run time (inline, never committed), plus any separate
+   Hunyuan credential if R1 finds fal-hosted endpoints insufficient. *Confirmed
+   available.*
+6. **The TV item's project state** for D0 — export/zip of the project (or at
+   least the console output when loading), or failing that the TV source image
+   so D0 can reproduce the import.
+7. **Hands-on time at C1** — unlike prior spikes' contact-sheet judgments,
    the arrangement bar can only be judged by driving it.
-6. At C1–C4: judgment against the §2 bars, set before looking at results.
+8. At C1–C4: judgment against the §2 bars, set before looking at results.
 
 ## 9. Explicitly out of scope
 
