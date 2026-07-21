@@ -1,11 +1,11 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { buildScene, type BuiltScene } from "../scene/buildScene";
-import { applyShellSurface, type ShellSurface } from "../scene/shellMaterials";
+import { applyShellSurface, updateSurfaceCalibrationInPlace, type ShellSurface } from "../scene/shellMaterials";
 import { loadShellTexture } from "../scene/loadShellTexture";
-import { DEFAULT_SURFACE_CALIBRATION, type ShellCalibration } from "../schema/scene";
+import { DEFAULT_SURFACE_CALIBRATION, type ShellCalibration, type SurfaceCalibration } from "../schema/scene";
 import type { SceneFile } from "../scene/types";
 import "./Viewport.css";
 
@@ -31,18 +31,48 @@ export function Viewport({
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const builtRef = useRef<BuiltScene | null>(null);
+  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+
+  // Per-surface tracking for the calibration effect below: the last
+  // calibration actually applied (so it can diff and skip no-op work) and
+  // the live THREE.Texture instances currently referenced by a material (so
+  // they can be disposed exactly once, right when superseded — see the
+  // calibration effect for why this can't just live in that effect's own
+  // per-run closure). Reset whenever the structural effect rebuilds the
+  // scene, since a rebuild gets fresh materials (at least for the floor,
+  // which is cloned per-rect in buildScene.ts) that haven't had any
+  // calibration applied yet.
+  const lastAppliedCalibRef = useRef<Partial<Record<ShellSurface, SurfaceCalibration>>>({});
+  const appliedTexturesRef = useRef<Partial<Record<ShellSurface, THREE.Texture[]>>>({});
+  const [buildVersion, setBuildVersion] = useState(0);
 
   // Structural build: renderer, lighting, room shell geometry, furniture,
-  // camera, controls. Runs once per mount from the sceneFile the component
-  // was mounted with (captured via ref, not a dependency) — v1 has no
-  // in-app room/furniture editing (arrangement is v2), so the only thing
-  // that legitimately changes live is shell calibration, handled by the
-  // second effect below without tearing down the WebGL context.
-  const initialSceneFile = useRef(sceneFile).current;
+  // camera, controls. Previously ran once per mount only (sceneFile
+  // captured via useRef at mount) — restored here to react to structural
+  // sceneFile changes (code review finding: any future structural mutation,
+  // e.g. furniture/walls/camera edits, silently stopped rebuilding). Shell-
+  // only changes (the only live mutation v1 actually makes post-mount) are
+  // still diverted to the calibration effect below without tearing down the
+  // WebGL context, by comparing every *other* top-level field by reference.
+  const prevSceneFileRef = useRef<SceneFile | null>(null);
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+
+    const prev = prevSceneFileRef.current;
+    const structuralChanged =
+      !prev ||
+      prev.room.ceilingHeightCm !== sceneFile.room.ceilingHeightCm ||
+      prev.room.floor !== sceneFile.room.floor ||
+      prev.room.walls !== sceneFile.room.walls ||
+      prev.items !== sceneFile.items ||
+      prev.cameras !== sceneFile.cameras ||
+      prev.layouts !== sceneFile.layouts ||
+      prev.current !== sceneFile.current;
+    prevSceneFileRef.current = sceneFile;
+
+    if (!structuralChanged) return; // shell-only change — the calibration effect handles it
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -51,8 +81,15 @@ export function Viewport({
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.appendChild(renderer.domElement);
 
-    const built = buildScene(initialSceneFile);
+    const built = buildScene(sceneFile);
     builtRef.current = built;
+    rendererRef.current = renderer;
+    // Fresh materials (floor, at least) need every surface reapplied —
+    // dropping stale per-surface state forces the calibration effect to
+    // treat this as a first-ever apply for all three surfaces.
+    lastAppliedCalibRef.current = {};
+    appliedTexturesRef.current = {};
+    setBuildVersion((v) => v + 1);
     const { scene, cameras } = built;
 
     const pmrem = new THREE.PMREMGenerator(renderer);
@@ -103,38 +140,100 @@ export function Viewport({
       renderer.dispose();
       container.removeChild(renderer.domElement);
       builtRef.current = null;
+      rendererRef.current = null;
+      // Any texture the calibration effect had applied belonged to this
+      // build's materials — dispose them all now rather than leak.
+      Object.values(appliedTexturesRef.current).forEach((textures) => textures?.forEach((t) => t.dispose()));
+      appliedTexturesRef.current = {};
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally mount-only, see comment above
-  }, []);
+  }, [sceneFile]);
 
   // Live shell-texture/calibration updates: mutates the materials the
   // structural effect already created, in place — no renderer/camera churn,
   // so dragging a calibration slider doesn't flicker or reset the view.
+  //
+  // Per-surface, this diffs against the last-applied calibration (code
+  // review findings 2-4): a numeric-only change (tint/repeat/roughnessScale)
+  // mutates the existing material/texture in place via
+  // updateSurfaceCalibrationInPlace — no decode, no new THREE.Texture, no
+  // race. Only an assetHash change (or a surface's first-ever apply after a
+  // rebuild) takes the async decode-and-replace path, and that path uses a
+  // per-run generation token (`runIdRef`) so a superseded run — the effect
+  // re-running before a previous run's `await` resolves, e.g. from rapid
+  // recalibration — aborts instead of ever mutating a material with a stale
+  // result. The replaced texture is only disposed *after* the material has
+  // been repointed at its replacement (inside the same synchronous
+  // continuation), so `.map` never points at an already-disposed texture.
   const calibration = shellCalibration ?? sceneFile.room.shell;
+  const runIdRef = useRef(0);
+
   useEffect(() => {
     const built = builtRef.current;
     if (!built) return;
-    let cancelled = false;
-    const createdTextures: THREE.Texture[] = [];
+    const myRun = ++runIdRef.current;
 
     (async () => {
       for (const surface of SHELL_SURFACES) {
+        if (runIdRef.current !== myRun) return; // superseded by a newer run — abandon remaining surfaces too
+
         const calib = calibration?.[surface] ?? DEFAULT_SURFACE_CALIBRATION;
+        const prevCalib = lastAppliedCalibRef.current[surface];
+        const sameTexture = prevCalib !== undefined && prevCalib.assetHash === calib.assetHash;
+        const sameNumeric =
+          prevCalib !== undefined &&
+          prevCalib.tint === calib.tint &&
+          prevCalib.repeat[0] === calib.repeat[0] &&
+          prevCalib.repeat[1] === calib.repeat[1] &&
+          prevCalib.roughnessScale === calib.roughnessScale;
+
+        if (sameTexture && sameNumeric) continue; // nothing changed for this surface
+
+        if (sameTexture) {
+          // Numeric-only change: mutate the already-applied material/texture
+          // in place. No async work, so no cancellation window at all.
+          updateSurfaceCalibrationInPlace(built.shell, surface, calib);
+          lastAppliedCalibRef.current[surface] = calib;
+          continue;
+        }
+
+        // Texture-affecting change (assetHash changed, or first apply for
+        // this surface since the last rebuild): decode + apply + swap.
         const textureSource = calib.assetHash ? await loadShellTexture(calib.assetHash) : null;
-        if (cancelled) {
-          if (textureSource) textureSource.bitmap.close();
+        if (runIdRef.current !== myRun) {
+          textureSource?.bitmap.close();
           return;
         }
-        const textures = applyShellSurface(built.shell, surface, calib, textureSource);
-        createdTextures.push(...textures);
+
+        const oldTextures = appliedTexturesRef.current[surface] ?? [];
+        const newTextures = applyShellSurface(built.shell, surface, calib, textureSource);
+
+        if (textureSource) {
+          // Force the GPU upload now, synchronously, so it's safe to close
+          // the ImageBitmap right after — three.js otherwise only uploads
+          // lazily on the next render() call, and closing the bitmap before
+          // that upload happens would hand the renderer a dead source.
+          // Without this the bitmap leaked (~4MB/surface/run): it was only
+          // ever closed on the cancelled branch, never on success.
+          newTextures.forEach((t) => rendererRef.current?.initTexture(t));
+          textureSource.bitmap.close();
+        }
+        // The material already points at newTextures (applyShellSurface set
+        // .map synchronously above) — safe to dispose the old ones now.
+        oldTextures.forEach((t) => t.dispose());
+        appliedTexturesRef.current[surface] = newTextures;
+        lastAppliedCalibRef.current[surface] = calib;
       }
     })();
 
     return () => {
-      cancelled = true;
-      createdTextures.forEach((t) => t.dispose());
+      // Invalidate this run's generation token — an in-flight `await` above
+      // will see the mismatch and bail without touching any material,
+      // whether this cleanup fired because the effect is re-running or
+      // because the component is unmounting.
+      runIdRef.current++;
     };
-  }, [calibration]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- buildVersion is a signal (rebuild happened), not a value read in the effect
+  }, [calibration, buildVersion]);
 
   return <div ref={containerRef} className="viewport" />;
 }

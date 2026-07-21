@@ -171,3 +171,43 @@ export function applyShellSurface(
   });
   return created;
 }
+
+/**
+ * Cheap path for a numeric-only calibration change (tint/repeat/
+ * roughnessScale) on a surface whose texture (or lack of one) hasn't
+ * changed: mutates the already-applied material(s)/texture(s) in place —
+ * tint/roughness via applyCalibrationToMaterial, repeat via the existing
+ * `THREE.Texture.repeat` vector — instead of decoding the photo again and
+ * creating a new THREE.Texture. No async work, no ImageBitmap involved (the
+ * bitmap behind the current texture may already be closed), so this is safe
+ * to call synchronously and as often as calibration changes (e.g. once per
+ * debounced slider tick — see Viewport.tsx's calibration effect).
+ */
+export function updateSurfaceCalibrationInPlace(
+  shell: ShellMeshes,
+  surface: ShellSurface,
+  calib: SurfaceCalibration,
+): void {
+  function applyToMaterial(mat: THREE.MeshStandardMaterial, base: [number, number]) {
+    const hasTexture = mat.map != null;
+    applyCalibrationToMaterial(mat, surface, calib, hasTexture);
+    if (mat.map) {
+      const repeat = applyRepeatCalibration(base, calib);
+      mat.map.repeat.set(repeat[0], repeat[1]);
+      mat.map.needsUpdate = true;
+    }
+    mat.needsUpdate = true;
+  }
+
+  if (surface === "wall") {
+    applyToMaterial(shell.wallMaterial, estimateWallRepeat(shell.wallMeshes));
+    return;
+  }
+  if (surface === "ceiling") {
+    applyToMaterial(shell.ceilingMaterial, estimateCeilingRepeat(shell.ceilingMeshes));
+    return;
+  }
+  shell.floorMeshes.forEach((mesh) => {
+    applyToMaterial(mesh.material as THREE.MeshStandardMaterial, floorBaseRepeat(mesh));
+  });
+}

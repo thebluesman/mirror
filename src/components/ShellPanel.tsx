@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   DEFAULT_SURFACE_CALIBRATION,
   type ShellCalibration,
@@ -7,6 +7,50 @@ import {
 import { photoToTileableBlob } from "../texturing/pipeline";
 import { putAsset } from "../storage/assets";
 import "./ShellPanel.css";
+
+// Range inputs fire `onChange` on every pixel of drag — without debouncing,
+// that meant one Viewport calibration-effect run (potentially a full
+// texture reload+reapply) per mouse-move event (code review finding).
+// 120ms lands comfortably under "feels instant" for a drag gesture while
+// collapsing a whole drag into a handful of commits.
+const SLIDER_DEBOUNCE_MS = 120;
+
+/** Debounces a callback by `delayMs`, always calling with the most recent
+ *  args. Flushes any pending call on unmount so a drag-then-navigate-away
+ *  doesn't drop the final value. */
+function useDebouncedCallback<Args extends unknown[]>(
+  fn: (...args: Args) => void,
+  delayMs: number,
+): (...args: Args) => void {
+  const fnRef = useRef(fn);
+  fnRef.current = fn;
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingArgsRef = useRef<Args | null>(null);
+
+  useEffect(
+    () => () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        if (pendingArgsRef.current) fnRef.current(...pendingArgsRef.current);
+      }
+    },
+    [],
+  );
+
+  return useMemo(() => {
+    const debounced = (...args: Args) => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      pendingArgsRef.current = args;
+      timerRef.current = setTimeout(() => {
+        timerRef.current = null;
+        pendingArgsRef.current = null;
+        fnRef.current(...args);
+      }, delayMs);
+    };
+    return debounced;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fn is read via fnRef so it can change every render without re-debouncing
+  }, [delayMs]);
+}
 
 const SURFACES: Array<{ key: "wall" | "floor" | "ceiling"; label: string }> = [
   { key: "wall", label: "Wall" },
@@ -24,12 +68,29 @@ function SurfaceRow({ label, calib, onChange }: SurfaceRowProps) {
   const [status, setStatus] = useState<"idle" | "processing" | "error">("idle");
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Local mirror of `calib` for instant slider/label feedback while
+  // dragging — `onChange` itself is debounced (see below) because it drives
+  // Viewport's calibration effect (storage write + possible texture
+  // reload), which must not run once per pixel of drag (code review
+  // finding). Synced from the prop on every change so an external update
+  // (e.g. a fresh upload elsewhere, or the initial load) still shows.
+  const [liveCalib, setLiveCalib] = useState(calib);
+  useEffect(() => setLiveCalib(calib), [calib]);
+  const debouncedOnChange = useDebouncedCallback(onChange, SLIDER_DEBOUNCE_MS);
+
+  function handleSliderChange(next: SurfaceCalibration) {
+    setLiveCalib(next); // immediate visual feedback
+    debouncedOnChange(next); // throttled commit
+  }
+
   async function handleFile(file: File) {
     setStatus("processing");
     try {
       const tileable = await photoToTileableBlob(file);
       const hash = await putAsset(tileable);
-      onChange({ ...calib, assetHash: hash });
+      const next = { ...calib, assetHash: hash };
+      setLiveCalib(next);
+      onChange(next); // a photo upload is a one-shot event, not a drag — commit immediately
       setStatus("idle");
     } catch (err) {
       console.error("[ShellPanel] tileable-texture pipeline failed", err);
@@ -71,44 +132,48 @@ function SurfaceRow({ label, calib, onChange }: SurfaceRowProps) {
         <span>Tint</span>
         <input
           type="color"
-          value={calib.tint}
-          onChange={(e) => onChange({ ...calib, tint: e.target.value })}
+          value={liveCalib.tint}
+          onChange={(e) => handleSliderChange({ ...liveCalib, tint: e.target.value })}
         />
       </label>
 
       <label className="shell-row-field">
-        <span>Repeat X ({calib.repeat[0].toFixed(2)}×)</span>
+        <span>Repeat X ({liveCalib.repeat[0].toFixed(2)}×)</span>
         <input
           type="range"
           min={0.25}
           max={4}
           step={0.05}
-          value={calib.repeat[0]}
-          onChange={(e) => onChange({ ...calib, repeat: [Number(e.target.value), calib.repeat[1]] })}
+          value={liveCalib.repeat[0]}
+          onChange={(e) =>
+            handleSliderChange({ ...liveCalib, repeat: [Number(e.target.value), liveCalib.repeat[1]] })
+          }
         />
       </label>
 
       <label className="shell-row-field">
-        <span>Repeat Y ({calib.repeat[1].toFixed(2)}×)</span>
+        <span>Repeat Y ({liveCalib.repeat[1].toFixed(2)}×)</span>
         <input
           type="range"
           min={0.25}
           max={4}
           step={0.05}
-          value={calib.repeat[1]}
-          onChange={(e) => onChange({ ...calib, repeat: [calib.repeat[0], Number(e.target.value)] })}
+          value={liveCalib.repeat[1]}
+          onChange={(e) =>
+            handleSliderChange({ ...liveCalib, repeat: [liveCalib.repeat[0], Number(e.target.value)] })
+          }
         />
       </label>
 
       <label className="shell-row-field">
-        <span>Roughness ({calib.roughnessScale.toFixed(2)}×)</span>
+        <span>Roughness ({liveCalib.roughnessScale.toFixed(2)}×)</span>
         <input
           type="range"
           min={0}
           max={2}
           step={0.05}
-          value={calib.roughnessScale}
-          onChange={(e) => onChange({ ...calib, roughnessScale: Number(e.target.value) })}
+          value={liveCalib.roughnessScale}
+          onChange={(e) => handleSliderChange({ ...liveCalib, roughnessScale: Number(e.target.value) })}
         />
       </label>
     </section>
