@@ -331,19 +331,32 @@ dev` until installed) — then a real photo of his table lamp through a paid
 Meshy generation via his own fal.ai key, confirmed cm dims, placed at the
 Figma-seeded position. GLB downloaded and rendering in-scene; Shyam judged
 it "looks good... good enough to move forward." Phase 4 exit criterion met.
-Two things flagged during the run, not blocking, kept for later:
-- **Seed/G2 geometry issues** — sofa position relative to the floor lamp
-  corner and bedroom door looks off, and the window nearer the corner on
-  the west wall reads as the wrong size. The sofa symptom likely overlaps
-  the already-flagged compound-sofa chaise-offset bug just above (~38%
-  too-wide bounding box), but the floor-lamp/door and window-size reports
-  are new and unconfirmed — worth a dedicated look at `seed/living-room.json`
-  and `buildScene.ts`'s window-opening math before the Phase 5 acceptance
-  run, not diagnosed further here.
+Two things flagged during the run, not blocking:
+- **Sofa/floor-lamp/bedroom-door positioning — fixed 2026-07-21.**
+  Cross-checked `seed/living-room.json` against the source Figma file
+  directly: the swivel-chair and floor-lamp seed positions match Figma
+  exactly, so this wasn't a seed/conversion error — it was the already-
+  flagged compound-sofa chaise-offset bug above. `buildScene.ts`'s chaise
+  `offsetX` was `-(main.w / 2) - chaise.w / 2`, double-subtracting main's
+  half-width (already accounted for by main's own `offsetX`); fixed to
+  `-(chaise.w / 2)`, which abuts the chaise to main's west edge with no
+  overlap and gives the expected 381cm overall width (290 + 91) instead of
+  the buggy 526cm. `npm run build`/`test` (48/48) clean.
+- **West-wall window sizing — not a Figma/seed issue, still open.**
+  Figma shows both west-wall openings (balcony door and window) at the same
+  110cm width, matching the seed exactly — Figma is a 2D plan with no
+  sill/head-height info, and that height-honoring logic was already fixed
+  in Phase 3, so this can't be explained from the Figma side. Likely either
+  a live rendering issue to re-check in-app, or visual confusion between
+  the two openings (the full-height glass balcony door reads much larger
+  than the standard window). Shyam has a spike run that generated a good
+  window texture from a photo and may reuse that image rather than
+  hand-entering a height — reopen once he decides which.
 - **DESIGN.md fidelity** — the app doesn't read as strongly "Cohere" yet.
   Likely just current-stage minimalism (Phase 5 owns viewport chrome/control
   bar per PRD §9) rather than a real gap, but flagged for a deliberate check
-  once Phase 5's chrome work lands rather than assumed benign.
+  once Phase 5's chrome work lands rather than assumed benign. Still
+  realladygrey's to check per the Phase 5 handoff note below.
 
 **`/code-review` pass, 2026-07-21:** 8 findings (6 CONFIRMED, 2 PLAUSIBLE), 3
 fixed directly on the branch — `ImportPanel.tsx`'s confirm-dims form accepted
@@ -415,11 +428,19 @@ before the checklist items rather than leaving for a later pass:
   that should resolve or clarify this — but treat it as a deliberate
   check against `DESIGN.md` once that chrome lands, not an assumed non-issue.
 
-The other Phase 4 acceptance-run finding — sofa position relative to the
-floor lamp/bedroom door, and the west-wall window sizing near the corner —
-needs cross-checking against the source Figma file (realladygrey doesn't
-have access), so Shyam is handling that directly rather than assigning it
-here; not part of her scope for this phase.
+The sofa/floor-lamp/bedroom-door positioning finding is fixed (see Phase 4's
+note) — Shyam cross-checked it against the source Figma file himself since
+realladygrey doesn't have access, confirmed it wasn't a seed/conversion
+error, and fixed the underlying `buildScene.ts` bug directly. The west-wall
+window-sizing finding is still open but turned out not to be Figma-
+dependent — Figma's plan view doesn't carry the sill/head-height data at
+all, so this is a live in-app rendering question, not a seed-vs-Figma one.
+It's not on her checklist above, but if she has time after the checklist
+items, worth a look at `buildScene.ts`'s window-opening rendering with the
+two seed heights (balcony door: sill 0/head 210; window: sill 90/head 120)
+against what actually renders. Shyam may also swap in a photo-derived
+window texture from an existing spike run instead of hand-tuning heights —
+check with him before spending much time on it.
 
 **Exit:** PRD §10 satisfied end to end; closing journal entry; v2 spike scoping
 becomes the next conversation.
