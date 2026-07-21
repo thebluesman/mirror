@@ -28,6 +28,13 @@ const SubFootprint = z.object({ w: z.number(), d: z.number() });
 // discriminant Phase 3 rendering hooks into; Phase 2 only owns the type.
 export const OpeningType = z.enum(["door", "glass-door", "window"]);
 
+// Minimum gap enforced between an opening's sill and head when both are
+// given. Without this, buildScene.ts's leafTop = max(sill, head - 2) can
+// collapse to exactly `sill`, silently dropping the door leaf (code review
+// finding) — better to reject the invalid data at the load boundary than
+// have it render as a degenerate hole in the wall.
+const MIN_SILL_HEAD_GAP_CM = 10;
+
 const WallOpeningSchema = z
   .object({
     name: z.string(),
@@ -38,7 +45,14 @@ const WallOpeningSchema = z
     sillHeightCm: z.number().optional(),
     headHeightCm: z.number().optional(),
   })
-  .loose(); // carry provenance notes (e.g. `note`) through untouched
+  .loose() // carry provenance notes (e.g. `note`) through untouched
+  .refine(
+    (o) =>
+      o.sillHeightCm === undefined ||
+      o.headHeightCm === undefined ||
+      o.headHeightCm - o.sillHeightCm >= MIN_SILL_HEAD_GAP_CM,
+    { message: `headHeightCm must be at least ${MIN_SILL_HEAD_GAP_CM}cm above sillHeightCm` },
+  );
 
 const WallDefSchema = z
   .object({

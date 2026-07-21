@@ -109,7 +109,11 @@ function addWall(scene: THREE.Scene, wallDef: WallDef, wallHeight: number): THRE
 
   function addSegment(aLocal: number, bLocal: number, yBottom: number, yTop: number, mat = MAT.wall) {
     const segLen = bLocal - aLocal;
-    if (segLen <= 0.001) return;
+    // Mirrors addInWallSlab's guard: a lintel/lower-fill span whose yTop has
+    // collapsed to (or below) yBottom — e.g. headHeightCm >= wallHeight —
+    // must no-op instead of handing BoxGeometry a non-positive height (code
+    // review finding: this guard existed on addInWallSlab but not here).
+    if (segLen <= 0.001 || yTop - yBottom <= 0.001) return;
     const h = yTop - yBottom;
     const geo = horizontal
       ? new THREE.BoxGeometry(segLen, h, WALL_THICKNESS)
@@ -160,6 +164,7 @@ function addWall(scene: THREE.Scene, wallDef: WallDef, wallHeight: number): THRE
       const head = o.headHeightCm ?? 210;
       const leafTop = Math.max(sill, head - 2); // small gap below the lintel
       const leafMat = o.type === "glass-door" ? glassMat : MAT.doorLeaf;
+      addSegment(o.start, o.end, 0, sill); // solid wall below a raised sill (no-ops when sill <= 0)
       addSegment(o.start, o.end, head, wallHeight); // lintel above head height
       addInWallSlab(o.start + 2, o.end - 2, sill, leafTop, 4, leafMat, o.type === "glass-door");
     } else if (o.type === "window") {

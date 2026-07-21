@@ -53,6 +53,22 @@ describe("SceneFile validation", () => {
     ];
     expect(() => SceneFileSchema.parse(scene)).not.toThrow();
   });
+
+  it("rejects an opening whose headHeightCm is too close to (or below) sillHeightCm", () => {
+    const scene = minimalV1() as any;
+    scene.room.walls[0].openings = [
+      { name: "o", along: "x", start: 0, size: 10, type: "door", sillHeightCm: 100, headHeightCm: 105 },
+    ];
+    expect(() => SceneFileSchema.parse(scene)).toThrow();
+  });
+
+  it("accepts an opening with only one of sillHeightCm/headHeightCm set (no gap to check)", () => {
+    const scene = minimalV1() as any;
+    scene.room.walls[0].openings = [
+      { name: "o", along: "x", start: 0, size: 10, type: "window", headHeightCm: 210 },
+    ];
+    expect(() => SceneFileSchema.parse(scene)).not.toThrow();
+  });
 });
 
 describe("furniture union", () => {
