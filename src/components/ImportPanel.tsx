@@ -4,6 +4,7 @@ import { loadFalKey } from "../storage/settings";
 import { putAsset } from "../storage/assets";
 import { generateFurnitureGlb, FalKeyMissingError, type GenerationPhase } from "../import/falClient";
 import { applyFurnitureImport } from "../import/applyImport";
+import { furnitureOverallDims } from "../scene/buildScene";
 import { slugify, uniqueId } from "../util/slug";
 import "./ImportPanel.css";
 
@@ -14,16 +15,17 @@ type Stage =
   | { kind: "confirm-dims"; glbBlob: Blob; photoBlob: Blob | File; dims: Dims; modelRotationDeg: ModelRotation }
   | { kind: "error"; message: string; photo: File; photoUrl: string | null };
 
+// furnitureOverallDims (not a raw item.dimsCm check) so a compound-sofa's
+// derived main+chaise footprint pre-fills correctly instead of falling
+// through to the 50x50x50 default — code-review finding: re-importing a
+// compound-sofa used to persist a stray literal dimsCm that permanently
+// overrode its main/chaise-derived footprint everywhere else in the app.
 function dimsOf(item: FurnitureItem | undefined): Dims {
-  if (item?.dimsCm) return item.dimsCm;
-  return { w: 50, d: 50, h: 50 };
+  if (!item) return { w: 50, d: 50, h: 50 };
+  return furnitureOverallDims(item);
 }
 
 const ZERO_ROTATION: ModelRotation = { x: 0, y: 0, z: 0 };
-
-function modelRotationOf(item: FurnitureItem | undefined): ModelRotation {
-  return item?.modelRotationDeg ?? ZERO_ROTATION;
-}
 
 const PROGRESS_LABEL: Record<GenerationPhase, string> = {
   uploading: "Uploading photo…",
@@ -77,8 +79,14 @@ export function ImportPanel({
         kind: "confirm-dims",
         glbBlob,
         photoBlob: photo,
+        // dims are a reasonable carry-over guess (the real-world object is
+        // presumably the same size) but rotation is not: this is a freshly
+        // generated GLB with its own, unrelated orientation quirks, so it
+        // always starts from zero rather than the previous model's
+        // correction (code-review finding — a re-import used to silently
+        // inherit a stale correction that no longer applied).
         dims: dimsOf(selectedItem),
-        modelRotationDeg: modelRotationOf(selectedItem),
+        modelRotationDeg: ZERO_ROTATION,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -184,6 +192,12 @@ export function ImportPanel({
 
       {stage.kind === "confirm-cost" && (
         <div className="import-panel-confirm">
+          {selectedItem?.glbHash && (
+            <p className="import-panel-warning">
+              "{selectedItem.name}" already has an imported model — generating replaces its current
+              photo, model, dimensions, and orientation correction. This can't be undone from here.
+            </p>
+          )}
           <p>
             Generating a 3D model via fal.ai's Meshy costs real money on your fal.ai account. Proceed
             with this generation?
@@ -284,7 +298,10 @@ function DimsConfirmForm({
 
       <p className="import-panel-dims-hint">
         If the model is lying on its side or facing the wrong way, correct it here before
-        placing — Meshy doesn't always output the model upright/forward-facing.
+        placing — Meshy doesn't always output the model upright/forward-facing. Corrections are
+        applied in X, then Y, then Z order; if only one axis is off, set just that one. If the
+        model needs two axes corrected at once, order matters and there's no way to change it
+        here — try each axis alone first to see which one it actually needs.
       </p>
       <div className="import-panel-dims-row">
         {(["x", "y", "z"] as const).map((axis) => (
