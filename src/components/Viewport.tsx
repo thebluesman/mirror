@@ -185,6 +185,14 @@ export const Viewport = forwardRef<
     }
     cameraRef.current = camera;
     controlsRef.current = controls;
+    // Dev-only console diagnostic (never ships to a production build): lets
+    // Shyam dump live scene-graph info (positions/materials/geometry) from
+    // devtools without a rebuild, for one-off "why does this look wrong"
+    // investigations. See scratch console snippets in troubleshooting notes.
+    if (import.meta.env.DEV) {
+      // @ts-expect-error dev-only debug global, intentionally untyped
+      window.__mirrorDebug = { camera, controls, scene: built.scene, THREE };
+    }
 
     function resize() {
       if (!container) return;
