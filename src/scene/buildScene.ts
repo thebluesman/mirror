@@ -199,7 +199,7 @@ function furnitureFootprint(item: FurnitureItem): Array<{ w: number; d: number; 
     const h = item.dimsCm?.h ?? item.backHeightCm ?? 80;
     return [
       { w: main.w, d: main.d, h, offsetX: main.w / 2, offsetZ: 0 },
-      { w: chaise.w, d: chaise.d, h, offsetX: -(main.w / 2) - chaise.w / 2, offsetZ: (main.d - chaise.d) / 2 },
+      { w: chaise.w, d: chaise.d, h, offsetX: -(chaise.w / 2), offsetZ: (main.d - chaise.d) / 2 },
     ];
   }
   return [{ w: item.dimsCm.w, d: item.dimsCm.d, h: item.dimsCm.h, offsetX: 0, offsetZ: 0 }];
