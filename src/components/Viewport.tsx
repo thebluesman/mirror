@@ -8,6 +8,7 @@ import { loadShellTexture } from "../scene/loadShellTexture";
 import { fitModelToDims, loadFurnitureModel } from "../scene/loadFurnitureModel";
 import { checkCollisions, itemFootprintAABB, wallFootprintAABBs, type AABB } from "../scene/collision";
 import { snapPosition } from "../scene/snapping";
+import { rotateHandleWorldXZ, yawDegFromPointer } from "../scene/rotateHandle";
 import {
   DEFAULT_SURFACE_CALIBRATION,
   type CameraPosition,
@@ -58,23 +59,48 @@ function applyCameraPreset(camera: THREE.PerspectiveCamera, controls: OrbitContr
 const MIN_POLAR_ANGLE = 0.1;
 const MAX_POLAR_ANGLE = Math.PI - 0.1;
 
-// W-A rotate control: keyboard step rather than a drag handle. Tradeoff
-// (recorded for C1): a handle reads more "direct manipulation" and matches
-// move's interaction model, but needs its own hit-testable geometry, an
-// angle-from-drag calculation, and a way to keep it visible/clickable at any
-// camera angle — real work for a spike whose core question is the floor-
-// drag seam, not rotate UI polish. A keyboard step is a few lines, is
-// trivially precise (exact 15deg increments fix the three known orientation
-// bugs in seconds, per v2-spike-plan.md §3), and still round-trips through
-// the identical commit-on-release path move uses. Coarser-grained by
-// construction — no free-angle rotate — which is a real limitation if C1
-// ever wants an in-between angle.
+// W-A rotate control: keyboard step, kept as-is. Tradeoff (recorded at D1,
+// C1): a handle reads more "direct manipulation" and matches move's
+// interaction model, but needs its own hit-testable geometry, an angle-from-
+// drag calculation, and a way to keep it visible/clickable at any camera
+// angle — real work for a spike whose core question was the floor-drag seam,
+// not rotate UI polish. A keyboard step is a few lines, is trivially precise
+// (exact 15deg increments fix the three known orientation bugs in seconds,
+// per v2-spike-plan.md §3), and still round-trips through the identical
+// commit-on-release path move uses.
 const ROTATE_STEP_DEG = 15;
+
+// C1 follow-up (see spike-v2/OUTCOME.md's "C1 follow-up — rotate UI handle"
+// section): Shyam's hands-on C1 pass cleared the plan's "handle *or*
+// keyboard step" bar via the keyboard step alone, but asked for a visible
+// drag handle too, additive to (not a replacement for) the above. How far
+// out along the item's local +Z the handle sits, and how big its hit-target
+// sphere is — both in cm, same unit as the rest of the scene graph.
+const ROTATE_HANDLE_MARGIN_CM = 25;
+const ROTATE_HANDLE_RADIUS_CM = 6;
+
 const SELECTION_COLOR = 0x4fd1ff;
 // D2: the selection outline recolors to this when the selected item's
 // footprint currently overlaps another item or a wall — the plan's
 // "decision support, not physics" bar means we flag, we don't block.
 const COLLISION_COLOR = 0xff5c5c;
+
+/** World-space position for the rotate handle, given the item's live group
+ *  and its definition (for overall dims). Not parented under the group (see
+ *  the selection-outline effect for why) — called from three call sites that
+ *  all want the handle to track a group that may have just been mutated
+ *  imperatively: the handle's own creation, the placement-reconciliation
+ *  effect (a committed layout change can move/rotate the selected item from
+ *  outside this component's own drag code), and every animate() frame (so a
+ *  live drag — translate or rotate — keeps the handle glued to the item
+ *  without waiting for a React re-render). */
+function positionRotateHandle(handle: THREE.Mesh, group: THREE.Group, item: FurnitureItem) {
+  const yawDeg = ((THREE.MathUtils.radToDeg(group.rotation.y) % 360) + 360) % 360;
+  const dims = furnitureOverallDims(item);
+  const offset = dims.d / 2 + ROTATE_HANDLE_MARGIN_CM;
+  const [hx, hz] = rotateHandleWorldXZ(group.position.x, group.position.z, yawDeg, offset);
+  handle.position.set(hx, group.position.y + dims.h / 2, hz);
+}
 
 export const Viewport = forwardRef<
   ViewportHandle,
@@ -112,6 +138,11 @@ export const Viewport = forwardRef<
   const selectedItemIdRef = useRef<string | null>(null);
   selectedItemIdRef.current = selectedItemId;
   const selectionHelperRef = useRef<THREE.BoxHelper | null>(null);
+  // C1 follow-up: the rotate-drag handle mesh — a small sphere, lifecycle
+  // paired with selectionHelperRef (created/destroyed alongside it in the
+  // selection-outline effect below), but tracked separately since it needs
+  // its own raycast target and its own per-frame reposition math.
+  const rotateHandleRef = useRef<THREE.Mesh | null>(null);
 
   // D2: wall AABBs and the item-id -> definition lookup only change when a
   // structural rebuild happens (room/items are structuralSceneFile deps), so
@@ -317,6 +348,12 @@ export const Viewport = forwardRef<
     const planeHit = new THREE.Vector3();
     const grabOffset = new THREE.Vector3();
     let drag: { itemId: string; group: THREE.Group } | null = null;
+    // C1 follow-up: a second, mutually-exclusive gesture — dragging the
+    // rotate handle sets group.rotation.y directly from the pointer's angle
+    // around the item's center, rather than moving group.position like
+    // `drag` above. Only one of `drag`/`rotateDrag` is ever set at a time
+    // (onPointerDown picks one based on what the ray hit first).
+    let rotateDrag: { itemId: string; group: THREE.Group } | null = null;
 
     function normalizeDeg(deg: number): number {
       return ((deg % 360) + 360) % 360;
@@ -356,10 +393,49 @@ export const Viewport = forwardRef<
       controls.enabled = true;
     }
 
+    // C1 follow-up: same commit shape as commitDrag (final position/rotation
+    // through the identical onCommitPlacementRef path move and keyboard-step
+    // rotate already use) — only the gesture that produced the live mutation
+    // differs.
+    function commitRotateDrag() {
+      if (!rotateDrag) return;
+      const { itemId, group } = rotateDrag;
+      onCommitPlacementRef.current?.(
+        itemId,
+        [group.position.x, group.position.y, group.position.z],
+        normalizeDeg(THREE.MathUtils.radToDeg(group.rotation.y)),
+      );
+      rotateDrag = null;
+      controls.enabled = true;
+    }
+
     function onPointerDown(evt: PointerEvent) {
       if (evt.button !== 0) return;
       setPointerNdcFromEvent(evt);
       raycaster.setFromCamera(pointerNdc, camera);
+
+      // C1 follow-up: the rotate handle is its own raycast target, checked
+      // first and in isolation (not part of the scene.children walk below,
+      // and not parented under the item's group) — a hit here starts a
+      // rotate-drag and returns before the item-vs-empty-space logic below
+      // ever runs, so clicking the handle can never be mistaken for a
+      // translate-drag on the item it's attached to.
+      const handleMesh = rotateHandleRef.current;
+      if (handleMesh) {
+        const handleHit = raycaster.intersectObject(handleMesh, false)[0];
+        if (handleHit) {
+          const itemId = selectedItemIdRef.current;
+          const group = itemId ? built.furnitureGroups.get(itemId) : undefined;
+          if (itemId && group) {
+            dragPlane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 1, 0), group.position);
+            rotateDrag = { itemId, group };
+            controls.enabled = false; // gesture owns the pointer, not the orbit camera
+            renderer.domElement.setPointerCapture(evt.pointerId);
+            return;
+          }
+        }
+      }
+
       const hit = raycaster.intersectObjects(scene.children, true)[0];
       const hitGroup = hit ? findItemGroup(hit.object) : null;
       if (!hitGroup) {
@@ -382,6 +458,21 @@ export const Viewport = forwardRef<
     }
 
     function onPointerMove(evt: PointerEvent) {
+      // C1 follow-up: rotate-drag branch — angle between the item's center
+      // and the pointer's current floor-plane hit, same raycast-against-
+      // dragPlane technique translate-drag uses below, feeding the pure
+      // yawDegFromPointer helper (src/scene/rotateHandle.ts) instead of a
+      // position delta.
+      if (rotateDrag) {
+        setPointerNdcFromEvent(evt);
+        raycaster.setFromCamera(pointerNdc, camera);
+        if (!raycaster.ray.intersectPlane(dragPlane, planeHit)) return; // camera edge case: ray parallel to the plane
+        const { group, itemId } = rotateDrag;
+        const yawDeg = yawDegFromPointer(group.position.x, group.position.z, planeHit.x, planeHit.z);
+        group.rotation.y = THREE.MathUtils.degToRad(yawDeg);
+        updateCollisionHighlight(itemId, group);
+        return;
+      }
       if (!drag) return;
       setPointerNdcFromEvent(evt);
       raycaster.setFromCamera(pointerNdc, camera);
@@ -427,6 +518,13 @@ export const Viewport = forwardRef<
     }
 
     function onPointerUp(evt: PointerEvent) {
+      if (rotateDrag) {
+        if (renderer.domElement.hasPointerCapture(evt.pointerId)) {
+          renderer.domElement.releasePointerCapture(evt.pointerId);
+        }
+        commitRotateDrag();
+        return;
+      }
       if (!drag) return;
       if (renderer.domElement.hasPointerCapture(evt.pointerId)) {
         renderer.domElement.releasePointerCapture(evt.pointerId);
@@ -497,6 +595,18 @@ export const Viewport = forwardRef<
       // recomputed every frame (selectionHelperRef is null when nothing is
       // selected, so this is a no-op cost the rest of the time).
       selectionHelperRef.current?.update();
+      // C1 follow-up: same idea for the rotate handle — it isn't parented
+      // under the item's group (see positionRotateHandle's comment), so its
+      // world position has to be re-derived every frame from wherever the
+      // group currently is, whether that's from a translate-drag, a
+      // rotate-drag, or a keyboard step.
+      const handle = rotateHandleRef.current;
+      const selId = selectedItemIdRef.current;
+      if (handle && selId) {
+        const group = built.furnitureGroups.get(selId);
+        const item = itemsByIdRef.current.get(selId);
+        if (group && item) positionRotateHandle(handle, group, item);
+      }
       renderer.render(scene, camera);
     }
     animate();
@@ -515,6 +625,7 @@ export const Viewport = forwardRef<
       // "commit wherever it is" behavior `onPointerCancel` already accepts
       // for a browser-stolen gesture — rather than vanishing.
       commitDrag();
+      commitRotateDrag(); // C1 follow-up: same "commit wherever it is" treatment for a mid-rotate-drag interruption
       cancelAnimationFrame(frameId);
       resizeObserver.disconnect();
       renderer.domElement.removeEventListener("pointerdown", onPointerDown);
@@ -684,6 +795,18 @@ export const Viewport = forwardRef<
       const group = built.furnitureGroups.get(selectedItemIdRef.current);
       if (group) updateCollisionHighlight(selectedItemIdRef.current, group);
     }
+    // C1 follow-up: a committed layout change (e.g. a future undo, or a
+    // programmatic edit) can move/rotate the selected item from outside this
+    // component's own drag code too — resync the handle's world position
+    // here for the same reason the outline resyncs above. Also a no-op the
+    // frame after this component's own drag/rotate-handle commit, since
+    // animate() already kept it current live.
+    const handle = rotateHandleRef.current;
+    if (handle && selectedItemIdRef.current) {
+      const group = built.furnitureGroups.get(selectedItemIdRef.current);
+      const item = itemsByIdRef.current.get(selectedItemIdRef.current);
+      if (group && item) positionRotateHandle(handle, group, item);
+    }
   }, [sceneFile.layouts, sceneFile.current, buildVersion]);
 
   // v2 spike (W-A) — selection-outline lifecycle: a THREE.BoxHelper
@@ -704,6 +827,16 @@ export const Viewport = forwardRef<
       prevHelper.parent?.remove(prevHelper);
       prevHelper.dispose();
       selectionHelperRef.current = null;
+    }
+    // C1 follow-up: rotate handle shares the outline's lifecycle — torn down
+    // on every selection change/rebuild alongside it, recreated below only
+    // if something's still selected.
+    const prevHandle = rotateHandleRef.current;
+    if (prevHandle) {
+      prevHandle.parent?.remove(prevHandle);
+      prevHandle.geometry.dispose();
+      (prevHandle.material as THREE.Material).dispose();
+      rotateHandleRef.current = null;
     }
     const built = builtRef.current;
     if (!built || !selectedItemId) return;
@@ -727,6 +860,31 @@ export const Viewport = forwardRef<
     // item that's already overlapping something shouldn't need a drag
     // before the flag shows up.
     updateCollisionHighlight(selectedItemId, group);
+
+    // C1 follow-up: rotate handle — a small sphere reusing SELECTION_COLOR
+    // (so it reads as part of the same selection affordance, not a new
+    // unrelated UI element), offset along the item's local +Z per
+    // positionRotateHandle. Not parented under the item's group: a
+    // translate-drag mutates group.position directly (see onPointerMove),
+    // and re-parenting/reading a child's world position every pointermove
+    // would need its own matrix-world update bookkeeping for no benefit over
+    // just recomputing the handle's world (x,z) from the group's own
+    // position/rotation, which animate() already does every frame. Same
+    // depth-test-disabled/late-renderOrder overlay treatment as the outline,
+    // for the same reason: a selection affordance should never be occluded
+    // by the furniture it's pointing at, and it doubles as this handle's own
+    // raycast target (onPointerDown checks it before anything else).
+    const item = itemsByIdRef.current.get(selectedItemId);
+    if (item) {
+      const handleGeo = new THREE.SphereGeometry(ROTATE_HANDLE_RADIUS_CM, 16, 16);
+      const handleMat = new THREE.MeshBasicMaterial({ color: SELECTION_COLOR, depthTest: false });
+      const handle = new THREE.Mesh(handleGeo, handleMat);
+      handle.renderOrder = 999;
+      handle.userData.isRotateHandle = true;
+      positionRotateHandle(handle, group, item);
+      built.scene.add(handle);
+      rotateHandleRef.current = handle;
+    }
   }, [selectedItemId, buildVersion]);
 
   return <div ref={containerRef} className="viewport" />;

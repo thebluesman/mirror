@@ -1,0 +1,54 @@
+import { describe, expect, it } from "vitest";
+import { rotateHandleWorldXZ, yawDegFromPointer } from "./rotateHandle";
+
+describe("yawDegFromPointer", () => {
+  it("returns 0 when the pointer is straight ahead on +Z (the handle's rest direction)", () => {
+    expect(yawDegFromPointer(0, 0, 0, 10)).toBeCloseTo(0, 5);
+  });
+
+  it("returns 90 when the pointer is on +X", () => {
+    expect(yawDegFromPointer(0, 0, 10, 0)).toBeCloseTo(90, 5);
+  });
+
+  it("returns 180 when the pointer is on -Z", () => {
+    expect(yawDegFromPointer(0, 0, 0, -10)).toBeCloseTo(180, 5);
+  });
+
+  it("returns 270 when the pointer is on -X", () => {
+    expect(yawDegFromPointer(0, 0, -10, 0)).toBeCloseTo(270, 5);
+  });
+
+  it("is independent of the pointer's distance from center — only direction matters", () => {
+    expect(yawDegFromPointer(0, 0, 1, 1)).toBeCloseTo(yawDegFromPointer(0, 0, 50, 50), 5);
+  });
+
+  it("is normalized to [0, 360) and works from a non-origin center", () => {
+    const yaw = yawDegFromPointer(100, 200, 100, 190); // pointer due -Z of center
+    expect(yaw).toBeCloseTo(180, 5);
+    expect(yaw).toBeGreaterThanOrEqual(0);
+    expect(yaw).toBeLessThan(360);
+  });
+});
+
+describe("rotateHandleWorldXZ", () => {
+  it("sits at +Z offset from center when yaw is 0", () => {
+    const [x, z] = rotateHandleWorldXZ(0, 0, 0, 40);
+    expect(x).toBeCloseTo(0, 5);
+    expect(z).toBeCloseTo(40, 5);
+  });
+
+  it("sits at +X offset from center when yaw is 90", () => {
+    const [x, z] = rotateHandleWorldXZ(0, 0, 90, 40);
+    expect(x).toBeCloseTo(40, 5);
+    expect(z).toBeCloseTo(0, 5);
+  });
+
+  it("round-trips through yawDegFromPointer for an arbitrary yaw/center/offset", () => {
+    const center: [number, number] = [37, -12];
+    const yawDeg = 217;
+    const offset = 55;
+    const [hx, hz] = rotateHandleWorldXZ(center[0], center[1], yawDeg, offset);
+    const recovered = yawDegFromPointer(center[0], center[1], hx, hz);
+    expect(recovered).toBeCloseTo(yawDeg, 5);
+  });
+});
