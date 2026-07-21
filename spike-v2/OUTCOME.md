@@ -405,6 +405,51 @@ the pre-fix code, passing after) for both a horizontal and a vertical
 wall's spurious cross-axis endpoint. `npx vitest run` (82 tests), `npx tsc
 -b`, `npm run build`, and `oxlint` all clean after the fix.
 
+## C1 — Checkpoint: Shyam drives the W-A branch, 2026-07-21
+
+Driven against `main` post-#10 (D1+D2+D3), against Shyam's own imported room
+data. Per-item results against the §2 bar:
+
+- **Move** — good.
+- **Rotate** — keyboard step works; no visible UI handle for rotate. Bar
+  technically clears ("handle *or* keyboard step"), but Shyam wants a
+  handle added — **new follow-up scoped below, not blocking this record.**
+- **Collision/overlap** — flags correctly. Surfaced a real question in the
+  process: no way to move an item vertically (Shyam wanted to lift a table
+  lamp clear of a bookshelf collision). This is not a bug — §9 explicitly
+  excludes it ("floor-plane placement + yaw rotation only; no vertical
+  stacking, no tilt, no physics engine") — **recorded as a new finding for
+  a future scope conversation, intentionally left as-is for now.**
+- **Snapping** — good.
+- **Replace** — good (re-import via existing flow, placement/scale/identity
+  preserved).
+- **Multi-layout** — good (save/switch/reload all work as intended).
+
+**Bookshelf — model defect, not an orientation bug.** Screenshot evidence:
+the cubby holes sit on the model's narrow end, not the wide end, and there's
+no backboard (cubbies are visible through the far side). Rotating in W-A
+cannot fix this — it's a bad Meshy generation, structurally wrong rather
+than misoriented. This lands squarely on why bookshelf is already in W-C's
+(D5) comparison slate — OUTCOME-3 flagged it as the weakest Meshy pass, "the
+most room to show a difference" against Hunyuan — so this finding is
+concrete evidence for that comparison, not a new problem to solve in W-A.
+Until D5 resolves it (or the asset is otherwise replaced), the bookshelf
+can't be placed correctly regardless of arrangement quality — noted as a
+known-bad-asset caveat on the verdict below, not counted against W-A itself.
+
+**Verdict: Go-with-constraints.** Core interactions (move, collision,
+snapping, replace, multi-layout) are decision-grade. Two named gaps keep it
+short of a clean go: (1) rotate has no UI handle (fix scoped immediately
+below), (2) no vertical placement axis (intentionally out of scope per §9,
+flagged for a possible future scope reopen, not fixed now). The bookshelf's
+bad geometry is a generation-quality issue outside W-A's remit, tracked via
+D5.
+
+**Follow-up spawned from C1: rotate UI handle.** A drag handle for rotating
+the selected item (alongside the existing keyboard step) — scoped and
+tracked as its own build pass on top of `main` post-#10; see the PR for
+implementation and evidence once it lands.
+
 ## D4/D5 — not started
 
 Blocked on Shyam's inputs (D4's rug photo; D5's FAL_KEY plus item/
