@@ -241,6 +241,23 @@ export function furnitureOverallDims(item: FurnitureItem): { w: number; d: numbe
   return { w: maxX - minX, d: maxZ - minZ, h };
 }
 
+// improvements-v2.2 §5: per-item color tint, extending the shell-surface
+// tint pattern (shellMaterials.ts's applyCalibrationToMaterial) to furniture.
+// MAT.furniture is shared across every untinted item's placeholder mesh(es)
+// (cheap, and the common case), so a tinted item needs its own clone rather
+// than mutating the shared instance in place — that would recolor every
+// other item using it. No "reset to base" step is needed the way
+// shellMaterials.ts has one: this clone is freshly made from MAT.furniture
+// on every buildScene() call, so there's no stale prior tint on it to undo
+// before multiplying the new one in (unlike the shell's long-lived,
+// repeatedly-recalibrated materials).
+function furnitureMaterialFor(item: FurnitureItem): THREE.MeshStandardMaterial {
+  if (!item.tintColor) return MAT.furniture;
+  const mat = MAT.furniture.clone();
+  mat.color.multiply(new THREE.Color(item.tintColor));
+  return mat;
+}
+
 // Elevation is already baked into a placement command's position[1] (see
 // e.g. table-lamp/tv-samsung-frame in seed/living-room.json) — don't add
 // item.elevationCm again here, or items with both end up floating 2x high.
@@ -249,9 +266,13 @@ export function furnitureOverallDims(item: FurnitureItem): { w: number; d: numbe
 // never end up permanently invisible just because its Meshy mesh failed to
 // decode from OPFS (code-review finding, Phase 4).
 export function addFurnitureBoxMeshes(group: THREE.Group, item: FurnitureItem): void {
+  // One material per item (not per part): a compound sofa's main+chaise
+  // sub-meshes are the same tinted item, so they share the one clone rather
+  // than each getting their own.
+  const material = furnitureMaterialFor(item);
   furnitureFootprint(item).forEach((part) => {
     const geo = new THREE.BoxGeometry(part.w, part.h, part.d);
-    const mesh = new THREE.Mesh(geo, MAT.furniture);
+    const mesh = new THREE.Mesh(geo, material);
     mesh.position.set(part.offsetX, part.h / 2, part.offsetZ);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
@@ -291,10 +312,15 @@ export function isBoxFurnitureItem(item: FurnitureItem): item is BoxFurnitureIte
 function addFlatTexturedFurnitureMesh(group: THREE.Group, item: BoxFurnitureItem): THREE.MeshStandardMaterial {
   const dims = flatTextureBoxDims(item.dimsCm);
   const topMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85 });
+  // The five non-top faces get the item's own (possibly tinted) furniture
+  // material — tint doesn't apply to the top face, which is the photo
+  // texture's material instead (a tint over a rug's actual pattern photo
+  // wouldn't read as a "color adjustment," it'd just discolor the photo).
+  const sideMaterial = furnitureMaterialFor(item);
   const geo = new THREE.BoxGeometry(dims.width, dims.height, dims.depth);
   // BoxGeometry's default material-group order is [+X, -X, +Y, -Y, +Z, -Z]
   // (right, left, top, bottom, front, back) — index 2 is the top face.
-  const materials = [MAT.furniture, MAT.furniture, topMaterial, MAT.furniture, MAT.furniture, MAT.furniture];
+  const materials = [sideMaterial, sideMaterial, topMaterial, sideMaterial, sideMaterial, sideMaterial];
   const mesh = new THREE.Mesh(geo, materials);
   mesh.position.set(0, dims.height / 2, 0);
   mesh.castShadow = true;

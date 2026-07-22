@@ -8,7 +8,7 @@ import { addFurnitureBoxMeshes, buildScene, furnitureOverallDims, type BuiltScen
 import { computeRoomBoundsCm, softClampCameraPosition, type RoomBoundsCm } from "../scene/cameraBounds";
 import { applyShellSurface, updateSurfaceCalibrationInPlace, type ShellSurface } from "../scene/shellMaterials";
 import { loadShellTexture } from "../scene/loadShellTexture";
-import { fitModelToDims, loadFurnitureModel } from "../scene/loadFurnitureModel";
+import { applyModelTint, fitModelToDims, loadFurnitureModel } from "../scene/loadFurnitureModel";
 import { computeFlatTextureFit, FULL_CONTENT_BOX, type ContentBox } from "../scene/flatItemTexture";
 import { checkCollisions, itemFootprintAABB, wallFootprintAABBs, type AABB } from "../scene/collision";
 import { snapPosition } from "../scene/snapping";
@@ -684,6 +684,10 @@ export const Viewport = forwardRef<
         .then((model) => {
           if (cancelled) return;
           fitModelToDims(model, furnitureOverallDims(item), item.modelRotationDeg);
+          // improvements-v2.2 §5: a real imported GLB is the common case for
+          // a placed item, not just the box placeholder — don't skip tinting
+          // it just because it has its own imported materials.
+          if (item.tintColor) applyModelTint(model, item.tintColor);
           group.add(model);
         })
         .catch((err) => {
