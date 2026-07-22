@@ -1,0 +1,40 @@
+<!doctype html><html><head><meta charset="utf-8"/><title>Phase 5 — shell-texture lever 1, before/after</title></head>
+<body style="background:#111;color:#eee;font-family:sans-serif;padding:24px;">
+<h1 style="font-size:20px;">Shell-texture lever 1 (PRD-v2 §7.5) — before/after, both standard views</h1>
+<p style="font-size:13px;color:#999;max-width:900px;">
+  <b>Before</b> = Shyam's own real surface photos (<code>spike/inputs/surfaces/*.JPG</code>) through the
+  unmodified pipeline at default calibration — the most honest, reproducible stand-in for the
+  acceptance-run's complained-about state (his actual tuned calibration only ever lived in his own
+  browser's IndexedDB/OPFS, never in this repo).
+  <b>After</b> = the lever-1 source textures (<code>src/scene/defaultShellTextures.ts</code> —
+  GitHub-raw substitutes for the PRD's named Poly Haven/ambientCG, see
+  <code>src/assets/shell-source-textures/README.md</code>), calibrated.
+  Bar (PRD-v2 §7.5): floor/wall/ceiling no longer read as obvious tiles. <b>Judged by Shyam</b>, not this
+  script — that's what these renders are for.
+</p>
+  <h2 style="font-size:16px;color:#aaa;">couch-view</h2>
+  <div style="display:flex;flex-wrap:wrap;">
+    <div style="margin:4px;"><div style="font-size:12px;color:#999;">before</div>
+      <img src="screenshots/before-couch-view.png" style="width:560px;border:1px solid #444;"/></div>
+    <div style="margin:4px;"><div style="font-size:12px;color:#999;">after</div>
+      <img src="screenshots/after-couch-view.png" style="width:560px;border:1px solid #444;"/></div>
+  </div>
+
+  <h2 style="font-size:16px;color:#aaa;">reverse-view</h2>
+  <div style="display:flex;flex-wrap:wrap;">
+    <div style="margin:4px;"><div style="font-size:12px;color:#999;">before</div>
+      <img src="screenshots/before-reverse-view.png" style="width:560px;border:1px solid #444;"/></div>
+    <div style="margin:4px;"><div style="font-size:12px;color:#999;">after</div>
+      <img src="screenshots/after-reverse-view.png" style="width:560px;border:1px solid #444;"/></div>
+  </div>
+
+  <h2 style="font-size:16px;color:#aaa;">reference photos (what "before"/"after" are judged against)</h2>
+  <div style="display:flex;flex-wrap:wrap;">
+    <div style="margin:4px;"><div style="font-size:12px;color:#999;">floor.JPG</div>
+      <img src="../../spike/inputs/surfaces/floor.JPG" style="width:360px;border:1px solid #444;"/></div>
+    <div style="margin:4px;"><div style="font-size:12px;color:#999;">wall.JPG</div>
+      <img src="../../spike/inputs/surfaces/wall.JPG" style="width:360px;border:1px solid #444;"/></div>
+    <div style="margin:4px;"><div style="font-size:12px;color:#999;">ceiling.JPG</div>
+      <img src="../../spike/inputs/surfaces/ceiling.JPG" style="width:360px;border:1px solid #444;"/></div>
+  </div>
+</body></html>

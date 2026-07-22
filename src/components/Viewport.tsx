@@ -10,6 +10,7 @@ import { computeFlatTextureFit, FULL_CONTENT_BOX, type ContentBox } from "../sce
 import { checkCollisions, itemFootprintAABB, wallFootprintAABBs, type AABB } from "../scene/collision";
 import { snapPosition } from "../scene/snapping";
 import { rotateHandleWorldXZ, snapYawDeg, yawDegFromPointer } from "../scene/rotateHandle";
+import { ELEVATION_STEP_CM, stepElevationCm } from "../scene/elevation";
 import {
   DEFAULT_SURFACE_CALIBRATION,
   type CameraPosition,
@@ -125,6 +126,20 @@ const MAX_POLAR_ANGLE = Math.PI - 0.1;
 // per v2-spike-plan.md §3), and still round-trips through the identical
 // commit-on-release path move uses.
 const ROTATE_STEP_DEG = 15;
+
+// v2 Phase 3 (PRD-v2 §7.8 / §11.1, decided 2026-07-22): elevation control,
+// same "keyboard step, commit-on-keypress" shape as rotate above — a minimal
+// control on the selected item, not free vertical dragging (no drag-plane,
+// no pointer gesture at all). PageUp/PageDown were picked over a `+`/`-` pair
+// because they read unambiguously as "up/down" rather than "more/less of
+// whatever's selected," and neither collides with anything onKeyDown already
+// binds (q/Q/[ and e/E/] for rotate, Escape for gesture-cancel) or with any
+// browser chrome shortcut worth worrying about in an already-focused canvas.
+// ELEVATION_STEP_CM (5) is the vertical analog of ROTATE_STEP_DEG (15) —
+// factored into src/scene/elevation.ts alongside the floor clamp so it's
+// unit-testable the same way rotateHandle.ts's snapYawDeg is.
+const ELEVATION_KEY_UP = "PageUp";
+const ELEVATION_KEY_DOWN = "PageDown";
 
 // C1 follow-up (see spike-v2/OUTCOME.md's "C1 follow-up — rotate UI handle"
 // section): Shyam's hands-on C1 pass cleared the plan's "handle *or*
@@ -610,8 +625,9 @@ export const Viewport = forwardRef<
 
     function onPointerDown(evt: PointerEvent) {
       if (evt.button !== 0) return;
-      // Give the viewport keyboard focus so its shortcuts (q/e, Escape) are
-      // focus-scoped to it — see onKeyDown's focus-ownership note.
+      // Give the viewport keyboard focus so its shortcuts (q/e, PageUp/
+      // PageDown, Escape) are focus-scoped to it — see onKeyDown's
+      // focus-ownership note.
       renderer.domElement.focus();
       setPointerNdcFromEvent(evt);
       raycaster.setFromCamera(pointerNdc, camera);
@@ -788,11 +804,18 @@ export const Viewport = forwardRef<
       const group = builtRef.current?.furnitureGroups.get(itemId);
       if (!group) return;
       let stepDeg = 0;
+      let elevationDir: 1 | -1 | 0 = 0;
       if (evt.key === "q" || evt.key === "Q" || evt.key === "[") stepDeg = -ROTATE_STEP_DEG;
       else if (evt.key === "e" || evt.key === "E" || evt.key === "]") stepDeg = ROTATE_STEP_DEG;
+      else if (evt.key === ELEVATION_KEY_UP) elevationDir = 1;
+      else if (evt.key === ELEVATION_KEY_DOWN) elevationDir = -1;
       else return;
       evt.preventDefault();
-      group.rotation.y += THREE.MathUtils.degToRad(stepDeg);
+      if (stepDeg !== 0) {
+        group.rotation.y += THREE.MathUtils.degToRad(stepDeg);
+      } else {
+        group.position.y = stepElevationCm(group.position.y, elevationDir, ELEVATION_STEP_CM);
+      }
       const rotationDeg = normalizeDeg(THREE.MathUtils.radToDeg(group.rotation.y));
       updateCollisionHighlight(itemId, group);
       onCommitPlacementRef.current?.(itemId, [group.position.x, group.position.y, group.position.z], rotationDeg);
