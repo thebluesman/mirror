@@ -12,7 +12,9 @@
 }
 
 .lighting-panel-title {
-  font: var(--text-feature-heading);
+  /* improvements-minor-fixes.md §7: bold variant, sidebar-panel-title only —
+     see tokens.css's --text-feature-heading-bold comment. */
+  font: var(--text-feature-heading-bold);
   color: var(--color-ink);
   margin: 0;
 }

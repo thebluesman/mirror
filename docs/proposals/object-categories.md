@@ -1,9 +1,11 @@
 # Proposal: object categories (`category` field) — improvements-v2.2 §7
 
-**Status:** approved for build — Shyam's call (2026-07-22, see
-`improvements-minor-fixes.md`'s "Proposal decisions"): build the `category`
-field as scoped here (schema-only, metadata, no behavior). §4(b)'s lamp
-point-lights this unblocks are still a separate, not-yet-scoped feature.
+**Status:** built (2026-07-22) — the `category` field landed in
+`src/schema/scene.ts` exactly as scoped here (optional `z.enum`, both
+furniture branches, no version bump, no rendering/behavior change), per
+Shyam's approval (see `improvements-minor-fixes.md`'s "Proposal decisions").
+§4(b)'s lamp point-lights this unblocks are still a separate, not-yet-scoped
+feature.
 **Date:** 2026-07-22
 **Scope frame:** metadata-only tag, no behavior. Unblocks §4(b) (lamp
 point-lights); commits to nothing else.

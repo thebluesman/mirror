@@ -76,7 +76,42 @@ substitutes preserving Cohere's extracted scale.
 - **elevation** — no shadows; depth communicated via flat white / bordered / dark-field /
   gradient-media, not box-shadow blur.
 
-## 6. Responsive
+## 6. Icon sizing
+
+Not part of the original Cohere extraction (`cohere/DESIGN.md` doesn't cover icons beyond
+noting Cohere uses custom icon fonts/illustrations — see its "Icons" line under Typography
+§Font Family) — this app's icons are `lucide-react`, so this is new ground, codified here
+per Shyam's 2026-07-22 request rather than adapted from the source system.
+
+Lucide icons are drawn on a 24×24 grid with a default 2px stroke: below ~16px the stroke
+reads thick relative to the glyph and corners round off, so 16px is treated as a practical
+legibility floor rather than scaling icons down to literally match text height. Two fixed
+sizes, chosen by context rather than a computed ratio (matching this app's flat spacing/
+radius scales — named steps, not a formula), landing on the low two rungs of the 16/20/24
+step scale common to comparable systems (Material, GitHub Primer) rather than a bespoke
+number:
+
+| Context | Size | Token | Used when |
+|---|---|---|---|
+| Inline with text | 16px | `--icon-size-inline` | Icon sits beside a text label inside the same control (e.g. a pill button with icon+word, like "Lock all" or "Snapshot") |
+| Standalone | 20px | `--icon-size-standalone` | Icon is the entire control, no adjacent label (icon-only buttons — rename, delete, close) |
+
+- **Inline (16px):** the smallest step that keeps the 2px stroke crisp while still reading
+  slightly larger than the cap-height of this app's 13–14px body/button text (§2) — the
+  usual optical-balance pairing for a line icon next to text, not literal em-matching.
+- **Standalone (20px):** icon-only buttons carry their entire meaning on the icon alone (no
+  word to lean on), so they need to read clearly at a glance and offer a fair click target —
+  this app's standalone icon buttons currently have near-zero button padding, so the icon is
+  most of the hit area. One step up the same scale.
+- **Composes with spacing, doesn't replace it:** the icon-to-text gap inside a pill button
+  uses the existing `--space-8` token, unchanged — this section only fixes the icon's own
+  size, not the layout around it.
+- Lucide's `size` prop takes a number (px), not a CSS custom property, so call sites pass
+  the literal `16`/`20` that mirrors `tokens.css`'s `--icon-size-inline`/
+  `--icon-size-standalone` — same by-hand sync convention `tokens.css`'s header already
+  documents for the rest of this file.
+
+## 7. Responsive
 
 | Breakpoint | Width | Behavior |
 |---|---|---|
@@ -86,7 +121,7 @@ substitutes preserving Cohere's extracted scale.
 | Desktop | 1024–1440px | full nav, 3-column grids |
 | Large desktop | 1440–2560px | wide containers, large vertical rhythm |
 
-## 7. Quick-reference palette (agent prompt guide)
+## 8. Quick-reference palette (agent prompt guide)
 
 `#17171c` primary · `#003c33` dark band · `#ffffff` canvas · `#eeece7` stone card ·
 `#ff7759` editorial/active · `#1863dc` link

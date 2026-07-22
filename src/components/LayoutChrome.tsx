@@ -8,6 +8,10 @@ import "./LayoutChrome.css";
 // pill pattern ViewportChrome (Phase 5) established for camera viewpoints —
 // reuses its CSS classes with a `--top` position override (`LayoutChrome.css`)
 // so the two chromes don't collide in the same bottom-center spot.
+//
+// Icon sizes follow DESIGN.md §6: these are standalone icon-only buttons
+// (rename/delete, no adjacent label), so 20 — mirrors tokens.css's
+// --icon-size-standalone.
 
 export function LayoutChrome({
   layouts,
@@ -108,7 +112,7 @@ export function LayoutChrome({
                 aria-label={`Rename layout "${layout.name}"`}
                 onClick={() => startRename(layout)}
               >
-                <Pencil size={12} aria-hidden="true" />
+                <Pencil size={20} aria-hidden="true" />
               </button>
               {/* Deleting the only remaining layout, or the one currently in
                *  view, would leave sceneFile.current pointing at nothing —
@@ -121,7 +125,7 @@ export function LayoutChrome({
                   aria-label={`Delete layout "${layout.name}"`}
                   onClick={() => onDelete(layout.id)}
                 >
-                  <X size={14} aria-hidden="true" />
+                  <X size={20} aria-hidden="true" />
                 </button>
               )}
             </div>
