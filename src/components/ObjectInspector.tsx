@@ -41,6 +41,14 @@ export function ObjectInspector({
   onEdit: (patch: ObjectEditPatch) => void;
   onClose: () => void;
 }) {
+  // Code-review fix: a compound-sofa's W/D are derived from its `main`/
+  // `chaise` sub-footprints (buildScene.ts's `furnitureFootprint`), which
+  // never reads `dimsCm.w`/`.d` — only `dimsCm.h` is ever honored for that
+  // shape. Editable W/D fields here would silently do nothing whenever the
+  // item is still rendered as the box placeholder (no `glbHash` yet, e.g.
+  // the seed's `applaryd-sofa`), so this shape only gets an editable H.
+  const dimsAxes = item.shape === "compound-sofa" ? (["h"] as const) : undefined;
+
   const [name, setName] = useState(item.name);
   const [dims, setDims] = useState<Dims>(furnitureOverallDims(item));
   const [rotation, setRotation] = useState<ModelRotation>(item.modelRotationDeg ?? ZERO_ROTATION);
@@ -80,7 +88,7 @@ export function ObjectInspector({
     // already surfaced inline by ObjectEditFields without needing this
     // panel to also block on it; it just skips committing until valid
     // again, same "gate the confirm, not the typing" shape ImportPanel uses.
-    if (!dimsAreValid(patch.dimsCm)) return;
+    if (!dimsAreValid(patch.dimsCm, dimsAxes)) return;
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
       timerRef.current = null;
@@ -116,6 +124,7 @@ export function ObjectInspector({
         onDimsChange={handleDimsChange}
         rotation={rotation}
         onRotationChange={handleRotationChange}
+        dimsAxes={dimsAxes}
       />
     </div>
   );

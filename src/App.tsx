@@ -309,6 +309,19 @@ function App() {
   // treatment of a compound-sofa's dimsCm as an explicit override (not just a
   // box-only field) — see furnitureOverallDims's read side for why that's
   // already the right thing to write.
+  //
+  // Code-review note: for a compound-sofa, ObjectInspector hides the W/D
+  // fields (they're not real for that shape — see its `dimsAxes` comment)
+  // but `patch.dimsCm` still carries whatever W/D `furnitureOverallDims`
+  // currently derives from `main`/`chaise`, unedited. Writing that through
+  // sets `dimsCm` explicitly for the first time on a sofa that never had
+  // one, which makes `furnitureOverallDims` start reading it as a frozen
+  // override instead of re-deriving from `main`/`chaise` on every call.
+  // Harmless today (nothing else in-app edits `main`/`chaise` after seeding,
+  // and every commit through this panel refreshes the freeze to whatever's
+  // currently derived) — but if `main`/`chaise` ever become independently
+  // editable, this would need to stop writing W/D for that shape rather
+  // than just hiding the fields.
   function handleEditItem(itemId: string, patch: ObjectEditPatch) {
     if (!sceneFile) return;
     commit({

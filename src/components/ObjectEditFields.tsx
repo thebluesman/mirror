@@ -21,11 +21,16 @@ export function isValidDim(n: number): boolean {
   return Number.isFinite(n) && n > 0;
 }
 
-/** True only when every axis of `dims` is a valid (finite, positive)
+const ALL_DIM_AXES = ["w", "d", "h"] as const;
+type DimAxis = (typeof ALL_DIM_AXES)[number];
+
+/** True when every *checked* axis of `dims` is a valid (finite, positive)
  *  number — the single check both mounting contexts use to gate their own
- *  "confirm"/"apply" affordance. */
-export function dimsAreValid(dims: Dims): boolean {
-  return isValidDim(dims.w) && isValidDim(dims.d) && isValidDim(dims.h);
+ *  "confirm"/"apply" affordance. Defaults to checking all three; a caller
+ *  hiding some axes (see `dimsAxes` below) should pass the same subset so an
+ *  axis the user can't even edit here can't block the commit. */
+export function dimsAreValid(dims: Dims, axes: readonly DimAxis[] = ALL_DIM_AXES): boolean {
+  return axes.every((axis) => isValidDim(dims[axis]));
 }
 
 export function ObjectEditFields({
@@ -35,6 +40,7 @@ export function ObjectEditFields({
   onRotationChange,
   name,
   onNameChange,
+  dimsAxes = ALL_DIM_AXES,
 }: {
   dims: Dims;
   onDimsChange: (dims: Dims) => void;
@@ -46,8 +52,16 @@ export function ObjectEditFields({
    *  ObjectInspector.tsx. */
   name?: string;
   onNameChange?: (name: string) => void;
+  /** Which dimension fields to render — defaults to all three (W/D/H).
+   *  Code-review fix (improvements-v2.2 §6): a compound-sofa's W/D come from
+   *  its `main`/`chaise` sub-footprints (see buildScene.ts's
+   *  `furnitureFootprint`), never from `dimsCm.w`/`.d` — showing editable W/D
+   *  fields for one would silently do nothing when it's still rendered as
+   *  the box placeholder (no `glbHash` yet). ObjectInspector passes `["h"]`
+   *  for that shape; every other caller keeps the default. */
+  dimsAxes?: readonly DimAxis[];
 }) {
-  const invalid = (["w", "d", "h"] as const).filter((axis) => !isValidDim(dims[axis]));
+  const invalid = dimsAxes.filter((axis) => !isValidDim(dims[axis]));
 
   return (
     <div className="object-edit-fields">
@@ -59,7 +73,7 @@ export function ObjectEditFields({
       )}
 
       <div className="object-edit-row">
-        {(["w", "d", "h"] as const).map((axis) => (
+        {dimsAxes.map((axis) => (
           <label key={axis} className="object-edit-field">
             <span>{axis.toUpperCase()}</span>
             <input
