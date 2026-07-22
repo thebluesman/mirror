@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { CameraPosition } from "../schema/scene";
-import { makeCameraPosition, renameCameraPosition } from "./cameraViewpoints";
+import {
+  deriveLiveCameraReading,
+  makeCameraPosition,
+  renameCameraPosition,
+  resolveStructuralBuildCameraPreset,
+} from "./cameraViewpoints";
+import { SYNTHETIC_LOOKAT_DISTANCE_CM } from "./walkCamera";
 
 describe("makeCameraPosition", () => {
   it("slugifies the name into an id and carries the reading through untouched", () => {
@@ -55,5 +61,77 @@ describe("renameCameraPosition", () => {
     const before = JSON.parse(JSON.stringify(cam));
     renameCameraPosition(cam, "Reading nook");
     expect(cam).toEqual(before);
+  });
+});
+
+// improvements-minor-fixes.md §15 regression coverage: a structural rebuild
+// (e.g. the SONDEROD rug's flat-texture upload — any furniture-item edit
+// goes through structuralSceneFile's `sceneFile.items` dep, not just
+// room/layout changes) used to unconditionally frame the fresh camera on
+// `cameras[0]`, discarding wherever the user had actually orbited to. The
+// seed's `cameras[0]` ("couch-view") is a coffee-table-occluded angle on the
+// rug (spike-v2/d4-rug-drive.mjs's header documents this), so every edit
+// silently kicked the live view back to an angle where the rug — and any
+// texture change on it — is barely visible, reading as "no visual change"
+// even though the texture itself applied correctly underneath. These two
+// functions are the pure decision/derivation Viewport.tsx's structural-build
+// effect now uses instead of the old unconditional `cameras[0]` read; see
+// that effect's cleanup (captures via deriveLiveCameraReading) and setup
+// (picks via resolveStructuralBuildCameraPreset) for the imperative wiring
+// this doesn't reach on its own (needs a live THREE camera/controls pair).
+describe("resolveStructuralBuildCameraPreset", () => {
+  const couchView: CameraPosition = {
+    id: "couch-view",
+    name: "couch-view",
+    eye: [660, 115, 640],
+    lookAt: [683, 120, 324],
+    fovDeg: 60,
+  };
+  const liveRestore: CameraPosition = {
+    id: "__live-camera-reading__",
+    name: "__live-camera-reading__",
+    eye: [683, 220, 620],
+    lookAt: [683, 0, 540],
+    fovDeg: 45,
+  };
+
+  it("prefers a stashed live restore over cameras[0] — the bug: it never used to", () => {
+    expect(resolveStructuralBuildCameraPreset(liveRestore, [couchView])).toBe(liveRestore);
+  });
+
+  it("falls back to cameras[0] only when there's no live restore yet (the very first build)", () => {
+    expect(resolveStructuralBuildCameraPreset(null, [couchView])).toBe(couchView);
+  });
+
+  it("returns null when there's neither a live restore nor any saved camera", () => {
+    expect(resolveStructuralBuildCameraPreset(null, [])).toBeNull();
+  });
+});
+
+describe("deriveLiveCameraReading", () => {
+  it("orbit mode: lookAt is the orbit target, untouched", () => {
+    const reading = deriveLiveCameraReading([683, 220, 620], 45, "orbit", [683, 0, 540], [0, -1, 0]);
+    expect(reading.eye).toEqual([683, 220, 620]);
+    expect(reading.lookAt).toEqual([683, 0, 540]);
+    expect(reading.fovDeg).toBe(45);
+  });
+
+  it("walk mode: lookAt is synthesized from eye + forward direction, ignoring orbitTarget", () => {
+    const eye: [number, number, number] = [100, 160, 200];
+    const forward: [number, number, number] = [1, 0, 0];
+    const reading = deriveLiveCameraReading(eye, 38, "walk", [999, 999, 999], forward);
+    expect(reading.lookAt).toEqual([
+      eye[0] + forward[0] * SYNTHETIC_LOOKAT_DISTANCE_CM,
+      eye[1] + forward[1] * SYNTHETIC_LOOKAT_DISTANCE_CM,
+      eye[2] + forward[2] * SYNTHETIC_LOOKAT_DISTANCE_CM,
+    ]);
+  });
+
+  it("copies eye/lookAt into fresh arrays, not references to the inputs", () => {
+    const eye: [number, number, number] = [1, 2, 3];
+    const target: [number, number, number] = [4, 5, 6];
+    const reading = deriveLiveCameraReading(eye, 50, "orbit", target, [0, 0, -1]);
+    expect(reading.eye).not.toBe(eye);
+    expect(reading.lookAt).not.toBe(target);
   });
 });

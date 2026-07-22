@@ -24,7 +24,6 @@ import { clampElevationCm, ELEVATION_STEP_CM, stepElevationCm } from "../scene/e
 import { normalizeXZ } from "../scene/minimapProjection";
 import {
   computeWalkStep,
-  deriveSyntheticLookAt,
   isWalkCollidableItem,
   resolveWalkCollision,
   SYNTHETIC_LOOKAT_DISTANCE_CM,
@@ -44,6 +43,7 @@ import {
   type SurfaceCalibration,
 } from "../schema/scene";
 import type { FurnitureItem, SceneFile } from "../scene/types";
+import { deriveLiveCameraReading, resolveStructuralBuildCameraPreset } from "../scene/cameraViewpoints";
 import { ObjectInspector, type ObjectEditPatch } from "./ObjectInspector";
 import { Minimap, type MinimapHandle } from "./Minimap";
 import "./Viewport.css";
@@ -511,6 +511,29 @@ export const Viewport = forwardRef<
   // that effect's focus-restore comment for why this matters now that "L"
   // can trigger a rebuild from a keyboard shortcut).
   const pendingRefocusRef = useRef(false);
+  // Bug fix (improvements-minor-fixes.md §15 investigation): a structural
+  // rebuild fires for ANY furniture-item edit (tint, flat-texture upload,
+  // lock toggle, ObjectInspector edits, ...) via structuralSceneFile's
+  // `sceneFile.items` dep — not just room/layout changes. The build below
+  // used to unconditionally frame the fresh camera on `cameras[0]`, even
+  // though the comment on structuralSceneFile's useMemo documents the
+  // intent as "only the initial mount reads cameras[0] as a starting
+  // position." Every non-initial rebuild silently snapped the live view
+  // back to the first saved viewpoint, discarding wherever the user had
+  // orbited to — e.g. the seed's `cameras[0]` ("couch-view") is a
+  // coffee-table-occluded angle on the SONDEROD rug (see spike-v2's D4
+  // drive script), so uploading a replacement rug photo while looking at
+  // the rug from a better angle would silently reset to a view where the
+  // rug — and any texture change on it — is barely visible, reading as "no
+  // visual change" even though the texture itself applied correctly.
+  // Captured in cleanup (mirrors getCurrentView()'s eye/lookAt/fov
+  // derivation, including the walk-mode synthetic-lookAt case) and
+  // consumed as the next build's starting preset instead of `cameras[0]` —
+  // paired with pendingReselectRef/pendingRefocusRef above, same
+  // stash-in-cleanup/restore-in-setup shape. Stays null until the first
+  // cleanup ever runs, so the very first mount still frames on `cameras[0]`
+  // exactly as before.
+  const pendingCameraRestoreRef = useRef<CameraPosition | null>(null);
   const selectionHelperRef = useRef<THREE.BoxHelper | null>(null);
   // §3: the rotate-drag handle — now a THREE.Group (footprint ring + grip
   // knob, was a bare sphere), lifecycle paired with selectionHelperRef
@@ -827,7 +850,12 @@ export const Viewport = forwardRef<
     scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 
     const camera = new THREE.PerspectiveCamera(HUMAN_FOV, 1, 5, 3000);
-    const preset = cameras[0];
+    // Bug fix (improvements-minor-fixes.md §15): prefer the previous build's
+    // live camera framing (stashed by this same effect's cleanup — see
+    // pendingCameraRestoreRef's declaration) over `cameras[0]`. `cameras[0]`
+    // is only ever the right starting position for the very first build,
+    // before any cleanup has run to stash a live framing to restore.
+    const preset = resolveStructuralBuildCameraPreset(pendingCameraRestoreRef.current, cameras);
     if (!preset) camera.position.set(0, 300, 600);
 
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -1714,6 +1742,26 @@ export const Viewport = forwardRef<
       // tears the canvas down — see pendingRefocusRef's declaration and the
       // setup-side comment for why this matters now.
       pendingRefocusRef.current = document.activeElement === renderer.domElement;
+      // Bug fix (improvements-minor-fixes.md §15): capture the live camera's
+      // framing before teardown, so the next build restores it instead of
+      // snapping back to `cameras[0]` — see pendingCameraRestoreRef's
+      // declaration. `deriveLiveCameraReading` is the same mode-aware
+      // eye/lookAt derivation ViewportHandle.getCurrentView() uses (including
+      // the walk-mode synthetic-lookAt case), but this reads this closure's
+      // own `camera`/`controls`/`walkControls` — the ones about to be
+      // disposed below — rather than the refs, which getCurrentView() reads
+      // and which this same cleanup nulls out further down.
+      {
+        const eye: [number, number, number] = [camera.position.x, camera.position.y, camera.position.z];
+        const forward = walkControls.getDirection(new THREE.Vector3());
+        pendingCameraRestoreRef.current = deriveLiveCameraReading(
+          eye,
+          camera.fov,
+          cameraModeRef.current,
+          [controls.target.x, controls.target.y, controls.target.z],
+          [forward.x, forward.y, forward.z],
+        );
+      }
       // Code-review finding: a structural rebuild can land mid-drag — e.g. an
       // unrelated background import completing changes `sceneFile.items`,
       // which this effect depends on (via `structuralSceneFile`) independent
@@ -1798,19 +1846,16 @@ export const Viewport = forwardRef<
         const controls = controlsRef.current;
         if (!camera || !controls) return null;
         const eye: [number, number, number] = [camera.position.x, camera.position.y, camera.position.z];
-        if (cameraModeRef.current === "walk" && walkControlsRef.current) {
-          const forward = walkControlsRef.current.getDirection(new THREE.Vector3());
-          return {
-            eye,
-            lookAt: deriveSyntheticLookAt(eye, [forward.x, forward.y, forward.z], SYNTHETIC_LOOKAT_DISTANCE_CM),
-            fovDeg: camera.fov,
-          };
-        }
-        return {
+        const mode = cameraModeRef.current === "walk" && walkControlsRef.current ? "walk" : "orbit";
+        const forward = walkControlsRef.current?.getDirection(new THREE.Vector3()) ?? new THREE.Vector3();
+        const reading = deriveLiveCameraReading(
           eye,
-          lookAt: [controls.target.x, controls.target.y, controls.target.z],
-          fovDeg: camera.fov,
-        };
+          camera.fov,
+          mode,
+          [controls.target.x, controls.target.y, controls.target.z],
+          [forward.x, forward.y, forward.z],
+        );
+        return { eye: reading.eye, lookAt: reading.lookAt, fovDeg: reading.fovDeg };
       },
       // improvements-v2.1 §5 (camera-viewpoint compatibility, other half):
       // every saved CameraPosition was captured as an orbit-style eye+target
