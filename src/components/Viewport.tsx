@@ -9,7 +9,7 @@ import { fitModelToDims, loadFurnitureModel } from "../scene/loadFurnitureModel"
 import { computeFlatTextureFit, FULL_CONTENT_BOX, type ContentBox } from "../scene/flatItemTexture";
 import { checkCollisions, itemFootprintAABB, wallFootprintAABBs, type AABB } from "../scene/collision";
 import { snapPosition } from "../scene/snapping";
-import { rotateHandleWorldXZ, yawDegFromPointer } from "../scene/rotateHandle";
+import { rotateHandleWorldXZ, snapYawDeg, yawDegFromPointer } from "../scene/rotateHandle";
 import {
   DEFAULT_SURFACE_CALIBRATION,
   type CameraPosition,
@@ -135,7 +135,21 @@ const ROTATE_STEP_DEG = 15;
 const ROTATE_HANDLE_MARGIN_CM = 25;
 const ROTATE_HANDLE_RADIUS_CM = 6;
 
+// Camera-relative grab-target sizing (PRD-v2 §7.1 polish): a fixed world-space
+// radius reads as a tiny dot when the camera is zoomed out and a boulder when
+// zoomed in. The handle mesh (and therefore its raycast hit target, which
+// scales with it) is instead sized by camera distance / this reference so it
+// holds a roughly constant on-screen size, clamped so it never vanishes or
+// dominates. ROTATE_HANDLE_RADIUS_CM is the authored size at the reference
+// distance.
+const ROTATE_HANDLE_REF_DISTANCE_CM = 500;
+const ROTATE_HANDLE_MIN_SCALE = 0.5;
+const ROTATE_HANDLE_MAX_SCALE = 4;
+
 const SELECTION_COLOR = 0x4fd1ff;
+// The rotate handle brightens to this while hovered, so it reads as a grabbable
+// affordance (paired with a `cursor: grab` on the canvas — see updateHover).
+const ROTATE_HANDLE_HOVER_COLOR = 0xd6f5ff;
 // D2: the selection outline recolors to this when the selected item's
 // footprint currently overlaps another item or a wall — the plan's
 // "decision support, not physics" bar means we flag, we don't block.
@@ -150,12 +164,26 @@ const COLLISION_COLOR = 0xff5c5c;
  *  outside this component's own drag code), and every animate() frame (so a
  *  live drag — translate or rotate — keeps the handle glued to the item
  *  without waiting for a React re-render). */
-function positionRotateHandle(handle: THREE.Mesh, group: THREE.Group, item: FurnitureItem) {
+function positionRotateHandle(
+  handle: THREE.Mesh,
+  group: THREE.Group,
+  item: FurnitureItem,
+  camera: THREE.PerspectiveCamera,
+) {
   const yawDeg = ((THREE.MathUtils.radToDeg(group.rotation.y) % 360) + 360) % 360;
   const dims = furnitureOverallDims(item);
   const offset = dims.d / 2 + ROTATE_HANDLE_MARGIN_CM;
   const [hx, hz] = rotateHandleWorldXZ(group.position.x, group.position.z, yawDeg, offset);
   handle.position.set(hx, group.position.y + dims.h / 2, hz);
+  // Camera-relative grab-target sizing — scale the handle so it holds a
+  // roughly constant on-screen size regardless of orbit distance/zoom.
+  const dist = camera.position.distanceTo(handle.position);
+  const scale = THREE.MathUtils.clamp(
+    dist / ROTATE_HANDLE_REF_DISTANCE_CM,
+    ROTATE_HANDLE_MIN_SCALE,
+    ROTATE_HANDLE_MAX_SCALE,
+  );
+  handle.scale.setScalar(scale);
 }
 
 export const Viewport = forwardRef<
@@ -462,15 +490,78 @@ export const Viewport = forwardRef<
     // `drag` above. Only one of `drag`/`rotateDrag` is ever set at a time
     // (onPointerDown picks one based on what the ray hit first).
     let rotateDrag: { itemId: string; group: THREE.Group } | null = null;
+    // Hot-loop cleanup (PRD-v2 §7.1): the canvas rect, cached once and reused
+    // by every pointermove — drag, rotate-drag, and idle hover alike — instead
+    // of forcing a layout read (getBoundingClientRect) on every single move.
+    // The canvas doesn't move under a captured pointer, and resize() below
+    // keeps this fresh on any actual size change (kept in sync unconditionally,
+    // not just mid-gesture, since hover needs it live just as much as drag).
+    let viewportRect: DOMRect = renderer.domElement.getBoundingClientRect();
+    // Pre-gesture transform, captured on pointerdown, so an interrupted gesture
+    // (browser-stolen pointercancel, or Escape) can revert to it rather than
+    // commit a partial mid-drag state (PRD-v2 §7.1: "explicit revert on
+    // pointer-cancel").
+    let gestureStart: { position: THREE.Vector3; rotationY: number } | null = null;
 
     function normalizeDeg(deg: number): number {
       return ((deg % 360) + 360) % 360;
     }
 
     function setPointerNdcFromEvent(evt: PointerEvent) {
-      const rect = renderer.domElement.getBoundingClientRect();
-      pointerNdc.x = ((evt.clientX - rect.left) / rect.width) * 2 - 1;
-      pointerNdc.y = -((evt.clientY - rect.top) / rect.height) * 2 + 1;
+      pointerNdc.x = ((evt.clientX - viewportRect.left) / viewportRect.width) * 2 - 1;
+      pointerNdc.y = -((evt.clientY - viewportRect.top) / viewportRect.height) * 2 + 1;
+    }
+
+    // Shared teardown for the end of any gesture (commit or revert): drop the
+    // pre-gesture snapshot, hand the pointer back to the orbit camera, and
+    // reset the cursor. The next hover move recomputes the cursor.
+    function endGesture() {
+      gestureStart = null;
+      controls.enabled = true;
+      renderer.domElement.style.cursor = "";
+    }
+
+    // Reverts an in-progress gesture to the transform captured at pointerdown
+    // and drops it WITHOUT committing — the explicit cancel path for a
+    // browser-stolen gesture or an Escape press.
+    function revertGesture() {
+      const active = drag ?? rotateDrag;
+      if (active && gestureStart) {
+        active.group.position.copy(gestureStart.position);
+        active.group.rotation.y = gestureStart.rotationY;
+        updateCollisionHighlight(active.itemId, active.group);
+      }
+      drag = null;
+      rotateDrag = null;
+      endGesture();
+    }
+
+    // Rotate handle brightens while hovered — its own material, so this never
+    // touches the shared furniture material.
+    function setHandleHovered(hovered: boolean) {
+      const handleMesh = rotateHandleRef.current;
+      if (!handleMesh) return;
+      (handleMesh.material as THREE.MeshBasicMaterial).color.set(hovered ? ROTATE_HANDLE_HOVER_COLOR : SELECTION_COLOR);
+    }
+
+    // Idle-hover affordances (not during a drag): `cursor: grab` over the
+    // rotate handle or a selectable item, and the handle's hover highlight.
+    // O(items) per move, same order as the drag-path collision recompute the
+    // plan accepts at ~13 items.
+    function updateHover(evt: PointerEvent) {
+      const dom = renderer.domElement;
+      setPointerNdcFromEvent(evt);
+      raycaster.setFromCamera(pointerNdc, camera);
+      const handleMesh = rotateHandleRef.current;
+      const overHandle = handleMesh ? raycaster.intersectObject(handleMesh, false).length > 0 : false;
+      setHandleHovered(overHandle);
+      if (overHandle) {
+        dom.style.cursor = "grab";
+        return;
+      }
+      const hit = raycaster.intersectObjects(scene.children, true)[0];
+      const overItem = hit ? findItemGroup(hit.object) !== null : false;
+      dom.style.cursor = overItem ? "grab" : "";
     }
 
     // Walks up from a raycast hit to the placed item's THREE.Group — every
@@ -498,7 +589,7 @@ export const Viewport = forwardRef<
         normalizeDeg(THREE.MathUtils.radToDeg(group.rotation.y)),
       );
       drag = null;
-      controls.enabled = true;
+      endGesture();
     }
 
     // C1 follow-up: same commit shape as commitDrag (final position/rotation
@@ -514,11 +605,14 @@ export const Viewport = forwardRef<
         normalizeDeg(THREE.MathUtils.radToDeg(group.rotation.y)),
       );
       rotateDrag = null;
-      controls.enabled = true;
+      endGesture();
     }
 
     function onPointerDown(evt: PointerEvent) {
       if (evt.button !== 0) return;
+      // Give the viewport keyboard focus so its shortcuts (q/e, Escape) are
+      // focus-scoped to it — see onKeyDown's focus-ownership note.
+      renderer.domElement.focus();
       setPointerNdcFromEvent(evt);
       raycaster.setFromCamera(pointerNdc, camera);
 
@@ -537,7 +631,9 @@ export const Viewport = forwardRef<
           if (itemId && group) {
             dragPlane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 1, 0), group.position);
             rotateDrag = { itemId, group };
+            gestureStart = { position: group.position.clone(), rotationY: group.rotation.y };
             controls.enabled = false; // gesture owns the pointer, not the orbit camera
+            renderer.domElement.style.cursor = "grabbing";
             renderer.domElement.setPointerCapture(evt.pointerId);
             return;
           }
@@ -561,7 +657,9 @@ export const Viewport = forwardRef<
       if (!raycaster.ray.intersectPlane(dragPlane, planeHit)) return;
       grabOffset.set(hitGroup.position.x - planeHit.x, 0, hitGroup.position.z - planeHit.z);
       drag = { itemId: hitGroup.userData.itemId as string, group: hitGroup };
+      gestureStart = { position: hitGroup.position.clone(), rotationY: hitGroup.rotation.y };
       controls.enabled = false; // gesture owns the pointer, not the orbit camera
+      renderer.domElement.style.cursor = "grabbing";
       renderer.domElement.setPointerCapture(evt.pointerId);
     }
 
@@ -576,12 +674,19 @@ export const Viewport = forwardRef<
         raycaster.setFromCamera(pointerNdc, camera);
         if (!raycaster.ray.intersectPlane(dragPlane, planeHit)) return; // camera edge case: ray parallel to the plane
         const { group, itemId } = rotateDrag;
-        const yawDeg = yawDegFromPointer(group.position.x, group.position.z, planeHit.x, planeHit.z);
+        let yawDeg = yawDegFromPointer(group.position.x, group.position.z, planeHit.x, planeHit.z);
+        // PRD-v2 §11.4 (decided): handle-drag snaps to the same 15deg steps as
+        // the q/e keyboard shortcut by default; Shift held frees it to
+        // continuous rotation, mirroring translate-snapping's Shift escape.
+        if (!evt.shiftKey) yawDeg = snapYawDeg(yawDeg, ROTATE_STEP_DEG);
         group.rotation.y = THREE.MathUtils.degToRad(yawDeg);
         updateCollisionHighlight(itemId, group);
         return;
       }
-      if (!drag) return;
+      if (!drag) {
+        updateHover(evt);
+        return;
+      }
       setPointerNdcFromEvent(evt);
       raycaster.setFromCamera(pointerNdc, camera);
       if (!raycaster.ray.intersectPlane(dragPlane, planeHit)) return; // camera edge case: ray parallel to the plane
@@ -640,18 +745,26 @@ export const Viewport = forwardRef<
       commitDrag();
     }
 
-    // Rough edge (spike, recorded for C1): a pointercancel (e.g. the browser
-    // stealing the gesture) commits wherever the item currently sits rather
-    // than reverting to its pre-drag position. Acceptable for a prototype —
-    // a real build would want an explicit revert-on-cancel path.
+    // PRD-v2 §7.1: an involuntarily-interrupted gesture (the browser stealing
+    // the pointer — a touch canceled, the element losing capture) reverts to
+    // the pre-gesture transform rather than committing wherever the item
+    // happened to be mid-drag. This is the explicit revert-on-cancel path the
+    // spike flagged as a rough edge; a normal pointerup still commits.
     function onPointerCancel(evt: PointerEvent) {
-      onPointerUp(evt);
+      if (renderer.domElement.hasPointerCapture(evt.pointerId)) {
+        renderer.domElement.releasePointerCapture(evt.pointerId);
+      }
+      revertGesture();
     }
 
-    // Keyboard rotate step (see ROTATE_STEP_DEG's tradeoff comment above).
-    // Window-level so focus doesn't have to be on the canvas — but that
-    // means it has to get out of the way of ordinary typing in the Shell/
-    // Import/Settings panel's own inputs.
+    // Keyboard-focus ownership model (PRD-v2 §7.1): viewport shortcuts fire
+    // only when the viewport owns focus, not globally on the document. The
+    // listener lives on the canvas (which is made focusable via tabIndex, and
+    // focused on pointerdown) rather than on `window`, so typing in the Shell/
+    // Import/Settings panel inputs can't reach it — the previous window-level
+    // handler had to special-case INPUT/TEXTAREA/SELECT to stay out of the way;
+    // scoping focus to the canvas makes that ownership explicit instead of a
+    // tag denylist.
     function onKeyDown(evt: KeyboardEvent) {
       // Code-review finding: without this, OS keyboard auto-repeat on a held
       // rotate key fired a full commit + immediate IndexedDB write on every
@@ -660,8 +773,16 @@ export const Viewport = forwardRef<
       // meant to have. Auto-repeat keydowns set `evt.repeat`; ignoring them
       // makes a held key a no-op past the first step rather than a flood.
       if (evt.repeat) return;
-      const active = document.activeElement;
-      if (active && ["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName)) return;
+      // Escape cancels an in-progress gesture (explicit revert), matching
+      // pointercancel — handled before the selection/rotate logic so it works
+      // whether or not an item is "still" selected mid-drag.
+      if (evt.key === "Escape") {
+        if (drag || rotateDrag) {
+          evt.preventDefault();
+          revertGesture();
+        }
+        return;
+      }
       const itemId = selectedItemIdRef.current;
       if (!itemId) return;
       const group = builtRef.current?.furnitureGroups.get(itemId);
@@ -677,11 +798,16 @@ export const Viewport = forwardRef<
       onCommitPlacementRef.current?.(itemId, [group.position.x, group.position.y, group.position.z], rotationDeg);
     }
 
+    // Keyboard-focus ownership (see onKeyDown): make the canvas focusable and
+    // suppress the focus ring (it's a viewport, not a form control), so its
+    // shortcuts are scoped to it rather than living on `window`.
+    renderer.domElement.tabIndex = 0;
+    renderer.domElement.style.outline = "none";
     renderer.domElement.addEventListener("pointerdown", onPointerDown);
     renderer.domElement.addEventListener("pointermove", onPointerMove);
     renderer.domElement.addEventListener("pointerup", onPointerUp);
     renderer.domElement.addEventListener("pointercancel", onPointerCancel);
-    window.addEventListener("keydown", onKeyDown);
+    renderer.domElement.addEventListener("keydown", onKeyDown);
 
     function resize() {
       if (!container) return;
@@ -689,6 +815,8 @@ export const Viewport = forwardRef<
       renderer.setSize(w, h, false);
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
+      // Keep the cached rect fresh on any real size change, gesture or not.
+      viewportRect = renderer.domElement.getBoundingClientRect();
     }
     resize();
     const resizeObserver = new ResizeObserver(resize);
@@ -713,7 +841,7 @@ export const Viewport = forwardRef<
       if (handle && selId) {
         const group = built.furnitureGroups.get(selId);
         const item = itemsByIdRef.current.get(selId);
-        if (group && item) positionRotateHandle(handle, group, item);
+        if (group && item) positionRotateHandle(handle, group, item, camera);
       }
       renderer.render(scene, camera);
     }
@@ -740,7 +868,7 @@ export const Viewport = forwardRef<
       renderer.domElement.removeEventListener("pointermove", onPointerMove);
       renderer.domElement.removeEventListener("pointerup", onPointerUp);
       renderer.domElement.removeEventListener("pointercancel", onPointerCancel);
-      window.removeEventListener("keydown", onKeyDown);
+      renderer.domElement.removeEventListener("keydown", onKeyDown);
       controls.dispose();
       renderer.dispose();
       container.removeChild(renderer.domElement);
@@ -890,7 +1018,27 @@ export const Viewport = forwardRef<
     const layout = sceneFile.layouts.find((l) => l.id === sceneFile.current);
     layout?.commands.forEach((cmd) => {
       const group = built.furnitureGroups.get(cmd.itemId);
-      if (!group) return; // item not in this build (e.g. mid-rebuild) — the next structural build will place it correctly
+      if (!group) {
+        // A command with no built group. When import was the only
+        // layout-mutating path this was assumed transient ("the next
+        // structural build will place it") — but that's only true while the
+        // item still exists in `items`: buildScene builds a group for every
+        // command whose item is present, so a group missing *here* means the
+        // command is orphaned — it references an item no longer in
+        // `sceneFile.items`. No path deletes items today, but now that
+        // layout-mutating paths exist beyond import (a future undo,
+        // programmatic edits — the paths this reconciliation effect also
+        // serves), one could produce an orphan; a rebuild would never place
+        // it, so surface it in dev rather than skipping silently. An item
+        // that IS present but not yet grouped is the benign mid-rebuild race
+        // and stays quiet.
+        if (import.meta.env.DEV && !itemsByIdRef.current.has(cmd.itemId)) {
+          console.warn(
+            `[Viewport] layout command references unknown item "${cmd.itemId}" — orphaned placement, skipping`,
+          );
+        }
+        return;
+      }
       group.position.set(cmd.position[0], cmd.position[1], cmd.position[2]);
       group.rotation.y = THREE.MathUtils.degToRad(cmd.rotationDeg);
     });
@@ -913,7 +1061,8 @@ export const Viewport = forwardRef<
     if (handle && selectedItemIdRef.current) {
       const group = built.furnitureGroups.get(selectedItemIdRef.current);
       const item = itemsByIdRef.current.get(selectedItemIdRef.current);
-      if (group && item) positionRotateHandle(handle, group, item);
+      const cam = cameraRef.current;
+      if (group && item && cam) positionRotateHandle(handle, group, item, cam);
     }
   }, [sceneFile.layouts, sceneFile.current, buildVersion]);
 
@@ -989,7 +1138,8 @@ export const Viewport = forwardRef<
       const handle = new THREE.Mesh(handleGeo, handleMat);
       handle.renderOrder = 999;
       handle.userData.isRotateHandle = true;
-      positionRotateHandle(handle, group, item);
+      const cam = cameraRef.current;
+      if (cam) positionRotateHandle(handle, group, item, cam);
       built.scene.add(handle);
       rotateHandleRef.current = handle;
     }

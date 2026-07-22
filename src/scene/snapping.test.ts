@@ -96,4 +96,24 @@ describe("snapPosition", () => {
     expect(result.snappedZ).toBe(false);
     expect(result.position[2]).toBe(53);
   });
+
+  it("snaps an item already inside a wall's thickness band to the near face, not the far one", () => {
+    // West wall at x=0 -> AABB x:[-5,5]; the room is on the +X (east) side, so
+    // the inner/near face the item should abut is x=5. An item mostly in the
+    // room whose west edge has poked into the band (minX=-1, still within
+    // [-5,5]) is nearer the far face x=-5 (|delta| 4 to align its west edge
+    // there) than the near face x=5 (|delta| 6). The old all-candidates snap
+    // picked that closer far-face alignment and shoved the item deeper through
+    // the wall; the fix must snap it +6 to the inner face instead.
+    const room: Pick<Room, "walls"> = { walls: [{ name: "west", from: [0, 0], to: [0, 400] }] };
+    const walls = wallFootprintAABBs(room);
+    const item = box("a", 20, 60); // width 20
+    const position: [number, number, number] = [9, 0, 100]; // center 9 -> minX=-1, maxX=19
+    const aabb = itemFootprintAABB(item, position, 0);
+    const result = snapPosition(aabb, position, walls, [], SNAP_THRESHOLD_CM);
+    expect(result.snappedX).toBe(true);
+    expect(result.position[0]).toBeGreaterThan(9); // pushed east (out of the wall), not west
+    const snappedAABB = itemFootprintAABB(item, result.position, 0);
+    expect(snappedAABB.minX).toBeCloseTo(5, 5); // flush against the wall's inner face
+  });
 });

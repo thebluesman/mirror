@@ -1,9 +1,24 @@
 import { describe, expect, it } from "vitest";
 import seedRaw from "../../seed/living-room.json";
-import { parseScene } from "../schema/scene";
+import { parseScene, type SceneFile } from "../schema/scene";
 import { applyFurnitureImport } from "./applyImport";
 
 const seedScene = parseScene(seedRaw);
+
+// A scene with a second, non-default layout snapshot made active — the case
+// applyFurnitureImport's default-placement path was previously untested
+// against (it only ever checked/wrote `scene.current`, which the seed's
+// single layout made indistinguishable from "the default one").
+function withActiveNonDefaultLayout(): SceneFile {
+  const base = seedScene.layouts[0];
+  const layoutB = {
+    id: "layout-b",
+    name: "Layout B",
+    base: base.id,
+    commands: base.commands.map((c) => ({ ...c })),
+  };
+  return { ...seedScene, layouts: [base, layoutB], current: "layout-b" };
+}
 
 describe("applyFurnitureImport", () => {
   it("attaches hashes/dims to an existing item and keeps its Figma-seeded placement", () => {
@@ -79,6 +94,45 @@ describe("applyFurnitureImport", () => {
       glbHash: "glb-hash-2",
     });
     expect(reimported.items.find((i) => i.id === "swivel-chair")?.modelRotationDeg).toBeUndefined();
+  });
+
+  it("places a genuinely new item in the active non-default layout, leaving other layouts untouched", () => {
+    const scene = withActiveNonDefaultLayout();
+    const next = applyFurnitureImport(scene, {
+      itemId: "reading-chair",
+      newItemName: "Reading chair",
+      dimsCm: { w: 70, d: 70, h: 90 },
+      sourcePhotoHash: "photo-hash-2",
+      glbHash: "glb-hash-2",
+    });
+
+    // the command lands in the active layout (layout-b), NOT the default one
+    const active = next.layouts.find((l) => l.id === "layout-b")!;
+    const activeCmd = active.commands.find((c) => c.itemId === "reading-chair");
+    expect(activeCmd).toEqual({ type: "place", itemId: "reading-chair", position: [0, 0, 0], rotationDeg: 0 });
+
+    const other = next.layouts.find((l) => l.id === seedScene.layouts[0].id)!;
+    expect(other.commands.some((c) => c.itemId === "reading-chair")).toBe(false);
+    expect(other.commands).toEqual(seedScene.layouts[0].commands);
+  });
+
+  it("keeps an existing item's placement when re-imported while a non-default layout is active", () => {
+    const scene = withActiveNonDefaultLayout();
+    const before = scene.layouts.find((l) => l.id === "layout-b")!.commands.find((c) => c.itemId === "swivel-chair")!;
+
+    const next = applyFurnitureImport(scene, {
+      itemId: "swivel-chair",
+      dimsCm: { w: 100, d: 91, h: 73 },
+      sourcePhotoHash: "photo-hash",
+      glbHash: "glb-hash",
+    });
+
+    const active = next.layouts.find((l) => l.id === "layout-b")!;
+    const cmds = active.commands.filter((c) => c.itemId === "swivel-chair");
+    expect(cmds).toHaveLength(1); // no duplicate command added
+    expect(cmds[0].position).toEqual(before.position); // placement preserved
+    // the item's asset hashes were still updated on the item itself
+    expect(next.items.find((i) => i.id === "swivel-chair")?.glbHash).toBe("glb-hash");
   });
 
   it("does not mutate the input scene", () => {
