@@ -36,6 +36,26 @@ const ModelRotation = z.object({ x: z.number(), y: z.number(), z: z.number() }).
 // discriminant Phase 3 rendering hooks into; Phase 2 only owns the type.
 export const OpeningType = z.enum(["door", "glass-door", "window"]);
 
+// improvements-v2.2 §7 (docs/proposals/object-categories.md): a semantic
+// category tag. Metadata ONLY — no rules engine, no per-category rendering/
+// behavior. Its one job is to let a future feature (§4b lamp point-lights)
+// filter items by kind: `items.filter(i => i.category === "lamp")`. Distinct
+// from `shape` below, which is a geometry/rendering discriminant, not a
+// semantic kind. Eight values, deliberately small — the minimum set that
+// covers the real room and makes the §4(b) "is this a light" question
+// answerable; add a value only when a real item or real feature needs it.
+export const FurnitureCategory = z.enum([
+  "seating", // sofa, armchair, swivel chair, stool, bench
+  "table", // dining, coffee, side, console
+  "storage", // shelving, cabinet, media unit, shoe rack, dresser
+  "lamp", // floor lamp, table lamp — the light-EMITTING fixtures §4b consumes
+  "rug", // flat floor covering
+  "appliance", // powered devices — water cooler, TV, fan
+  "decor", // art, plants, vases, cushions, mirrors (near-future; no current item)
+  "other", // deliberately-tagged "none of the above" (see the field comment below)
+]);
+export type FurnitureCategory = z.infer<typeof FurnitureCategory>;
+
 // Minimum gap enforced between an opening's sill and head when both are
 // given. Without this, buildScene.ts's leafTop = max(sill, head - 2) can
 // collapse to exactly `sill`, silently dropping the door leaf (code review
@@ -223,6 +243,18 @@ const BoxFurniture = z
     // `locked` just above: so z.infer types it directly instead of leaving
     // it reachable only through `.loose()`'s any-typed passthrough.
     tintColor: z.string().optional(),
+    // improvements-v2.2 §7 (docs/proposals/object-categories.md): a semantic
+    // category tag. Optional + no default so every existing seed/saved file
+    // validates unchanged (field absent → undefined → "uncategorized"), same
+    // backward-compat reasoning as `locked`/`tintColor` above. Declared on
+    // both union branches explicitly (not via `.loose()`) so `z.infer` types
+    // it on FurnitureItem instead of leaving it reachable only through an
+    // untyped loose access — the `locked` precedent. `undefined` means
+    // "never categorized"; the `"other"` enum member is a deliberate "none
+    // of the above" choice — the two are not the same and a schema
+    // `.default()` would collapse that distinction on load, so there isn't
+    // one here.
+    category: FurnitureCategory.optional(),
   })
   .loose();
 
@@ -245,6 +277,8 @@ const CompoundSofaFurniture = z
     locked: z.boolean().optional(),
     // See BoxFurniture's `tintColor` comment — same field, same rationale.
     tintColor: z.string().optional(),
+    // See BoxFurniture's `category` comment — same field, same rationale.
+    category: FurnitureCategory.optional(),
   })
   .loose();
 
