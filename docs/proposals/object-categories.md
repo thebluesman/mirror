@@ -1,6 +1,9 @@
 # Proposal: object categories (`category` field) — improvements-v2.2 §7
 
-**Status:** proposal (research-and-propose per §7 + the doc's sequencing note)
+**Status:** approved for build — Shyam's call (2026-07-22, see
+`improvements-minor-fixes.md`'s "Proposal decisions"): build the `category`
+field as scoped here (schema-only, metadata, no behavior). §4(b)'s lamp
+point-lights this unblocks are still a separate, not-yet-scoped feature.
 **Date:** 2026-07-22
 **Scope frame:** metadata-only tag, no behavior. Unblocks §4(b) (lamp
 point-lights); commits to nothing else.

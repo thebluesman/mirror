@@ -1,7 +1,11 @@
 # Proposal: multi-joint / multi-configuration objects
 
-**Status:** proposal (research-and-propose per `improvements-v2.2.md` §3 — not
-spec'd-for-build)
+**Status:** deferred — Shyam's call (2026-07-22, see
+`improvements-minor-fixes.md`'s "Proposal decisions"): a real object in the
+room *could* use this, but not worth the build cost described here right now.
+No schema work started. Kept as reference to revisit once a concrete object
+justifies it — re-read this document then rather than re-deriving the
+constraint/schema/UI reasoning from scratch.
 **Date:** 2026-07-22
 **Scope resolved upstream:** discrete named pivots per object, fixed set of
 allowed rotation states (snap, not free rigging). This document brings back a

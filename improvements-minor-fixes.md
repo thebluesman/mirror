@@ -106,3 +106,272 @@ separate fix. §5 and §3's cheatsheet both need a short research/proposal
 pass before implementation, same treatment as v2.1 §3 and v2.2 §3/§7. §6 is
 blocked on Shyam providing the file, not on realladygrey. §4, §7 are
 otherwise independent and small.
+
+---
+
+## v2.2 feedback — first-pass notes on PR #26
+
+Numbering restarts per-PR, same convention as the v2.1 section above (these
+map to `improvements-v2.2.md`'s own §2/§4a/§5/§6/§8, not to each other).
+
+### 8. Soft rubber-band camera containment (§2) — fine as-is
+
+No changes requested. Ships as built.
+
+### 9. Location-based sun/lighting (extends §4a) — RESOLVED, scope set
+
+Sun intensity/azimuth/elevation are manual sliders today
+(`LightingPanel.tsx`, `schema/scene.ts`'s `LightingSchema`). Shyam wants to
+explore driving them from a **real location + time of day** instead, tying
+into lighting work he has planned beyond this repo (not detailed further
+here).
+
+**Decisions from Shyam (2026-07-22):**
+- **Coexists as a toggle** — manual sliders and location-driven mode are
+  both available, not a replacement of one by the other.
+- **Input is raw lat/long, not a free-text place name** — no geocoding
+  needed (fine, since CLAUDE.md's standing decisions keep this repo's only
+  network call as the fal.ai import). Also needs **room/apartment
+  orientation** as a separate input alongside lat/long — the room's local
+  X/Z axes aren't compass-aligned, so a solar azimuth computed from
+  lat/long/time needs the room's own facing to map onto scene coordinates.
+- **Keep the input UI basic for v1** — plain fields are fine, polish comes
+  later. Use `cohere/DESIGN.md` as the styling reference (same as every
+  other form control in this app), not a bespoke input design.
+
+**Still research-and-propose, not a straight build** — same treatment as
+v2.2 §3/§7 got. What's still open for realladygrey to scope:
+- A solar-position formula (azimuth/elevation from lat/long/date/time) is a
+  well-known calculation (NOAA's algorithm, or a small library) — survey
+  options before hand-rolling the math.
+- Time-of-day slider: one value (hour) or hour+date (seasonal sun angle
+  varies)? Simplest useful version is probably hour-only against a fixed
+  date — flag this as an open call in the proposal rather than deciding it
+  unilaterally.
+- What the lat/long + orientation input actually looks like — this is the
+  part Shyam explicitly wants researched/designed, not just wired up:
+  propose a concrete basic-but-usable form layout (e.g. two number fields +
+  a compass-direction picker for orientation), styled per `cohere/DESIGN.md`.
+- Schema shape: likely a new `room`-level field (lat/long + orientation
+  degrees), separate from `LightingSchema`'s existing manual fields, plus
+  whatever toggle/mode field selects manual vs. location-driven.
+
+### 10. Per-object tint — add blend modes (extends §5) — RESOLVED, scope set
+
+The multiplicative tint (`buildScene.ts`'s `furnitureMaterialFor`) works and
+is "quite cool" — Shyam wants additional blend modes beyond multiply (e.g.
+overlay/screen/etc., the general photo-editing sense) as an option per item,
+not a replacement for multiply.
+
+**Decision:** realladygrey surveys and proposes a shortlist herself — Shyam
+has no specific modes in mind, just multiply-only feeling limited.
+
+Scope for that survey: which blend modes actually make sense over a
+`MeshStandardMaterial`'s flat base color (some photo-editing blend modes
+don't have a clean single-color equivalent — they assume a full image, not
+a flat tint, so the shortlist should explicitly note which common modes
+were excluded and why), and whether this needs a per-item `tintBlendMode`
+schema field (`z.enum`, same optional/no-version-bump shape as `tintColor`)
+with a `<select>` next to the existing color picker in `ImportPanel.tsx`'s
+`TintRow`.
+
+### 11. Docked object editor — reposition near the object (extends §6) — RESOLVED, scope set
+
+`ObjectInspector` is currently fixed bottom-left
+(`ObjectInspector.css`'s `.object-inspector`, `position: absolute; left:
+var(--space-24); bottom: var(--space-24)`). Shyam wants it positioned
+relative to the selected object instead — above/below/beside it in
+viewport-space — so the editor visually anchors to what it's editing
+rather than sitting in a fixed HUD corner.
+
+**Decision: clamp on-screen.** When the object goes off-screen or near a
+viewport edge, the editor clamps back into the visible viewport rather than
+hiding/fading — it should always stay reachable while the item is selected.
+
+Still needs the object's *screen-space* position (project the item's world
+position through the camera each frame, `THREE.Vector3.project()`), not
+just a CSS anchor. Worth a short proposal on the exact anchor rule (which
+side of the object it prefers — above? nearest free screen edge?) and the
+clamp margin, before building.
+
+### 12. Walk-mode collision prevention — RESOLVED, scope set
+
+Walk mode (`walkCamera.ts`) currently has **no collision at all** — WASD
+movement is unclamped, so you can walk straight through furniture and walls
+today. Shyam wants it to feel like actually walking through the space —
+i.e., collide with placed items and walls, not pass through them.
+
+**Decision: hard stop for v1.** Slide-along-the-wall (the usual FPS feel)
+is explicitly deferred — build the simpler hard-stop version first, revisit
+sliding only if the hard stop actually feels bad in practice.
+
+The room already has the AABB machinery this needs
+(`src/scene/collision.ts`'s `itemFootprintAABB`/`wallFootprintAABBs`/
+`aabbOverlap`), built for drag-placement collision checks — the walk-mode
+build should reuse those, not build a second collision system. The new part
+is per-frame clamping of the *camera's* position against those same AABBs
+(with some eye-radius buffer so the camera doesn't clip flush against a
+surface) — this can go straight to a build now that the collision response
+is decided, no separate proposal needed.
+
+### 13. Top-down HUD minimap (early/lite version)
+
+A game-style minimap: a simple top-down 2D overlay showing furniture as
+boxes and the camera's position/facing, visible in **both** orbit and walk
+mode. Explicitly scoped as an early/lite pass — no renders, no textures,
+just shapes — with richer HUD/space-UI treatment deferred to later.
+
+This is genuinely cheap to build a first version of: the room/furniture
+footprint data already exists (`buildScene.ts`'s `furnitureFootprint`,
+`Room.floor`) and a top-down 2D projection is simpler than anything Three.js
+already does here — likely a `<canvas>` or absolutely-positioned `<div>`s
+in a fixed HUD corner, redrawn from the same `sceneFile.items`/`room` data
+Viewport already has, plus the live camera x/z/facing angle. No proposal
+needed — this can go straight to a small build; flag scope explicitly as
+"boxes + camera dot, no polish" so it doesn't quietly grow into §5's kind of
+open-ended reskin work.
+
+### 14. Expose the import flow from the object editor (extends §6/§7-ImportPanel)
+
+Right now, fixing a bad import means leaving the docked `ObjectInspector`,
+switching to the **Import** tab, re-selecting the same item from its picker,
+and re-running the photo → confirm-dims flow (`ImportPanel.tsx`). Shyam is
+asking whether that re-import entry point should also be reachable directly
+from `ObjectInspector` while the item is already selected in the viewport —
+skipping the tab switch and re-selection step.
+
+Plausible shape: a "Re-import" affordance in `ObjectInspector` that hands
+off to `ImportPanel`'s existing `confirm-cost`/`generating`/`confirm-dims`
+stages (already built, tested, and item-aware via `dimsOf`/
+`furnitureOverallDims`) rather than duplicating that flow — this is a UI
+entry-point/routing question, not new import logic. Worth a quick proposal
+on where that hands off to (switch tabs programmatically + pre-select the
+item vs. inlining the stages into the docked panel itself) before building,
+since inlining risks duplicating state ImportPanel already owns.
+
+## Proposal decisions — improvements-v2.2 §3 and §7's research docs
+
+Shyam reviewed both `docs/proposals/*.md` research-and-propose docs from
+v2.2 and made the call on each (2026-07-22):
+
+- **`multi-joint-objects.md` (§3) — deferred, not built.** There is one
+  object in Shyam's room this could arguably apply to, but not worth the
+  build cost the proposal lays out right now. No schema work starts. The
+  document stays in the repo as the reference to return to if a real object
+  later justifies it — whoever picks it back up should re-read that
+  proposal rather than re-deriving the "why a generated GLB can't be
+  jointed" reasoning from scratch. Status line in the file itself updated
+  to reflect this.
+- **`object-categories.md` (§7) — approved for build, schema-only.** Add the
+  `category` field exactly as scoped in the proposal (optional
+  `z.enum(...)`, both furniture branches, no version bump, no rendering/
+  behavior change). The lamp point-light feature (§4b) this unblocks is
+  **not** part of this approval — that's a separate, not-yet-scoped future
+  item; this just lands the tag so it exists when that work starts. Status
+  line in the file itself updated to reflect this.
+
+## Sequencing note (v2.2)
+
+§9's location/time-of-day lighting still needs a research-and-propose pass
+before implementation (same treatment as v2.1 §5's handle-reskin and v2.2
+§3/§7's original research items) — scope/UI decided by Shyam, but the
+solar-math survey and concrete input design still need to come back as a
+proposal before building. §10's blend-mode survey is realladygrey's to
+scope and propose a shortlist for. §11's reposition and §14's re-import
+entry point are each a proposal-then-build, not pure research (the "what"
+is clear, the "how" needs a short design pass). §12 (walk-mode collision)
+and §13 (minimap) can now go straight to a build — no proposal step needed,
+collision response and minimap scope are both decided. The `category`
+field (§7's proposal, above) is also approved straight to build. §8 needs
+nothing further. `multi-joint-objects.md` (§3's proposal, above) is
+deferred — no action until Shyam reopens it.
+
+---
+
+## Follow-up round — 2026-07-22 (same-day additions)
+
+### 15. SONDEROD rug texture import — still broken (revisits v2.2 §1)
+
+`improvements-v2.2.md` §1 flagged this and deliberately left it untouched
+pending a repro from Shyam ("do not assume it's the same issue" as the
+historical square-pixel bug `computeFlatTextureFit`/`Viewport.tsx` already
+fixed — see that section for the prior bug's details). Shyam confirms it's
+**still broken** — he expected it to already be fixed, because he'd seen
+renders that appeared to show it working, but **he has never personally
+exercised the import in the running app** — so those renders may have been
+against a different code path, a stale build, or simply not the same
+failure he's hitting live.
+
+**Still blocked on the same thing v2.2 §1 asked for: an actual repro from
+Shyam.** realladygrey needs, from Shyam, before diagnosing further:
+- Which image file (the actual SONDEROD photo he's uploading).
+- Which step it fails at (upload, tileable-pipeline processing, or
+  render/placement).
+- The exact failure — a thrown error / console message, vs. it "succeeding"
+  but rendering visibly wrong (wrong orientation, stretched, blank/
+  untextured, etc.).
+
+Do not assume this is the same root cause as the historical bug just
+because it's the same item — confirm from the actual current symptom.
+
+### 16. Bookshelf reimport — confirmed working (no action needed)
+
+Shyam successfully reimported the bookshelf and fixed its orientation/shape
+using the current import/edit flow. Logged as a positive confirmation that
+the re-import path (`ImportPanel.tsx`'s existing-item re-import,
+`applyImport.ts`'s `existingIdx >= 0` branch) and the §6 edit flow both work
+end-to-end for a real item — no fix needed, just a data point that this
+flow is solid.
+
+### 17. Switchable camera lenses (new)
+
+Shyam wants the ability to switch between camera lenses (FOV presets) while
+viewing the room — not just the current fixed `HUMAN_FOV = 38` (~35mm-
+equivalent, `Viewport.tsx:65`) used for the live orbit/walk camera.
+
+Partial infra already exists: `CameraPositionSchema` already carries an
+optional `fovDeg` per **saved** viewpoint (`Viewport.tsx`'s
+`applyCameraPreset` reads `preset.fovDeg ?? HUMAN_FOV`, and
+`getCurrentView()` reports the live `camera.fov` back out) — so fov is
+already a first-class per-viewpoint value, just not exposed as a live,
+in-the-moment control. What's missing is a HUD affordance to change the
+*current* camera's fov on the fly (a lens picker — e.g. wide/normal/tele
+presets, or a slider), independent of recalling a saved viewpoint. Worth a
+short proposal on preset values (a small named set like "wide/normal/tele"
+vs. a continuous slider) and where it lives in the HUD (`ViewportChrome.tsx`
+alongside the other viewport-level controls seems the natural home) before
+building.
+
+### 18. Shell texturing import flow — preview + microcopy (extends Phase 3 / ShellPanel)
+
+Two related asks about `ShellPanel.tsx`'s surface-photo import flow:
+
+- **No preview before committing.** `SurfaceRow`'s `handleFile` runs the
+  uploaded photo straight through `photoToTileableBlob` → `putAsset` →
+  `onChange` (an immediate commit, `ShellPanel.tsx:50-63`) — the very first
+  time Shyam sees the tiled result is already live on the real wall/floor/
+  ceiling in the viewport. He wants to **preview** what a photo (especially
+  his own CC0 textures, not just his own surface photos) will tile like
+  before committing it to the actual room shell.
+- **Sliders need microcopy.** Repeat X/Y and Roughness (`ShellPanel.tsx`
+  lines 104-142) are bare labels + a live numeric readout — no explanation
+  of what they visually do. Wants an info-tooltip with brief microcopy per
+  slider (e.g. what "repeat" means for a tiled texture, what raising/
+  lowering roughness looks like).
+
+Worth a short proposal rather than a blind build: the preview needs its own
+small isolated render (same shape as `ObjectPreview3D.tsx` from §6 — a
+tiny standalone Three.js viewport rendering a flat tiled plane with the
+candidate texture/repeat/roughness, not the real room), so it doesn't
+commit anything until confirmed. Tooltip mechanism (native `title`, a
+small custom tooltip component, or reusing whatever `DESIGN.md`/`cohere/
+DESIGN.md` specify for this) should be decided once, then reused for every
+slider needing one — not one-off per slider.
+
+## Sequencing note (follow-up round)
+
+§15 (rug bug) is blocked on Shyam providing a repro — same as before,
+nothing for realladygrey to do until that lands. §16 needs no action. §17
+and §18 each want a short proposal (preset/slider shape for §17; preview-
+render approach + tooltip mechanism for §18) before building, same
+proposal-then-build treatment as §11/§14 above.
