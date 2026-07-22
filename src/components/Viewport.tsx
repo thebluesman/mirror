@@ -497,6 +497,30 @@ export const Viewport = forwardRef<
     return itemsByIdRef.current.get(itemId)?.locked === true;
   }
 
+  // Code-review fix: whether the selected item's footprint is *currently*
+  // flagged as colliding — set by updateCollisionHighlight (the only place
+  // that actually runs the AABB check) and read by every handle-coloring
+  // site below so the rotate ring/knob and elevation handle agree with the
+  // selection outline instead of only ever branching on lock state. Handles
+  // only ever exist for the selected item, so one flag (not a per-item map)
+  // is enough — updateCollisionHighlight is in practice only ever called
+  // with the currently-selected item's id (a drag/rotate/elevate gesture can
+  // only target what's selected).
+  const selectedCollidingRef = useRef(false);
+
+  // improvements-v2.1 §4, code-review fix: the shared color composition —
+  // collision (a physical fact) outranks lock (a safety-toggle fact), which
+  // outranks plain selection. Used by both the selection outline
+  // (updateCollisionHighlight) and every handle-coloring site (hover,
+  // initial creation, global-lock resync) so they can't drift apart the way
+  // the handles did before this fix (locked-and-colliding read as amber
+  // instead of red on the handles, contradicting the outline).
+  function gestureAffordanceColor(itemId: string, colliding: boolean): number {
+    if (colliding) return COLLISION_COLOR;
+    if (isPlacementLocked(itemId)) return LOCKED_COLOR;
+    return SELECTION_COLOR;
+  }
+
   // D2: recolors the selection outline to flag footprint overlap — called
   // after any live mutation (drag move, rotate step, a committed layout
   // change affecting the selected item, or first selecting an already-
@@ -525,10 +549,8 @@ export const Viewport = forwardRef<
     });
     const { itemIds, wall } = checkCollisions(aabb, others, wallAABBsRef.current);
     const colliding = itemIds.length > 0 || wall;
-    // improvements-v2.1 §4: collision (a physical fact) outranks lock (a
-    // safety-toggle fact) — see LOCKED_COLOR's comment for why.
-    const color = colliding ? COLLISION_COLOR : isPlacementLocked(itemId) ? LOCKED_COLOR : SELECTION_COLOR;
-    (helper.material as THREE.LineBasicMaterial).color.set(color);
+    selectedCollidingRef.current = colliding;
+    (helper.material as THREE.LineBasicMaterial).color.set(gestureAffordanceColor(itemId, colliding));
   }
 
   // Per-surface tracking for the calibration effect below: the last
@@ -745,6 +767,12 @@ export const Viewport = forwardRef<
     // are: read every frame, written every keydown/keyup, no render involved.
     const walkKeys: WalkInput = { forward: false, back: false, left: false, right: false };
     let lastFrameTime = performance.now();
+    // Code-review fix: the orbit camera's Y before entering walk mode,
+    // restored on the way back out. Without this, applyCameraMode's "walk"
+    // branch below permanently snaps the camera to WALK_EYE_HEIGHT_CM even
+    // after returning to orbit — PointerLockControls has no "restore" of its
+    // own, and nothing else remembered the pre-walk height.
+    let preWalkEyeY: number | null = null;
 
     // Single source of truth for "which control scheme is live right now" —
     // both the HUD toggle button (via applyModeRef, since the button lives
@@ -764,7 +792,9 @@ export const Viewport = forwardRef<
         // height — PointerLockControls has no notion of "orbit target" to
         // carry over, and WASD never touches Y once in walk mode (see
         // walkCamera.ts's computeWalkStep), so this is the one place height
-        // gets set.
+        // gets set. Stash the pre-walk Y first so returning to orbit can put
+        // it back (code-review fix — see preWalkEyeY's declaration).
+        preWalkEyeY = camera.position.y;
         camera.position.y = WALK_EYE_HEIGHT_CM;
       } else {
         // Reverse of the above: hand the pointer back (browser no-ops if
@@ -775,6 +805,13 @@ export const Viewport = forwardRef<
         walkControls.unlock();
         walkKeys.forward = walkKeys.back = walkKeys.left = walkKeys.right = false;
         controls.enabled = true;
+        // Restore the pre-walk height before recentering the target below,
+        // so the target is computed around the restored eye position, not
+        // the walking height.
+        if (preWalkEyeY !== null) {
+          camera.position.y = preWalkEyeY;
+          preWalkEyeY = null;
+        }
         // OrbitControls.target is wherever it was left before walk mode —
         // possibly now behind the camera after mouselook turned it around.
         // Recenter it in front of the camera's current facing so the next
@@ -913,14 +950,15 @@ export const Viewport = forwardRef<
 
     // A handle (rotate ring/knob or elevation arrow) brightens while hovered —
     // its own materials, so this never touches the shared furniture material.
-    // improvements-v2.1 §4: the un-hovered base color is lock-aware
-    // (LOCKED_COLOR vs SELECTION_COLOR) rather than a fixed SELECTION_COLOR,
-    // so a handle itself signals lock state even before a click swallows the
-    // gesture.
+    // improvements-v2.1 §4 / code-review fix: the un-hovered base color is
+    // both collision- and lock-aware (gestureAffordanceColor) rather than a
+    // fixed SELECTION_COLOR, so a handle itself signals overlap/lock state
+    // even before a click swallows the gesture, and agrees with the
+    // selection outline instead of only ever reflecting lock.
     function setHandleHovered(handle: THREE.Object3D | null, hovered: boolean) {
       if (!handle) return;
       const itemId = selectedItemIdRef.current;
-      const baseColor = itemId && isPlacementLocked(itemId) ? LOCKED_COLOR : SELECTION_COLOR;
+      const baseColor = itemId ? gestureAffordanceColor(itemId, selectedCollidingRef.current) : SELECTION_COLOR;
       setHandleColor(handle, hovered ? ROTATE_HANDLE_HOVER_COLOR : baseColor);
     }
 
@@ -1086,8 +1124,15 @@ export const Viewport = forwardRef<
           controls.enabled = false; // gesture owns the pointer, not the orbit camera
           renderer.domElement.style.cursor = "grabbing";
           renderer.domElement.setPointerCapture(evt.pointerId);
-          return;
         }
+        // Code-review fix: return unconditionally once the raycast has
+        // confirmed a handle hit, even if the plane-intersect just above
+        // failed (ray parallel to the plane — near-impossible given the
+        // orbit polar-angle clamps, but not impossible). Previously the
+        // `return` only lived inside that `if`, so a failed intersect fell
+        // through into the body hit-test below and could start an ordinary
+        // translate-drag instead of the intended (aborted) handle gesture.
+        return;
       }
 
       const elevationHandle = elevationHandleRef.current;
@@ -1105,8 +1150,10 @@ export const Viewport = forwardRef<
           controls.enabled = false; // gesture owns the pointer, not the orbit camera
           renderer.domElement.style.cursor = "grabbing";
           renderer.domElement.setPointerCapture(evt.pointerId);
-          return;
         }
+        // Code-review fix: same unconditional return as the rotate-handle
+        // branch above, for the same reason.
+        return;
       }
 
       const hit = raycaster.intersectObjects(scene.children, true)[0];
@@ -1317,6 +1364,13 @@ export const Viewport = forwardRef<
           else walkKeys.right = true;
           return;
         }
+        // Code-review fix: every other key below this point is item
+        // manipulation (L, q/e/[/], PageUp/PageDown) — mirrors
+        // onPointerDown's walk-mode bail for pointer-driven selection/drag,
+        // which this fell through past before. Without this, a previously-
+        // selected item would silently rotate/elevate/(un)lock under the
+        // user while they're just trying to walk around.
+        return;
       }
       const itemId = selectedItemIdRef.current;
       if (!itemId) return;
@@ -1838,14 +1892,16 @@ export const Viewport = forwardRef<
       if (cam) positionElevationHandle(elevationHandle, group, item, cam);
       built.scene.add(elevationHandle);
       elevationHandleRef.current = elevationHandle;
-      // improvements-v2.1 §4: lock-aware initial color (own flag or the
-      // global toggle) on both handles, same composition setHandleHovered
-      // uses for its un-hovered base color — a freshly-selected locked
-      // item's handles should read as locked from the first frame, not just
-      // after the first hover.
-      if (isPlacementLocked(selectedItemId)) {
-        setHandleColor(rotateHandle, LOCKED_COLOR);
-        setHandleColor(elevationHandle, LOCKED_COLOR);
+      // improvements-v2.1 §4 / code-review fix: collision- and lock-aware
+      // initial color on both handles, the same gestureAffordanceColor
+      // composition setHandleHovered uses — a freshly-selected item that's
+      // already colliding or locked should read that way on its handles from
+      // the first frame, not just after the first hover. updateCollisionHighlight
+      // above already refreshed selectedCollidingRef for this exact item.
+      const initialColor = gestureAffordanceColor(selectedItemId, selectedCollidingRef.current);
+      if (initialColor !== SELECTION_COLOR) {
+        setHandleColor(rotateHandle, initialColor);
+        setHandleColor(elevationHandle, initialColor);
       }
     }
   }, [selectedItemId, buildVersion]);
@@ -1865,15 +1921,18 @@ export const Viewport = forwardRef<
     const selId = selectedItemIdRef.current;
     if (!built || !selId) return;
     const group = built.furnitureGroups.get(selId);
-    if (group) updateCollisionHighlight(selId, group);
+    if (group) updateCollisionHighlight(selId, group); // refreshes selectedCollidingRef too
     // §3: both handles are multi-mesh THREE.Group instances (ring+knob,
     // stem+cones) now, not a single Mesh with a top-level `.material` —
     // setHandleColor traverses and recolors every mesh underneath.
-    const lockColor = isPlacementLocked(selId) ? LOCKED_COLOR : SELECTION_COLOR;
+    // Code-review fix: collision- and lock-aware (gestureAffordanceColor),
+    // not lock-only — a locked-and-colliding item's handles should stay red,
+    // matching the outline, not fall back to amber.
+    const color = gestureAffordanceColor(selId, selectedCollidingRef.current);
     const rotateHandle = rotateHandleRef.current;
-    if (rotateHandle) setHandleColor(rotateHandle, lockColor);
+    if (rotateHandle) setHandleColor(rotateHandle, color);
     const elevationHandle = elevationHandleRef.current;
-    if (elevationHandle) setHandleColor(elevationHandle, lockColor);
+    if (elevationHandle) setHandleColor(elevationHandle, color);
   }, [globalLock]);
 
   // improvements-v2.1 §5: mode-toggle pill, self-contained to this component
