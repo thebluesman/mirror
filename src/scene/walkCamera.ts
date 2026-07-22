@@ -5,6 +5,12 @@
 // both pieces are unit-testable without a WebGL context, and so Viewport.tsx's
 // per-frame call sites don't pay for any THREE.Vector allocation beyond what
 // PointerLockControls itself already needs.
+//
+// improvements-minor-fixes.md §4/§12: crouch eye height and the hard-stop
+// collision check below extend the same file rather than starting a new one
+// — both are still "camera math with no THREE dependency," and §12 reuses
+// collision.ts's own AABB type/overlap test rather than duplicating it.
+import { aabbOverlap, type AABB } from "./collision";
 
 /** Which WASD keys are currently held, keyed by intent rather than physical
  *  key (w/a/s/d) so Viewport.tsx's keydown/keyup handlers are the only place
@@ -25,6 +31,17 @@ export interface WalkInput {
  *  walk-around navigation, not a precise avatar/collision simulation.
  */
 export const WALK_EYE_HEIGHT_CM = 160;
+
+/** improvements-minor-fixes.md §4: seated/crouched eye height (cm), swapped
+ *  in for WALK_EYE_HEIGHT_CM by Viewport.tsx's "C" toggle while walk mode is
+ *  active. An instant snap, not an eased transition, the same "drag-free,
+ *  instant-toggle" shape as the existing "L" lock feature — computeWalkStep's
+ *  velocity integration has nothing to hook an eye-height tween into without
+ *  adding a whole separate animation-state machine for one cosmetic axis, so
+ *  this stays a plain constant swap rather than a per-frame interpolation.
+ *  ~120cm approximates a seated/crouched human eye height, sibling to
+ *  WALK_EYE_HEIGHT_CM's own "plausible, not measured" standing figure. */
+export const WALK_CROUCH_EYE_HEIGHT_CM = 120;
 
 /** Constant walk speed (cm/sec) — no acceleration or momentum, per the PRD's
  *  "simple constant-speed walk, no physics" scope. ~1.5 m/s is an unhurried
@@ -85,4 +102,46 @@ export function deriveSyntheticLookAt(
     eye[1] + forwardDirection[1] * distance,
     eye[2] + forwardDirection[2] * distance,
   ];
+}
+
+/** improvements-minor-fixes.md §12: half-width (cm) of the square footprint
+ *  walk mode's hard-stop check uses in place of the camera's true (zero-
+ *  radius) point position — without a buffer, the hard stop would only
+ *  trigger once the eye point itself is already inside a wall/item AABB,
+ *  reading as the view clipping flush into the surface before movement
+ *  actually stops. ~30cm is a shoulder-width-ish personal-space buffer, in
+ *  the same "plausible, not measured" spirit as WALK_EYE_HEIGHT_CM — not
+ *  meant to model a real body's girth. */
+export const WALK_COLLISION_RADIUS_CM = 30;
+
+/** World-space AABB for the walk-mode hard-stop check: a `radius`-cm square
+ *  centered on the camera's XZ position. Deliberately a square, not a true
+ *  circle — collision.ts's aabbOverlap only knows AABBs, and a slight
+ *  over-estimate at the corners is the same "conservative, not wrong" trade
+ *  itemFootprintAABB's own header comment already accepts for rotated
+ *  furniture footprints. */
+export function walkCameraFootprintAABB(x: number, z: number, radius: number): AABB {
+  return { minX: x - radius, maxX: x + radius, minZ: z - radius, maxZ: z + radius };
+}
+
+/** True if the camera's current XZ position, expanded to a WALK_COLLISION_
+ *  RADIUS_CM footprint, overlaps any item or wall AABB — Viewport.tsx's
+ *  animate loop calls this *after* speculatively applying a frame's
+ *  moveForward/moveRight (PointerLockControls mutates camera.position
+ *  in place; there's no "propose a position" API to check beforehand) and
+ *  reverts the XZ position back to where it was that frame if this returns
+ *  true. That's the decided v1 response — a hard stop, not slide-along-wall
+ *  (improvements-minor-fixes.md §12) — so the caller doesn't need this
+ *  function to report *which* axis collided, only whether the resulting
+ *  spot is clear. Pure/testable without a WebGL context, same shape as
+ *  collision.ts's own checkCollisions. */
+export function walkStepCollides(
+  x: number,
+  z: number,
+  radius: number,
+  items: readonly AABB[],
+  walls: readonly AABB[],
+): boolean {
+  const footprint = walkCameraFootprintAABB(x, z, radius);
+  return items.some((aabb) => aabbOverlap(footprint, aabb)) || walls.some((aabb) => aabbOverlap(footprint, aabb));
 }

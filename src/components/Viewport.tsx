@@ -24,8 +24,11 @@ import {
   computeWalkStep,
   deriveSyntheticLookAt,
   SYNTHETIC_LOOKAT_DISTANCE_CM,
+  WALK_COLLISION_RADIUS_CM,
+  WALK_CROUCH_EYE_HEIGHT_CM,
   WALK_EYE_HEIGHT_CM,
   WALK_SPEED_CM_PER_SEC,
+  walkStepCollides,
   type WalkInput,
 } from "../scene/walkCamera";
 import {
@@ -584,6 +587,23 @@ export const Viewport = forwardRef<
     (helper.material as THREE.LineBasicMaterial).color.set(gestureAffordanceColor(itemId, colliding));
   }
 
+  // improvements-minor-fixes.md §12: every placed item's footprint AABB, for
+  // the walk-mode hard-stop check in the animate loop below. Unlike
+  // updateCollisionHighlight's `others`, there's no itemId to exclude here —
+  // the camera is never itself one of built.furnitureGroups.
+  function allItemFootprintAABBs(): AABB[] {
+    const built = builtRef.current;
+    if (!built) return [];
+    const aabbs: AABB[] = [];
+    built.furnitureGroups.forEach((group, itemId) => {
+      const item = itemsByIdRef.current.get(itemId);
+      if (!item) return;
+      const rotationDeg = ((THREE.MathUtils.radToDeg(group.rotation.y) % 360) + 360) % 360;
+      aabbs.push(itemFootprintAABB(item, [group.position.x, group.position.y, group.position.z], rotationDeg));
+    });
+    return aabbs;
+  }
+
   // Per-surface tracking for the calibration effect below: the last
   // calibration actually applied (so it can diff and skip no-op work) and
   // the live THREE.Texture instances currently referenced by a material (so
@@ -817,6 +837,14 @@ export const Viewport = forwardRef<
     // after returning to orbit — PointerLockControls has no "restore" of its
     // own, and nothing else remembered the pre-walk height.
     let preWalkEyeY: number | null = null;
+    // improvements-minor-fixes.md §4: whether the "C" crouch toggle is
+    // currently down. Reset to false whenever walk mode is left (below) so
+    // re-entering walk mode always starts standing — deliberately NOT read
+    // by preWalkEyeY's stash/restore above: preWalkEyeY captures the orbit
+    // camera's Y at walk-mode entry, before any crouch toggle can happen, so
+    // toggling crouch mid-walk only ever changes camera.position.y directly
+    // and never touches what gets restored on the way back to orbit.
+    let crouching = false;
 
     // Single source of truth for "which control scheme is live right now" —
     // both the HUD toggle button (via applyModeRef, since the button lives
@@ -838,6 +866,9 @@ export const Viewport = forwardRef<
         // walkCamera.ts's computeWalkStep), so this is the one place height
         // gets set. Stash the pre-walk Y first so returning to orbit can put
         // it back (code-review fix — see preWalkEyeY's declaration).
+        // crouching is always false here (reset below on the way out of walk
+        // mode, or never-yet-entered — see crouching's declaration), so this
+        // always starts standing.
         preWalkEyeY = camera.position.y;
         camera.position.y = WALK_EYE_HEIGHT_CM;
       } else {
@@ -848,6 +879,9 @@ export const Viewport = forwardRef<
         // direction the next time walk mode is entered.
         walkControls.unlock();
         walkKeys.forward = walkKeys.back = walkKeys.left = walkKeys.right = false;
+        // §4: same "reset on mode-exit" treatment as walkKeys above, so
+        // crouch never carries over into the next walk-mode session.
+        crouching = false;
         controls.enabled = true;
         // Restore the pre-walk height before recentering the target below,
         // so the target is computed around the restored eye position, not
@@ -1408,6 +1442,19 @@ export const Viewport = forwardRef<
           else walkKeys.right = true;
           return;
         }
+        // improvements-minor-fixes.md §4: "C" crouch/"sit" toggle — same
+        // drag-free, instant-toggle shape as "L" (below, for item lock), just
+        // scoped to walk mode and to the camera's own eye height rather than
+        // an item's lock flag. "C" is unused elsewhere in either mode's key
+        // space (w/a/s/d claimed above; q/e/[/]/PageUp/PageDown/L are item-
+        // manipulation keys that are inert in walk mode per the comment
+        // below anyway) and is the common FPS convention for crouch.
+        if (key === "c") {
+          evt.preventDefault();
+          crouching = !crouching;
+          camera.position.y = crouching ? WALK_CROUCH_EYE_HEIGHT_CM : WALK_EYE_HEIGHT_CM;
+          return;
+        }
         // Code-review fix: every other key below this point is item
         // manipulation (L, q/e/[/], PageUp/PageDown) — mirrors
         // onPointerDown's walk-mode bail for pointer-driven selection/drag,
@@ -1537,8 +1584,36 @@ export const Viewport = forwardRef<
       if (cameraModeRef.current === "walk") {
         if (walkControls.isLocked) {
           const step = computeWalkStep(walkKeys, WALK_SPEED_CM_PER_SEC, deltaSec);
-          if (step.forward !== 0) walkControls.moveForward(step.forward);
-          if (step.right !== 0) walkControls.moveRight(step.right);
+          if (step.forward !== 0 || step.right !== 0) {
+            // improvements-minor-fixes.md §12: hard-stop collision. Reuses
+            // the same drag-placement AABB machinery (itemFootprintAABB/
+            // wallFootprintAABBs/aabbOverlap, via walkCamera.ts's
+            // walkStepCollides) rather than a second collision system.
+            // moveForward/moveRight are PointerLockControls' own mutate-in-
+            // place methods — there's no "propose a position, then decide"
+            // API to check *before* applying the step — so this applies the
+            // step first, then reverts the XZ position back to where it was
+            // this frame if the resulting eye footprint collides. Y is never
+            // touched by WASD (see computeWalkStep's own comment), so only
+            // X/Z need saving. This is a whole-frame hard stop, not per-axis
+            // sliding — the decided v1 scope; slide-along-wall is deferred.
+            const prevX = camera.position.x;
+            const prevZ = camera.position.z;
+            if (step.forward !== 0) walkControls.moveForward(step.forward);
+            if (step.right !== 0) walkControls.moveRight(step.right);
+            if (
+              walkStepCollides(
+                camera.position.x,
+                camera.position.z,
+                WALK_COLLISION_RADIUS_CM,
+                allItemFootprintAABBs(),
+                wallAABBsRef.current,
+              )
+            ) {
+              camera.position.x = prevX;
+              camera.position.z = prevZ;
+            }
+          }
         }
       } else {
         controls.update();
