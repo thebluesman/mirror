@@ -1,0 +1,18 @@
+/* docs/proposals/shell-texture-preview.md §1.1/§1.3 — small fixed-size
+ * preview box inline inside SurfaceRow's preview card, matching
+ * ObjectPreview3D.css's own precedent (a small inspector, not the room, so
+ * it needs its own explicit height — a flex child with no intrinsic size
+ * would otherwise collapse to 0 inside the sidebar's scrolling column). */
+.shell-texture-preview-3d {
+  width: 100%;
+  height: 160px;
+  border-radius: var(--radius-xs);
+  overflow: hidden;
+  background: #d8d4c8;
+}
+
+.shell-texture-preview-3d canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}

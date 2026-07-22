@@ -1,5 +1,21 @@
 # Proposal: give the manipulation handles a design-system voice — improvements-minor-fixes §5
 
+**Built (2026-07-22):** Option B shipped as proposed. Rotate ring is now a
+flat `RingGeometry` annulus (~3cm thick), the rotate knob is a shallow-
+extruded rounded-rect pill (`Shape` + `ExtrudeGeometry`, oriented tangent to
+the ring via a new `rotation.y` set in `positionRotateHandle`), and the
+elevation handle's cones are now shallow-extruded chevron heads
+(`chevronShape` + `ExtrudeGeometry`) on the unchanged cylinder stem. All three
+open sub-questions landed on this doc's own recommended lean: Coral on hover
+(not drag-only), the color mapping is now documented in `DESIGN.md` §7, and
+collision red stayed the brighter `#ff5c5c` rather than snapping to the
+documented Error `#b30000`. `Viewport.tsx`'s builder functions
+(`createRotateHandle`, `createElevationHandle`), the four color constants, and
+`positionRotateHandle` (added the knob's tangential yaw) changed; raycasting,
+gesture logic, snapping, commit paths, and the collision-wins-over-locked
+precedence are untouched, and `rotateHandle.test.ts`/`elevation.test.ts` pass
+unmodified.
+
 **Status:** approved for build (2026-07-22 review) — **Option B** (shape +
 palette reskin) confirmed. The three open sub-questions (Coral-on-hover vs.
 Coral-only-while-dragging; whether to document handle colors in `DESIGN.md`;

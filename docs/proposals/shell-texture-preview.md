@@ -1,5 +1,16 @@
 # Proposal: shell texturing — preview before commit + slider microcopy — improvements-minor-fixes §18
 
+**Built (2026-07-22):** implemented as **Option P-2** per the review correction
+below (not this doc's own P-1 recommendation) — `SurfaceRow`'s `handleFile`
+path now runs `idle → processing → preview → confirm/cancel → commit`, with
+`putAsset`/`onChange` deferred to Confirm; sliders are untouched. New
+`ShellTexturePreview3D` (modeled on `ObjectPreview3D.tsx`, reusing
+`shellMaterials.ts`'s `makeTexture`/`applyCalibrationToMaterial`, now
+exported for that reuse) renders inline below the upload button. New
+reusable `InfoTip` (Option T-2), documented in `DESIGN.md` §5, carries the
+drafted microcopy on Repeat X/Y/Roughness. See
+`src/components/ShellPanel.tsx`, `ShellTexturePreview3D.tsx`, `InfoTip.tsx`.
+
 **Status:** approved for build (2026-07-22 review) — **Option P-2** (narrow
 draft: preview gates only the *photo*, not the whole calibration), overriding
 this doc's own P-1 recommendation — Shyam's call was P-2 is enough. The

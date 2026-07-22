@@ -590,3 +590,107 @@ and §12's collision rethink first (both are regressions/bugs affecting the
 app today, not new features), then the icon-placement fixes (§1/§2, small
 and self-contained), then the approved proposals in whatever order is
 convenient.
+
+---
+
+## Build round 2 — 2026-07-22 (this PR)
+
+Everything the review round approved is now built. Orchestrated as
+parallel/sequential worktree streams (independent-file items ran
+concurrently; the `Viewport.tsx`/`ViewportChrome.tsx`/`ObjectInspector.tsx`
+cluster ran sequentially, one stream merged and re-verified before the next
+started, to avoid tangled concurrent edits to that shared file). Every merge
+was re-run through `npm run test`/`build`/`lint` before moving on.
+
+**§15 — SONDEROD rug bug, fixed.** Root cause was not the texture pipeline
+(which worked correctly) — `Viewport.tsx`'s structural-rebuild effect
+unconditionally re-applied `cameras[0]` (the seed's coffee-table-occluded
+"couch-view") on *every* furniture-item edit, not just the initial mount, so
+uploading a new rug photo silently snapped the camera back to an angle where
+the (correctly updated) texture was barely visible. Fixed by stashing and
+restoring the live camera framing across a structural rebuild instead of
+re-reading `cameras[0]`; new pure helpers in `src/scene/cameraViewpoints.ts`,
+regression-tested, and confirmed live via Playwright against the real dev
+server.
+
+**§12 (revisited) — walk-mode collision reworked.** Rugs (`category ===
+"rug"`) are now excluded from `allItemFootprintAABBs()`'s walk-collision
+list entirely (walls stay collidable). The whole-frame hard-stop was
+replaced with axis-independent sliding (`resolveWalkCollision` in
+`walkCamera.ts`) — X and Z movement are checked and reverted independently,
+so brushing a wall/item on one axis no longer freezes movement on the other.
+
+**§1/§2 (icon placement) — all three diagnosed bugs fixed.** Icon+label
+centering moved onto the base `.viewport-chrome-pill` class (not just the
+lock modifier); rename/delete icons now share one pill boundary with the
+name instead of rendering past it; the literal `+` in "Save view"/"Save
+layout" is a 16px Lucide `Plus` icon.
+
+**§3 — keyboard shortcuts + cheatsheet, built.** Shared `SHORTCUTS`/`KEYS_*`
+table (`src/scene/shortcuts.ts`) drives both `onKeyDown` and a new `?`
+cheatsheet overlay (the app's first modal). Walk/orbit toggle bound to `V`.
+Both the cheatsheet and the revived selection-hint pill ("L lock · Q/E
+rotate · PgUp/PgDn elevate · Esc cancel") shipped, per Shyam's "do both"
+call. The "Lock all" HUD button now derives its label from actual aggregate
+per-item lock state instead of its own separately-tracked flag.
+
+**§17 — camera lens picker, built.** Wide 24mm / Normal 35mm / Tele 85mm
+focal-length presets in `ViewportChrome.tsx` — the UI never shows a degree
+value. FOV is re-derived from focal length via a full-frame-sensor
+convention consistent with the existing `HUMAN_FOV`. Recalling a saved
+viewpoint snaps the picker to the nearest preset within 3°, or shows
+"Custom."
+
+**§11 — ObjectInspector anchor, built.** The panel (and its selection-hint
+pill) now anchors to the selected object's on-screen bounding box each
+frame — below, then above, then nearest side, then clamped into the
+viewport — computed via `Vector3.project()` against the item's world AABB
+and written imperatively to a DOM ref from the existing per-frame handle-
+positioning code, not React state.
+
+**§14 — re-import entry point, built.** `ObjectInspector` has a
+"Re-import…"/"Import…" button (`RefreshCw`) that switches to the Import tab
+with the item pre-selected in `ImportPanel`'s picker, leaving
+`ObjectInspector` open behind the sidebar.
+
+**§5 — handle reskin, built (Option B).** Rotate ring: torus → flat
+`RingGeometry` annulus. Rotate knob: sphere → rounded-rect pill
+(`Shape`+`ExtrudeGeometry`). Elevation handle: cone caps → chevron heads on
+the existing stem. Colors: idle/selection → Action Blue `#1863dc`,
+hover/active → Coral `#ff7759`; collision-red and locked-amber kept as-is
+per the confirmed leans. Mapping documented in a new `DESIGN.md` §7.
+
+**§9 — location-driven lighting, built.** Hour+date input, toggle against
+the existing manual sliders (both persist independently). Solar position is
+a hand-rolled NOAA low-precision algorithm (`src/util/solarPosition.ts`, no
+new dependency) feeding the *existing* `sunPositionFromAngles` seam via a
+new `room.lightingMode`/`room.location` (additive-optional, no
+`SCHEMA_VERSION` bump). Elevation clamps to ≥5° for shadows; intensity fades
+toward zero as the true sun angle drops through the horizon.
+
+**§18 — shell texture preview, built (P-2 scope).** `SurfaceRow`'s photo
+upload now previews the new texture (at the surface's current committed
+repeat/roughness/tint) in a small standalone `ShellTexturePreview3D` before
+Confirm/Cancel — `putAsset` deferred to Confirm so a cancelled preview
+leaves no orphan OPFS asset. Repeat X/Y/Roughness sliders get a new
+`<InfoTip>` component with microcopy; documented in `DESIGN.md`.
+
+**§10 — tint blend modes, built (multiply + screen only).** New
+`tintBlendMode` field (full 5-value enum in the schema, only multiply/screen
+wired up; overlay/soft-light/darken deferred to a follow-up round, not
+dropped). Screen is free on the flat/placeholder-box path; the textured
+path (imported GLBs, the rug's flat-texture top face) needed a real
+`onBeforeCompile` shader patch, shared via a new `applyTintBlend` helper.
+
+All 8 proposal docs and the two bug-investigation write-ups got their own
+"Built" status notes. Final state: 329 tests passing, clean `tsc`/`vite`
+build, clean `oxlint`.
+
+## Sequencing note (build round 2)
+
+Nothing outstanding from this round. §6's DESIGN.md-vs-cohere audit (9 gaps
+beyond icon sizing, reported in the prior build round) still needs a scope
+call from Shyam before anyone touches it — untouched here, not forgotten.
+The overlay/soft-light/darken blend modes (§10) and a "Color"/HSL blend mode
+are explicit candidates for a follow-up round if Shyam wants more than
+multiply+screen.

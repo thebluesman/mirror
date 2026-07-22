@@ -8,6 +8,7 @@ import {
   addFurnitureBoxMeshes,
   buildScene,
   furnitureOverallDims,
+  resolveSunLighting,
   sunPositionFromAngles,
   type BuiltScene,
 } from "../scene/buildScene";
@@ -17,30 +18,53 @@ import { loadShellTexture } from "../scene/loadShellTexture";
 import { applyModelTint, fitModelToDims, loadFurnitureModel } from "../scene/loadFurnitureModel";
 import { computeFlatTextureFit, FULL_CONTENT_BOX, type ContentBox } from "../scene/flatItemTexture";
 import { checkCollisions, itemFootprintAABB, wallFootprintAABBs, type AABB } from "../scene/collision";
+import {
+  computeInspectorAnchor,
+  fixedCornerAnchor,
+  rectOverlapsViewport,
+  type ScreenRect,
+} from "../scene/inspectorAnchor";
 import { snapPosition } from "../scene/snapping";
 import { relativeYawDeg, rotateHandleWorldXZ, snapYawDeg, yawDegFromPointer } from "../scene/rotateHandle";
 import { clampElevationCm, ELEVATION_STEP_CM, stepElevationCm } from "../scene/elevation";
 import { normalizeXZ } from "../scene/minimapProjection";
+import { HUMAN_FOV } from "../scene/cameraLens";
+import {
+  KEYS_CANCEL_GESTURE,
+  KEYS_CROUCH,
+  KEYS_ELEVATE_DOWN,
+  KEYS_ELEVATE_UP,
+  KEYS_LOCK,
+  KEYS_MODE_TOGGLE,
+  KEYS_ROTATE_CCW,
+  KEYS_ROTATE_CW,
+  KEYS_WALK_BACK,
+  KEYS_WALK_FORWARD,
+  KEYS_WALK_LEFT,
+  KEYS_WALK_RIGHT,
+} from "../scene/shortcuts";
 import {
   computeWalkStep,
-  deriveSyntheticLookAt,
+  isWalkCollidableItem,
+  resolveWalkCollision,
   SYNTHETIC_LOOKAT_DISTANCE_CM,
   WALK_COLLISION_RADIUS_CM,
   WALK_CROUCH_EYE_HEIGHT_CM,
   WALK_EYE_HEIGHT_CM,
   WALK_SPEED_CM_PER_SEC,
-  walkStepCollides,
   type WalkInput,
 } from "../scene/walkCamera";
 import {
-  DEFAULT_LIGHTING,
   DEFAULT_SURFACE_CALIBRATION,
   type CameraPosition,
   type Lighting,
+  type LightingMode,
+  type Location,
   type ShellCalibration,
   type SurfaceCalibration,
 } from "../schema/scene";
 import type { FurnitureItem, SceneFile } from "../scene/types";
+import { deriveLiveCameraReading, resolveStructuralBuildCameraPreset } from "../scene/cameraViewpoints";
 import { ObjectInspector, type ObjectEditPatch } from "./ObjectInspector";
 import { Minimap, type MinimapHandle } from "./Minimap";
 import "./Viewport.css";
@@ -67,7 +91,10 @@ export interface ViewportHandle {
   captureSnapshot(): string | null;
 }
 
-const HUMAN_FOV = 38; // ~35mm-equivalent, per spike 2's C2 feedback
+// HUMAN_FOV now lives in ../scene/cameraLens (imported above) — single
+// source of truth for the app's default vertical FOV, shared with the
+// improvements-minor-fixes.md §17 lens-picker's "Normal" preset (which is
+// pinned to this exact constant, not a re-derived close value).
 const SHELL_SURFACES: ShellSurface[] = ["wall", "floor", "ceiling"];
 
 // improvements-v2.1 §5: walk-around camera mode, additive to orbit (default
@@ -173,9 +200,10 @@ const ROTATE_STEP_DEG = 15;
 // browser chrome shortcut worth worrying about in an already-focused canvas.
 // ELEVATION_STEP_CM (5) is the vertical analog of ROTATE_STEP_DEG (15) —
 // factored into src/scene/elevation.ts alongside the floor clamp so it's
-// unit-testable the same way rotateHandle.ts's snapYawDeg is.
-const ELEVATION_KEY_UP = "PageUp";
-const ELEVATION_KEY_DOWN = "PageDown";
+// unit-testable the same way rotateHandle.ts's snapYawDeg is. The actual key
+// literals ("PageUp"/"PageDown", q/Q/[, e/E/]) now live in ../scene/shortcuts
+// as KEYS_ELEVATE_UP/KEYS_ELEVATE_DOWN/KEYS_ROTATE_CCW/KEYS_ROTATE_CW
+// (improvements-minor-fixes.md §3) — imported above, not redeclared here.
 
 // §3 (improvements-v2.1) manipulation-handle redesign — supersedes the C1
 // follow-up's bare rotate sphere. Research pass (see this file's git commit
@@ -192,23 +220,44 @@ const ELEVATION_KEY_DOWN = "PageDown";
 // until now had only PageUp/PageDown and no drag gesture at all.
 
 // --- Rotation ring + knob (replaces the sphere) ---
-// Gap between the footprint's outer radius and the ring, the ring's line
-// thickness, and the grip-knob radius — all cm, same unit as the scene graph.
+// Gap between the footprint's outer radius and the ring, and the ring's line
+// thickness — cm, same unit as the scene graph.
 const ROTATE_RING_MARGIN_CM = 12;
-const ROTATE_RING_TUBE_CM = 2.5;
-const ROTATE_KNOB_RADIUS_CM = 6;
-// Lift the ring a hair above the base plane so its flat torus doesn't z-fight
-// the floor/rug it sits on.
+// handle-reskin.md (§5 Option B): the ring's "line thickness" is now
+// `outerRadius - innerRadius` of a flat RingGeometry annulus, not a torus
+// tube radius — ~3cm, echoing a bordered stroke.
+const ROTATE_RING_THICKNESS_CM = 3;
+// handle-reskin.md: the sphere grip is now a pill (rounded-rect, extruded
+// shallow) — length is the tangential (long) axis, width the radial (short)
+// axis fully rounded into pill caps, depth the shallow vertical thickness.
+// Length matches the old sphere's diameter (2 * the old 6cm radius) so the
+// grab target reads about the same size as before.
+const ROTATE_KNOB_LENGTH_CM = 12;
+const ROTATE_KNOB_WIDTH_CM = 7;
+const ROTATE_KNOB_DEPTH_CM = 3;
+// Lift the ring a hair above the base plane so its flat geometry doesn't
+// z-fight the floor/rug it sits on.
 const ROTATE_HANDLE_LIFT_CM = 1;
 
 // --- Elevation (vertical) drag handle (net-new affordance) ---
 // A vertical double-arrow floating above the item's top face. Gap above the
-// top, stem (shaft) length, arrowhead length, and the two radii — cm.
+// top, stem (shaft) length, head length, and the shaft radius — cm.
 const ELEVATION_HANDLE_GAP_CM = 18;
 const ELEVATION_HANDLE_STEM_CM = 24;
-const ELEVATION_HANDLE_CONE_CM = 9;
+// handle-reskin.md: same head length the old ConeGeometry used (kept
+// identical so positionElevationHandle's capOffset/halfArrow math — which
+// reads this constant — doesn't need updating), now the vertical span of a
+// chevron instead of a cone height.
+const ELEVATION_HANDLE_HEAD_CM = 9;
 const ELEVATION_HANDLE_SHAFT_R_CM = 1.6;
-const ELEVATION_HANDLE_CONE_R_CM = 4;
+// Full base width of a chevron head (was the old cone's radius; doubled here
+// since a chevron's width, not a radius, is what its shape constructor takes).
+const ELEVATION_HANDLE_HEAD_WIDTH_CM = 8;
+// Stroke thickness of each chevron arm, and the shallow depth it's extruded
+// to (mirrors the rotate knob's shallow-pill treatment) — both new to the
+// chevron construction, no old-cone equivalent.
+const ELEVATION_HANDLE_CHEVRON_ARM_CM = 2.5;
+const ELEVATION_HANDLE_CHEVRON_DEPTH_CM = 3;
 
 // Camera-relative grab-target sizing (PRD-v2 §7.1 polish): a fixed world-space
 // size reads as a tiny dot when the camera is zoomed out and a boulder when
@@ -221,19 +270,41 @@ const HANDLE_REF_DISTANCE_CM = 500;
 const HANDLE_MIN_SCALE = 0.5;
 const HANDLE_MAX_SCALE = 4;
 
-const SELECTION_COLOR = 0x4fd1ff;
+// docs/proposals/object-inspector-anchor.md §2: two distinct pixel budgets
+// for `updateInspectorAnchor`'s below/above/side/clamp rule (src/scene/
+// inspectorAnchor.ts) — MARGIN is the viewport-edge clamp inset, reusing
+// the exact `--space-24` inset `.object-inspector-wrap` already used as its
+// fixed corner; GAP is the smaller, distinct object-to-panel spacing
+// (`--space-16`) for the non-clamped anchored case. Kept as literal px
+// (not read from CSS custom properties) since `updateInspectorAnchor` does
+// this math against `container.clientWidth/Height` — real CSS pixels, not
+// world units — every frame; see tokens.css for the source of truth these
+// mirror.
+const INSPECTOR_ANCHOR_MARGIN_PX = 24; // var(--space-24)
+const INSPECTOR_ANCHOR_GAP_PX = 16; // var(--space-16)
+
+// docs/proposals/handle-reskin.md (§5 Option B, built 2026-07-22): idle/
+// selection is DESIGN.md's Action Blue — the system's link/accent color,
+// distinct from both the collision red and the locked amber below. See
+// DESIGN.md's new "Manipulation-handle colors" section for the full mapping.
+const SELECTION_COLOR = 0x1863dc;
 // A handle brightens to this while hovered, so it reads as a grabbable
 // affordance (paired with a `cursor: grab` on the canvas — see updateHover).
 // Name kept from the C1 sphere era; it's now the shared handle-hover color.
-const ROTATE_HANDLE_HOVER_COLOR = 0xd6f5ff;
+// handle-reskin.md: DESIGN.md's Coral — hover is treated as "you're about to
+// grab this," the same active-marker role Coral plays elsewhere in the app.
+const ROTATE_HANDLE_HOVER_COLOR = 0xff7759;
 // D2: the selection outline recolors to this when the selected item's
 // footprint currently overlaps another item or a wall — the plan's
 // "decision support, not physics" bar means we flag, we don't block.
+// handle-reskin.md: deliberately kept brighter than DESIGN.md's documented
+// Error `#b30000` — legibility as an always-on-top overlay against furniture
+// wins over palette purity here (open question 4, "keep the brighter red").
 const COLLISION_COLOR = 0xff5c5c;
 // improvements-v2.1 §4: the selection outline (and rotate handle) recolor to
 // this when the selected item is locked — its own `locked` flag or the
 // global "lock all" toggle, either counts (see isPlacementLocked) — and NOT
-// currently flagged as colliding. Amber, distinct from both the cyan
+// currently flagged as colliding. Amber, distinct from both the Action-Blue
 // selection default and the red collision flag, so "locked" reads as its own
 // state rather than a shade of either. Collision still wins when both are
 // true (see updateCollisionHighlight's color composition): a physical
@@ -251,8 +322,8 @@ function cameraRelativeScale(camera: THREE.PerspectiveCamera, worldPos: THREE.Ve
 }
 
 /** Recolors every mesh under a handle (ring+knob, or the elevation double-
- *  arrow's stem+cones) — a handle is a THREE.Group of a few basic meshes, so
- *  hover/idle color swaps traverse it rather than poking one material. */
+ *  arrow's stem+chevrons) — a handle is a THREE.Group of a few basic meshes,
+ *  so hover/idle color swaps traverse it rather than poking one material. */
 function setHandleColor(handle: THREE.Object3D, color: number) {
   handle.traverse((obj) => {
     const mesh = obj as THREE.Mesh;
@@ -274,13 +345,97 @@ function disposeHandle(handle: THREE.Object3D) {
   });
 }
 
+/** A rounded-rectangle (pill, when `radius` is half of `height`) outline in
+ *  the local XY plane, centered on the origin — handle-reskin.md's "pill
+ *  grip" quote of the button-pill silhouette used throughout this app's 2D
+ *  chrome. `radius` is clamped so it can't exceed the shape's own half-width/
+ *  half-height (degenerate otherwise). Feeds `ExtrudeGeometry` for the rotate
+ *  knob. */
+function roundedRectShape(width: number, height: number, radius: number): THREE.Shape {
+  const w = width / 2;
+  const h = height / 2;
+  const r = Math.min(radius, w, h);
+  const shape = new THREE.Shape();
+  shape.moveTo(-w + r, -h);
+  shape.lineTo(w - r, -h);
+  shape.quadraticCurveTo(w, -h, w, -h + r);
+  shape.lineTo(w, h - r);
+  shape.quadraticCurveTo(w, h, w - r, h);
+  shape.lineTo(-w + r, h);
+  shape.quadraticCurveTo(-w, h, -w, h - r);
+  shape.lineTo(-w, -h + r);
+  shape.quadraticCurveTo(-w, -h, -w + r, -h);
+  return shape;
+}
+
+/** A thick "^" chevron outline (two constant-width arms meeting at a centered
+ *  apex) in the local XY plane — handle-reskin.md's "UI stepper, not
+ *  physics-lab vector arrow" replacement for `ConeGeometry`. Apex sits at
+ *  local `+height/2`, base corners at local `-height/2`, so the shape is
+ *  vertically centered on the origin exactly like the cone it replaces —
+ *  callers don't need to re-derive `positionElevationHandle`'s cap-offset
+ *  math. Each arm is offset `thickness/2` to either side of its centerline
+ *  along the arm's own perpendicular, so the two arms meet the apex as a
+ *  (very slightly blunt, unmitered) point rather than a sharp corner — at
+ *  this scale imperceptible, and in keeping with the softened, no-sharp-tips
+ *  brief for the elevation handle. */
+function chevronShape(width: number, height: number, thickness: number): THREE.Shape {
+  const half = thickness / 2;
+  const apex = new THREE.Vector2(0, height / 2);
+  const left = new THREE.Vector2(-width / 2, -height / 2);
+  const right = new THREE.Vector2(width / 2, -height / 2);
+
+  const leftDir = apex.clone().sub(left).normalize();
+  const leftOut = new THREE.Vector2(-leftDir.y, leftDir.x);
+  const rightDir = right.clone().sub(apex).normalize();
+  const rightOut = new THREE.Vector2(-rightDir.y, rightDir.x);
+
+  const shape = new THREE.Shape();
+  const outerLeft = left.clone().addScaledVector(leftOut, half);
+  shape.moveTo(outerLeft.x, outerLeft.y);
+  const pts = [
+    apex.clone().addScaledVector(leftOut, half),
+    apex.clone().addScaledVector(rightOut, half),
+    right.clone().addScaledVector(rightOut, half),
+    right.clone().addScaledVector(rightOut, -half),
+    apex.clone().addScaledVector(rightOut, -half),
+    apex.clone().addScaledVector(leftOut, -half),
+    left.clone().addScaledVector(leftOut, -half),
+  ];
+  for (const pt of pts) shape.lineTo(pt.x, pt.y);
+  shape.closePath();
+  return shape;
+}
+
+/** Builds one chevron head (a shallow-extruded `chevronShape`, centered on
+ *  all three axes) for the elevation handle. A fresh geometry per call — the
+ *  up/down heads each own an independent `BufferGeometry` instance, matching
+ *  the old up/down `ConeGeometry` pair, so `disposeHandle`'s per-mesh
+ *  traversal disposes them cleanly with no shared-resource double-free
+ *  concerns. */
+function chevronHeadGeometry(): THREE.ExtrudeGeometry {
+  const shape = chevronShape(ELEVATION_HANDLE_HEAD_WIDTH_CM, ELEVATION_HANDLE_HEAD_CM, ELEVATION_HANDLE_CHEVRON_ARM_CM);
+  const geometry = new THREE.ExtrudeGeometry(shape, { depth: ELEVATION_HANDLE_CHEVRON_DEPTH_CM, bevelEnabled: false });
+  geometry.center();
+  return geometry;
+}
+
 /** Builds the rotation handle: a flat ring encircling the item's footprint
  *  plus a grip knob riding the ring at the item's front (+Z). The whole group
  *  is the rotate-drag's raycast target (grab the ring *or* the knob). The ring
  *  radius — world-locked to the footprint — is stashed on the group so
  *  positionRotateHandle can place the knob on it every frame. Both meshes use
  *  the standard depthTest-off / late-renderOrder overlay treatment so the
- *  affordance is never occluded by the furniture it points at. */
+ *  affordance is never occluded by the furniture it points at.
+ *
+ *  handle-reskin.md (§5 Option B, built 2026-07-22): the ring is now a flat
+ *  `RingGeometry` annulus (was a round-tube `TorusGeometry`) — the direct 3D
+ *  read of DESIGN.md's "flat, no-shadow, depth-via-field" elevation rule, a
+ *  washer that looks drawn on rather than a lit donut. The knob is now a
+ *  shallow-extruded rounded-rect pill (was a `SphereGeometry`) — this app's
+ *  button-pill silhouette turned into a 3D grip — oriented tangent to the
+ *  ring by `positionRotateHandle` (a plain sphere needed no orientation; a
+ *  pill does). */
 function createRotateHandle(item: FurnitureItem): THREE.Group {
   const dims = furnitureOverallDims(item);
   // Half the footprint's diagonal (not max(w,d)/2 — a 45deg-rotated rectangle
@@ -291,18 +446,28 @@ function createRotateHandle(item: FurnitureItem): THREE.Group {
   group.userData.ringRadius = ringRadius;
 
   const ring = new THREE.Mesh(
-    new THREE.TorusGeometry(ringRadius, ROTATE_RING_TUBE_CM, 12, 64),
+    new THREE.RingGeometry(ringRadius - ROTATE_RING_THICKNESS_CM / 2, ringRadius + ROTATE_RING_THICKNESS_CM / 2, 64),
     new THREE.MeshBasicMaterial({ color: SELECTION_COLOR, depthTest: false }),
   );
-  ring.rotation.x = Math.PI / 2; // lay the torus flat on the floor plane
+  ring.rotation.x = Math.PI / 2; // lay the ring flat on the floor plane
   ring.position.y = ROTATE_HANDLE_LIFT_CM;
   ring.renderOrder = 999;
   group.add(ring);
 
-  const knob = new THREE.Mesh(
-    new THREE.SphereGeometry(ROTATE_KNOB_RADIUS_CM, 16, 16),
-    new THREE.MeshBasicMaterial({ color: SELECTION_COLOR, depthTest: false }),
+  const knobGeometry = new THREE.ExtrudeGeometry(
+    roundedRectShape(ROTATE_KNOB_LENGTH_CM, ROTATE_KNOB_WIDTH_CM, ROTATE_KNOB_WIDTH_CM / 2),
+    { depth: ROTATE_KNOB_DEPTH_CM, bevelEnabled: false },
   );
+  knobGeometry.center();
+  const knob = new THREE.Mesh(knobGeometry, new THREE.MeshBasicMaterial({ color: SELECTION_COLOR, depthTest: false }));
+  // Lay the pill flat first (extrude depth -> vertical thickness, same as the
+  // ring), then yaw it to track the item's front — positionRotateHandle sets
+  // rotation.y every frame. Order 'YXZ' composes as Ry * Rx (yaw applied
+  // about the still-vertical world Y axis, *after* the flattening tilt),
+  // which is the order that keeps the pill's long axis tangent to the ring
+  // instead of tipping it out of the floor plane.
+  knob.rotation.order = 'YXZ';
+  knob.rotation.x = Math.PI / 2;
   knob.renderOrder = 999;
   group.add(knob);
   group.userData.knob = knob;
@@ -310,14 +475,23 @@ function createRotateHandle(item: FurnitureItem): THREE.Group {
 }
 
 /** Builds the elevation handle: a vertical double-arrow (stem capped by an
- *  up-cone and a down-cone) that floats above the item's top face. The
+ *  up-head and a down-head) that floats above the item's top face. The
  *  double-arrow reads unambiguously as "drag me up/down" — distinct from the
  *  floor-hugging rotation ring — and is the raycast target that starts a
- *  vertical drag. Same overlay treatment (depthTest off, late renderOrder). */
+ *  vertical drag. Same overlay treatment (depthTest off, late renderOrder).
+ *
+ *  handle-reskin.md (§5 Option B, built 2026-07-22): the stem stays the same
+ *  `CylinderGeometry` (Option B's (a) — the simpler of its two sanctioned
+ *  constructions), but the sharp `ConeGeometry` caps are now rounded-arm
+ *  chevrons (`chevronHeadGeometry`) — "UI stepper," not "physics-lab vector
+ *  arrow." `capOffset` is unchanged: each chevron is centered on the origin
+ *  exactly like the cone it replaces (same `ELEVATION_HANDLE_HEAD_CM`
+ *  length), so this and positionElevationHandle's halfArrow math don't need
+ *  updating. */
 function createElevationHandle(): THREE.Group {
   const group = new THREE.Group();
   const mat = new THREE.MeshBasicMaterial({ color: SELECTION_COLOR, depthTest: false });
-  const capOffset = ELEVATION_HANDLE_STEM_CM / 2 + ELEVATION_HANDLE_CONE_CM / 2;
+  const capOffset = ELEVATION_HANDLE_STEM_CM / 2 + ELEVATION_HANDLE_HEAD_CM / 2;
 
   const stem = new THREE.Mesh(
     new THREE.CylinderGeometry(ELEVATION_HANDLE_SHAFT_R_CM, ELEVATION_HANDLE_SHAFT_R_CM, ELEVATION_HANDLE_STEM_CM, 12),
@@ -326,12 +500,12 @@ function createElevationHandle(): THREE.Group {
   stem.renderOrder = 999;
   group.add(stem);
 
-  const up = new THREE.Mesh(new THREE.ConeGeometry(ELEVATION_HANDLE_CONE_R_CM, ELEVATION_HANDLE_CONE_CM, 16), mat);
+  const up = new THREE.Mesh(chevronHeadGeometry(), mat);
   up.position.y = capOffset;
   up.renderOrder = 999;
   group.add(up);
 
-  const down = new THREE.Mesh(new THREE.ConeGeometry(ELEVATION_HANDLE_CONE_R_CM, ELEVATION_HANDLE_CONE_CM, 16), mat);
+  const down = new THREE.Mesh(chevronHeadGeometry(), mat);
   down.rotation.x = Math.PI; // flip to point down
   down.position.y = -capOffset;
   down.renderOrder = 999;
@@ -361,6 +535,12 @@ function positionRotateHandle(
   // from center (0,0) gives the knob's local offset on the ring.
   const [kx, kz] = rotateHandleWorldXZ(0, 0, yawDeg, ringRadius);
   knob.position.set(kx, ROTATE_HANDLE_LIFT_CM, kz);
+  // handle-reskin.md: unlike the old sphere, the pill knob isn't rotationally
+  // symmetric, so it also needs to yaw to stay tangent to the ring at its new
+  // position — same yawDeg already computed above, just applied to the mesh
+  // (see the 'YXZ' rotation.order comment in createRotateHandle for why this
+  // composes correctly with the knob's fixed flattening tilt).
+  knob.rotation.y = THREE.MathUtils.degToRad(yawDeg);
   // Camera-relative sizing applies to the knob only — the ring's radius is
   // world-locked to the footprint (scaling it would break that), while the
   // knob keeps the old sphere's constant-on-screen grab-target sizing. The
@@ -385,7 +565,7 @@ function positionElevationHandle(
   // Sit the double-arrow's lower tip a scaled gap above the top face (half the
   // arrow's own extent clears the surface). Scaling the gap too keeps the
   // on-screen standoff constant, matching the gizmo's own constant size.
-  const halfArrow = (ELEVATION_HANDLE_STEM_CM / 2 + ELEVATION_HANDLE_CONE_CM) * scale;
+  const halfArrow = (ELEVATION_HANDLE_STEM_CM / 2 + ELEVATION_HANDLE_HEAD_CM) * scale;
   handle.position.set(
     group.position.x,
     topY + ELEVATION_HANDLE_GAP_CM * scale + halfArrow,
@@ -404,6 +584,11 @@ export const Viewport = forwardRef<
      *  rebuilding the scene/renderer — see the lighting-update effect below.
      *  Defaults to sceneFile.room.lighting (then DEFAULT_LIGHTING). */
     lighting?: Lighting;
+    /** improvements-minor-fixes §9: live mode/location, same "applied
+     *  without rebuilding" shape as `lighting` above. Default to
+     *  sceneFile.room.lightingMode / .location. */
+    lightingMode?: LightingMode;
+    location?: Location;
     /** v2 spike (W-A): fired once per gesture — on drag-release for a move,
      *  or per keypress for a rotate step — with the item's final position/
      *  rotation. Never fired per-frame mid-drag; see the pointer-handler
@@ -425,9 +610,45 @@ export const Viewport = forwardRef<
      *  action shape as onCommitPlacement/onToggleLock, App.tsx maps it onto
      *  the matching item in `sceneFile.items` and runs it through `commit()`. */
     onEditItem?: (itemId: string, patch: ObjectEditPatch) => void;
+    /** docs/proposals/reimport-entry-point.md §14: ObjectInspector's
+     *  "Re-import…"/"Import…" button, fired with the selected item's id —
+     *  same pass-through shape as onEditItem/onToggleLock above. App.tsx's
+     *  handleRequestReimport is the only consumer; this component doesn't
+     *  know anything about the Import tab or ImportPanel, it just forwards
+     *  the click. */
+    onReimport?: (itemId: string) => void;
+    /** improvements-minor-fixes.md §17: live lens-picker FOV — ephemeral
+     *  App.tsx state (mirrors globalLock), applied without a structural
+     *  rebuild by the live-update effect below. `undefined` until this
+     *  component's first-mount report-back (see onFovRecalled) tells
+     *  App.tsx what the initial camera/saved-preset framing actually set —
+     *  deliberately NOT defaulted to HUMAN_FOV here, since that would
+     *  clobber a saved viewpoint's own fovDeg on the very first render (see
+     *  the live-update effect's comment for why). */
+    fovDeg?: number;
+    /** Reports the actually-applied live fov back up to App.tsx: once on
+     *  this component's first mount (syncing the HUD picker to whatever the
+     *  initial camera/saved-preset framing set) and on every flyTo recall
+     *  (so recalling a saved viewpoint's own fovDeg doesn't leave the
+     *  picker's active-pill highlight stale — proposal §3,
+     *  docs/proposals/camera-lens-picker.md). */
+    onFovRecalled?: (fovDeg: number) => void;
   }
 >(function Viewport(
-  { sceneFile, shellCalibration, lighting, onCommitPlacement, onToggleLock, globalLock, onEditItem },
+  {
+    sceneFile,
+    shellCalibration,
+    lighting,
+    lightingMode,
+    location,
+    onCommitPlacement,
+    onToggleLock,
+    globalLock,
+    onEditItem,
+    onReimport,
+    fovDeg,
+    onFovRecalled,
+  },
   handleRef,
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -473,6 +694,21 @@ export const Viewport = forwardRef<
   onToggleLockRef.current = onToggleLock;
   const globalLockRef = useRef(globalLock ?? false);
   globalLockRef.current = globalLock ?? false;
+  // improvements-minor-fixes.md §17: same "ref so an imperative callback
+  // (flyTo, or the structural effect's mount-time report-back) always sees
+  // the latest closure" treatment as onCommitPlacementRef/onToggleLockRef —
+  // flyTo is created once inside useImperativeHandle's deps-[] callback (see
+  // below), so it can't close over a fresh onFovRecalled prop directly.
+  const onFovRecalledRef = useRef(onFovRecalled);
+  onFovRecalledRef.current = onFovRecalled;
+  // Set true after the structural effect's first-ever mount reports its
+  // initial fov back — later rebuilds must NOT re-report (that would
+  // overwrite whatever lens the user picked live with the fresh camera's
+  // own preset/default fov, fighting the "rebuild persists the picker's
+  // choice" behavior the live-update effect below provides via its
+  // buildVersion dependency). See that effect's comment for the full
+  // ordering reasoning.
+  const hasReportedInitialFovRef = useRef(false);
 
   // W-A selection: which placed item (by itemId) is currently selected, plus
   // a BoxHelper wireframe outline (cheapest indicator per the plan — a plain
@@ -503,6 +739,56 @@ export const Viewport = forwardRef<
   // that effect's focus-restore comment for why this matters now that "L"
   // can trigger a rebuild from a keyboard shortcut).
   const pendingRefocusRef = useRef(false);
+
+  // docs/proposals/object-inspector-anchor.md §11 open question 1: keeps
+  // inspectorSizeRef current without a per-frame DOM read. A small, separate
+  // effect (not folded into the giant WebGL effect below) since it only
+  // touches the DOM/React ref, not Three.js state — keyed on selectedItemId
+  // so it (re)attaches whenever `.object-inspector-wrap` mounts (a fresh
+  // selection) or unmounts (deselection), and ResizeObserver itself covers
+  // in-place content-size changes for the lifetime of one selection (a
+  // different item swapped in via the wrap's own re-render doesn't remount
+  // the wrap — only the keyed ObjectInspector child does — so this effect
+  // re-running per selectedItemId is a touch more than strictly necessary
+  // but keeps "attach once while mounted, re-measure on resize" simple).
+  useEffect(() => {
+    const el = inspectorWrapRef.current;
+    if (!el) {
+      inspectorSizeRef.current = { width: 0, height: 0 };
+      return;
+    }
+    function measure() {
+      if (!el) return;
+      inspectorSizeRef.current = { width: el.offsetWidth, height: el.offsetHeight };
+    }
+    measure();
+    const resizeObserver = new ResizeObserver(measure);
+    resizeObserver.observe(el);
+    return () => resizeObserver.disconnect();
+  }, [selectedItemId]);
+  // Bug fix (improvements-minor-fixes.md §15 investigation): a structural
+  // rebuild fires for ANY furniture-item edit (tint, flat-texture upload,
+  // lock toggle, ObjectInspector edits, ...) via structuralSceneFile's
+  // `sceneFile.items` dep — not just room/layout changes. The build below
+  // used to unconditionally frame the fresh camera on `cameras[0]`, even
+  // though the comment on structuralSceneFile's useMemo documents the
+  // intent as "only the initial mount reads cameras[0] as a starting
+  // position." Every non-initial rebuild silently snapped the live view
+  // back to the first saved viewpoint, discarding wherever the user had
+  // orbited to — e.g. the seed's `cameras[0]` ("couch-view") is a
+  // coffee-table-occluded angle on the SONDEROD rug (see spike-v2's D4
+  // drive script), so uploading a replacement rug photo while looking at
+  // the rug from a better angle would silently reset to a view where the
+  // rug — and any texture change on it — is barely visible, reading as "no
+  // visual change" even though the texture itself applied correctly.
+  // Captured in cleanup (mirrors getCurrentView()'s eye/lookAt/fov
+  // derivation, including the walk-mode synthetic-lookAt case) and
+  // consumed as the next build's starting preset instead of `cameras[0]` —
+  // paired with pendingReselectRef/pendingRefocusRef above, same
+  // stash-in-cleanup/restore-in-setup shape. Stays null until the first
+  // cleanup ever runs, so the very first mount still frames on `cameras[0]`
+  // exactly as before.
+  const pendingCameraRestoreRef = useRef<CameraPosition | null>(null);
   const selectionHelperRef = useRef<THREE.BoxHelper | null>(null);
   // §3: the rotate-drag handle — now a THREE.Group (footprint ring + grip
   // knob, was a bare sphere), lifecycle paired with selectionHelperRef
@@ -515,6 +801,26 @@ export const Viewport = forwardRef<
   // only the PageUp/PageDown keyboard step). Same lifecycle/reposition shape
   // as the rotate handle, its own raycast target and vertical-drag gesture.
   const elevationHandleRef = useRef<THREE.Group | null>(null);
+
+  // docs/proposals/object-inspector-anchor.md §11 (§3's plumbing): the
+  // anchored `.object-inspector-wrap` DOM node, positioned imperatively
+  // every animate() frame — see updateInspectorAnchor below. A plain DOM
+  // ref, not a forwardRef into ObjectInspector: the wrap (hint pill + card)
+  // is rendered directly by this component's own JSX (added by
+  // improvements-minor-fixes.md §3's keyboard-cheatsheet work, after this
+  // proposal was drafted assuming ObjectInspector owned its own root node),
+  // so anchoring the wrap Viewport already renders is simpler than routing
+  // through a forwardRef/useImperativeHandle pair on a child component —
+  // and it's the right unit anyway: the hint pill and the inspector card
+  // should move together, not be independently anchored.
+  const inspectorWrapRef = useRef<HTMLDivElement | null>(null);
+  // Cached wrap size (§1 open question 1's recommended lean: measure via
+  // ResizeObserver on content change, not a per-frame getBoundingClientRect
+  // read) — see the ResizeObserver effect below, which keeps this current
+  // whenever the wrap mounts, unmounts, or its content's rendered size
+  // changes (a different item selected, compound-sofa's fewer fields, the
+  // hint pill's text).
+  const inspectorSizeRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 });
 
   // D2: wall AABBs and the item-id -> definition lookup only change when a
   // structural rebuild happens (room/items are structuralSceneFile deps), so
@@ -596,17 +902,22 @@ export const Viewport = forwardRef<
     (helper.material as THREE.LineBasicMaterial).color.set(gestureAffordanceColor(itemId, colliding));
   }
 
-  // improvements-minor-fixes.md §12: every placed item's footprint AABB, for
-  // the walk-mode hard-stop check in the animate loop below. Unlike
-  // updateCollisionHighlight's `others`, there's no itemId to exclude here —
-  // the camera is never itself one of built.furnitureGroups.
+  // improvements-minor-fixes.md §12 (revisited): every placed item's
+  // footprint AABB, for the walk-mode collision check in the animate loop
+  // below. Unlike updateCollisionHighlight's `others`, there's no itemId to
+  // exclude here — the camera is never itself one of built.furnitureGroups.
+  // Rugs/flat floor coverings (isWalkCollidableItem) are skipped entirely —
+  // they don't block walking in real life, and leaving sonderod-rug in this
+  // list was the confirmed "can't walk near the rug" bug. Room-shell walls
+  // are a separate, untouched list (wallFootprintAABBs) — this only ever
+  // filters furniture items.
   function allItemFootprintAABBs(): AABB[] {
     const built = builtRef.current;
     if (!built) return [];
     const aabbs: AABB[] = [];
     built.furnitureGroups.forEach((group, itemId) => {
       const item = itemsByIdRef.current.get(itemId);
-      if (!item) return;
+      if (!item || !isWalkCollidableItem(item)) return;
       const rotationDeg = ((THREE.MathUtils.radToDeg(group.rotation.y) % 360) + 360) % 360;
       aabbs.push(itemFootprintAABB(item, [group.position.x, group.position.y, group.position.z], rotationDeg));
     });
@@ -739,7 +1050,10 @@ export const Viewport = forwardRef<
           // improvements-v2.2 §5: a real imported GLB is the common case for
           // a placed item, not just the box placeholder — don't skip tinting
           // it just because it has its own imported materials.
-          if (item.tintColor) applyModelTint(model, item.tintColor);
+          // improvements-minor-fixes §10: passes the item's chosen blend mode
+          // through, falling back to "multiply" (applyModelTint's own
+          // default) when unset.
+          if (item.tintColor) applyModelTint(model, item.tintColor, item.tintBlendMode);
           group.add(model);
         })
         .catch((err) => {
@@ -811,7 +1125,12 @@ export const Viewport = forwardRef<
     scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 
     const camera = new THREE.PerspectiveCamera(HUMAN_FOV, 1, 5, 3000);
-    const preset = cameras[0];
+    // Bug fix (improvements-minor-fixes.md §15): prefer the previous build's
+    // live camera framing (stashed by this same effect's cleanup — see
+    // pendingCameraRestoreRef's declaration) over `cameras[0]`. `cameras[0]`
+    // is only ever the right starting position for the very first build,
+    // before any cleanup has run to stash a live framing to restore.
+    const preset = resolveStructuralBuildCameraPreset(pendingCameraRestoreRef.current, cameras);
     if (!preset) camera.position.set(0, 300, 600);
 
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -825,6 +1144,23 @@ export const Viewport = forwardRef<
     }
     cameraRef.current = camera;
     controlsRef.current = controls;
+
+    // improvements-minor-fixes.md §17: report the initial live fov (whatever
+    // the block above just set — a saved preset's own fovDeg, or the
+    // HUMAN_FOV construction default) back to App.tsx exactly once, on this
+    // component's first-ever mount, so the HUD lens picker's active-pill
+    // highlight starts in sync with the real camera instead of defaulting
+    // to "Normal" regardless of what the initial framing actually is.
+    // Deliberately NOT done on later rebuilds (see hasReportedInitialFovRef's
+    // declaration) — a later rebuild's fresh camera should pick up whatever
+    // fovDeg the user's live lens choice already set (the fovDeg live-update
+    // effect's buildVersion dependency handles that), not have this line
+    // report the rebuild's own transient preset/default value back and
+    // clobber that choice.
+    if (!hasReportedInitialFovRef.current) {
+      hasReportedInitialFovRef.current = true;
+      onFovRecalledRef.current?.(camera.fov);
+    }
 
     // improvements-v2.1 §5: walk-around camera mode. PointerLockControls is
     // constructed alongside OrbitControls (both live for this structural
@@ -960,6 +1296,11 @@ export const Viewport = forwardRef<
     // mode's forward direction) — a single preallocated Vector3, same "avoid
     // a per-frame allocation" treatment as the drag-gesture vectors above.
     const minimapForward = new THREE.Vector3();
+    // §11 (object-inspector-anchor): reused every updateInspectorAnchor call
+    // (animate()'s per-frame call and selectItem's one-off call) for
+    // projecting the selected item's AABB corners through the camera — same
+    // "avoid a per-frame allocation" treatment as minimapForward above.
+    const inspectorProjectScratch = new THREE.Vector3();
     let drag: { itemId: string; group: THREE.Group } | null = null;
     // §3: a second, mutually-exclusive gesture — dragging the rotate ring/knob
     // turns group.rotation.y by the angle the pointer has swept around the
@@ -1054,7 +1395,7 @@ export const Viewport = forwardRef<
     }
 
     // True if the ray currently hits any mesh under `handle` — recursive,
-    // since a handle is a multi-mesh group (ring+knob, stem+two cones) now.
+    // since a handle is a multi-mesh group (ring+knob, stem+two chevrons) now.
     function rayHitsHandle(handle: THREE.Object3D | null): boolean {
       return handle ? raycaster.intersectObject(handle, true).length > 0 : false;
     }
@@ -1108,6 +1449,107 @@ export const Viewport = forwardRef<
     function selectItem(itemId: string | null) {
       selectedItemIdRef.current = itemId;
       setSelectedItemId(itemId);
+      // §11: computed once synchronously here (not only from animate()) so a
+      // same-frame reselect (one item already selected, another clicked)
+      // doesn't render at a stale anchor for one visible frame. A fresh
+      // empty->selected transition still waits one frame regardless —
+      // inspectorWrapRef.current is null until React commits the wrap's DOM
+      // node, and updateInspectorAnchor no-ops on that — but animate()'s own
+      // rAF tick (<16ms later) picks it up immediately after.
+      updateInspectorAnchor();
+    }
+
+    /** docs/proposals/object-inspector-anchor.md §11/§3: projects the
+     *  selected item's world-space AABB (XZ footprint from itemFootprintAABB,
+     *  height from furnitureOverallDims — same two functions
+     *  updateCollisionHighlight/the elevation handle already trust for
+     *  per-frame work) through the camera, and imperatively positions
+     *  `.object-inspector-wrap` via computeInspectorAnchor's below/above/
+     *  side/clamp rule (src/scene/inspectorAnchor.ts) — direct DOM style
+     *  writes, NOT React state (see this file's header comment on
+     *  positionRotateHandle/positionElevationHandle for why: a per-frame
+     *  setState here would re-render Viewport *and* ObjectInspector 60x/sec
+     *  for a value nothing in the form actually depends on).
+     *
+     *  Called from animate() every frame a selection exists — so the panel
+     *  tracks a live drag/rotate/elevation gesture, an orbit drag, AND a
+     *  flyTo/saved-viewpoint recall alike, since this re-derives from live
+     *  `camera` state regardless of what moved it (open question 2's
+     *  confirmed answer) — and once synchronously from selectItem, per that
+     *  call site's comment. */
+    function updateInspectorAnchor() {
+      // Same "re-check inside the nested function" shape as resize() above —
+      // TS can't carry the outer `if (!container) return` narrowing into a
+      // separate function declaration's body.
+      if (!container) return;
+      const itemId = selectedItemIdRef.current;
+      const el = inspectorWrapRef.current;
+      if (!itemId || !el) return;
+      const group = built.furnitureGroups.get(itemId);
+      const item = itemsByIdRef.current.get(itemId);
+      if (!group || !item) return;
+
+      const containerWidth = container.clientWidth;
+      const containerHeight = container.clientHeight;
+      if (containerWidth === 0 || containerHeight === 0) return;
+
+      const rotationDeg = normalizeDeg(THREE.MathUtils.radToDeg(group.rotation.y));
+      const footprint = itemFootprintAABB(item, [group.position.x, group.position.y, group.position.z], rotationDeg);
+      const dims = furnitureOverallDims(item);
+      const groupY = group.position.y;
+
+      // Project all 8 world-space corners of the footprint × height box
+      // (proposal §1: exact for any yaw/camera angle, unlike projecting just
+      // the center and estimating a radius) and take the min/max of the
+      // resulting container-pixel points. `z > 1` on any corner (behind the
+      // camera's near/far clip, in the "behind camera" sense) flags the item
+      // as not-currently-visible, same as the resulting rect not overlapping
+      // the viewport at all (see the edge case below).
+      let behindCamera = false;
+      let minX = Infinity;
+      let maxX = -Infinity;
+      let minY = Infinity;
+      let maxY = -Infinity;
+      for (const x of [footprint.minX, footprint.maxX]) {
+        for (const z of [footprint.minZ, footprint.maxZ]) {
+          for (const y of [groupY, groupY + dims.h]) {
+            inspectorProjectScratch.set(x, y, z).project(camera);
+            if (inspectorProjectScratch.z > 1) behindCamera = true;
+            const px = (inspectorProjectScratch.x * 0.5 + 0.5) * containerWidth;
+            const py = (-inspectorProjectScratch.y * 0.5 + 0.5) * containerHeight;
+            if (px < minX) minX = px;
+            if (px > maxX) maxX = px;
+            if (py < minY) minY = py;
+            if (py > maxY) maxY = py;
+          }
+        }
+      }
+
+      const objRect: ScreenRect = { left: minX, top: minY, right: maxX, bottom: maxY };
+      const { width: panelWidth, height: panelHeight } = inspectorSizeRef.current;
+      // Edge case (§1): object behind the camera, or its projected box
+      // doesn't overlap the viewport at all — skip the anchor rule and fall
+      // back to the *old* fixed corner, so "not currently visible" degrades
+      // to exactly the pre-anchor-system behavior instead of a new edge
+      // case to design (Shyam's "always reachable while selected"
+      // requirement — the title bar's `Edit "{item.name}"` already says
+      // which item, per open question 3's resolution).
+      const visible = !behindCamera && rectOverlapsViewport(objRect, containerWidth, containerHeight);
+      const anchor = visible
+        ? computeInspectorAnchor(
+            objRect,
+            panelWidth,
+            panelHeight,
+            containerWidth,
+            containerHeight,
+            INSPECTOR_ANCHOR_GAP_PX,
+            INSPECTOR_ANCHOR_MARGIN_PX,
+          )
+        : fixedCornerAnchor(panelHeight, containerHeight, INSPECTOR_ANCHOR_MARGIN_PX);
+
+      el.style.left = `${anchor.left}px`;
+      el.style.top = `${anchor.top}px`;
+      el.style.bottom = "auto";
     }
 
     function commitDrag() {
@@ -1422,7 +1864,7 @@ export const Viewport = forwardRef<
       // Escape cancels an in-progress gesture (explicit revert), matching
       // pointercancel — handled before the selection/rotate logic so it works
       // whether or not an item is "still" selected mid-drag.
-      if (evt.key === "Escape") {
+      if (KEYS_CANCEL_GESTURE.includes(evt.key)) {
         if (drag || rotateDrag || elevationDrag) {
           evt.preventDefault();
           revertGesture();
@@ -1433,6 +1875,21 @@ export const Viewport = forwardRef<
         // ("orbit") on its own. drag/rotateDrag are always null in walk mode
         // (onPointerDown's walk-mode bail — see above), so the revert branch
         // above is a guaranteed no-op here too, not a conflict.
+        return;
+      }
+      // improvements-minor-fixes.md §3 (docs/proposals/keyboard-cheatsheet.md
+      // §2, product review picked `V` over the proposal's own `M`
+      // recommendation): mode toggle has to work from BOTH orbit and walk
+      // mode to be a real toggle, so it's checked before the walk-mode
+      // branch below (which would otherwise swallow every keydown while
+      // walking) and before the `!itemId` gate further down (it isn't
+      // item-scoped at all). Calls the exact same `applyModeRef` the HUD
+      // toggle pill already calls (see the return statement's mode-toggle
+      // button), so there's no second implementation of the mode-switch
+      // logic to keep in sync — this is just a second trigger for it.
+      if (KEYS_MODE_TOGGLE.includes(evt.key)) {
+        evt.preventDefault();
+        applyModeRef.current?.(cameraModeRef.current === "orbit" ? "walk" : "orbit");
         return;
       }
       // improvements-v2.1 §5: walk-mode WASD — held-key state, not a discrete
@@ -1446,12 +1903,16 @@ export const Viewport = forwardRef<
       // shape PointerLockControls' own mousemove listener already has via
       // its isLocked check.
       if (cameraModeRef.current === "walk") {
-        const key = evt.key.toLowerCase();
-        if (key === "w" || key === "a" || key === "s" || key === "d") {
+        if (
+          KEYS_WALK_FORWARD.includes(evt.key) ||
+          KEYS_WALK_BACK.includes(evt.key) ||
+          KEYS_WALK_LEFT.includes(evt.key) ||
+          KEYS_WALK_RIGHT.includes(evt.key)
+        ) {
           evt.preventDefault();
-          if (key === "w") walkKeys.forward = true;
-          else if (key === "s") walkKeys.back = true;
-          else if (key === "a") walkKeys.left = true;
+          if (KEYS_WALK_FORWARD.includes(evt.key)) walkKeys.forward = true;
+          else if (KEYS_WALK_BACK.includes(evt.key)) walkKeys.back = true;
+          else if (KEYS_WALK_LEFT.includes(evt.key)) walkKeys.left = true;
           else walkKeys.right = true;
           return;
         }
@@ -1462,7 +1923,7 @@ export const Viewport = forwardRef<
         // space (w/a/s/d claimed above; q/e/[/]/PageUp/PageDown/L are item-
         // manipulation keys that are inert in walk mode per the comment
         // below anyway) and is the common FPS convention for crouch.
-        if (key === "c") {
+        if (KEYS_CROUCH.includes(evt.key)) {
           evt.preventDefault();
           crouching = !crouching;
           camera.position.y = crouching ? WALK_CROUCH_EYE_HEIGHT_CM : WALK_EYE_HEIGHT_CM;
@@ -1487,7 +1948,7 @@ export const Viewport = forwardRef<
       // PageDown below (own key, no existing binding — see the constants'
       // comments), just editing scene data (through App.tsx's commit) rather
       // than mutating a live THREE.Group.
-      if (evt.key === "l" || evt.key === "L") {
+      if (KEYS_LOCK.includes(evt.key)) {
         evt.preventDefault();
         onToggleLockRef.current?.(itemId);
         return;
@@ -1497,10 +1958,10 @@ export const Viewport = forwardRef<
       if (!group) return;
       let stepDeg = 0;
       let elevationDir: 1 | -1 | null = null;
-      if (evt.key === "q" || evt.key === "Q" || evt.key === "[") stepDeg = -ROTATE_STEP_DEG;
-      else if (evt.key === "e" || evt.key === "E" || evt.key === "]") stepDeg = ROTATE_STEP_DEG;
-      else if (evt.key === ELEVATION_KEY_UP) elevationDir = 1;
-      else if (evt.key === ELEVATION_KEY_DOWN) elevationDir = -1;
+      if (KEYS_ROTATE_CCW.includes(evt.key)) stepDeg = -ROTATE_STEP_DEG;
+      else if (KEYS_ROTATE_CW.includes(evt.key)) stepDeg = ROTATE_STEP_DEG;
+      else if (KEYS_ELEVATE_UP.includes(evt.key)) elevationDir = 1;
+      else if (KEYS_ELEVATE_DOWN.includes(evt.key)) elevationDir = -1;
       else return;
       evt.preventDefault();
       // improvements-v2.1 §4: swallow the keypress either way (consistent
@@ -1526,11 +1987,10 @@ export const Viewport = forwardRef<
     // walkKeys (applyCameraMode also clears all four on any mode switch —
     // this is the ongoing steady-state complement to that one-time reset).
     function onKeyUp(evt: KeyboardEvent) {
-      const key = evt.key.toLowerCase();
-      if (key === "w") walkKeys.forward = false;
-      else if (key === "s") walkKeys.back = false;
-      else if (key === "a") walkKeys.left = false;
-      else if (key === "d") walkKeys.right = false;
+      if (KEYS_WALK_FORWARD.includes(evt.key)) walkKeys.forward = false;
+      else if (KEYS_WALK_BACK.includes(evt.key)) walkKeys.back = false;
+      else if (KEYS_WALK_LEFT.includes(evt.key)) walkKeys.left = false;
+      else if (KEYS_WALK_RIGHT.includes(evt.key)) walkKeys.right = false;
     }
 
     // Keyboard-focus ownership (see onKeyDown): make the canvas focusable and
@@ -1598,34 +2058,36 @@ export const Viewport = forwardRef<
         if (walkControls.isLocked) {
           const step = computeWalkStep(walkKeys, WALK_SPEED_CM_PER_SEC, deltaSec);
           if (step.forward !== 0 || step.right !== 0) {
-            // improvements-minor-fixes.md §12: hard-stop collision. Reuses
-            // the same drag-placement AABB machinery (itemFootprintAABB/
-            // wallFootprintAABBs/aabbOverlap, via walkCamera.ts's
-            // walkStepCollides) rather than a second collision system.
-            // moveForward/moveRight are PointerLockControls' own mutate-in-
-            // place methods — there's no "propose a position, then decide"
-            // API to check *before* applying the step — so this applies the
-            // step first, then reverts the XZ position back to where it was
-            // this frame if the resulting eye footprint collides. Y is never
+            // improvements-minor-fixes.md §12 (revisited): axis-independent
+            // slide collision response. Reuses the same drag-placement AABB
+            // machinery (itemFootprintAABB/wallFootprintAABBs/aabbOverlap,
+            // via walkCamera.ts's resolveWalkCollision/walkStepCollides)
+            // rather than a second collision system. moveForward/moveRight
+            // are PointerLockControls' own mutate-in-place methods — there's
+            // no "propose a position, then decide" API to check *before*
+            // applying the step — so this applies the step first, reads back
+            // the resulting XZ, then resolves each axis independently
+            // against the pre-step position: brushing a wall/item on one
+            // axis reverts just that axis, not the whole frame, so movement
+            // along the other axis keeps going (the v1 whole-frame hard stop
+            // this replaces froze both axes on any overlap). Y is never
             // touched by WASD (see computeWalkStep's own comment), so only
-            // X/Z need saving. This is a whole-frame hard stop, not per-axis
-            // sliding — the decided v1 scope; slide-along-wall is deferred.
+            // X/Z need resolving.
             const prevX = camera.position.x;
             const prevZ = camera.position.z;
             if (step.forward !== 0) walkControls.moveForward(step.forward);
             if (step.right !== 0) walkControls.moveRight(step.right);
-            if (
-              walkStepCollides(
-                camera.position.x,
-                camera.position.z,
-                WALK_COLLISION_RADIUS_CM,
-                allItemFootprintAABBs(),
-                wallAABBsRef.current,
-              )
-            ) {
-              camera.position.x = prevX;
-              camera.position.z = prevZ;
-            }
+            const resolved = resolveWalkCollision(
+              prevX,
+              prevZ,
+              camera.position.x,
+              camera.position.z,
+              WALK_COLLISION_RADIUS_CM,
+              allItemFootprintAABBs(),
+              wallAABBsRef.current,
+            );
+            camera.position.x = resolved.x;
+            camera.position.z = resolved.z;
           }
         }
       } else {
@@ -1686,6 +2148,11 @@ export const Viewport = forwardRef<
           if (elevationHandle) positionElevationHandle(elevationHandle, group, item, camera);
         }
       }
+      // §11: not gated on rotateHandle/elevationHandle existing (unlike the
+      // block above) — the inspector is up whenever something's selected
+      // regardless of whether its handles built successfully; the selection
+      // and DOM-node-exists checks live inside updateInspectorAnchor itself.
+      updateInspectorAnchor();
       renderer.render(scene, camera);
     }
     animate();
@@ -1696,6 +2163,26 @@ export const Viewport = forwardRef<
       // tears the canvas down — see pendingRefocusRef's declaration and the
       // setup-side comment for why this matters now.
       pendingRefocusRef.current = document.activeElement === renderer.domElement;
+      // Bug fix (improvements-minor-fixes.md §15): capture the live camera's
+      // framing before teardown, so the next build restores it instead of
+      // snapping back to `cameras[0]` — see pendingCameraRestoreRef's
+      // declaration. `deriveLiveCameraReading` is the same mode-aware
+      // eye/lookAt derivation ViewportHandle.getCurrentView() uses (including
+      // the walk-mode synthetic-lookAt case), but this reads this closure's
+      // own `camera`/`controls`/`walkControls` — the ones about to be
+      // disposed below — rather than the refs, which getCurrentView() reads
+      // and which this same cleanup nulls out further down.
+      {
+        const eye: [number, number, number] = [camera.position.x, camera.position.y, camera.position.z];
+        const forward = walkControls.getDirection(new THREE.Vector3());
+        pendingCameraRestoreRef.current = deriveLiveCameraReading(
+          eye,
+          camera.fov,
+          cameraModeRef.current,
+          [controls.target.x, controls.target.y, controls.target.z],
+          [forward.x, forward.y, forward.z],
+        );
+      }
       // Code-review finding: a structural rebuild can land mid-drag — e.g. an
       // unrelated background import completing changes `sceneFile.items`,
       // which this effect depends on (via `structuralSceneFile`) independent
@@ -1780,19 +2267,16 @@ export const Viewport = forwardRef<
         const controls = controlsRef.current;
         if (!camera || !controls) return null;
         const eye: [number, number, number] = [camera.position.x, camera.position.y, camera.position.z];
-        if (cameraModeRef.current === "walk" && walkControlsRef.current) {
-          const forward = walkControlsRef.current.getDirection(new THREE.Vector3());
-          return {
-            eye,
-            lookAt: deriveSyntheticLookAt(eye, [forward.x, forward.y, forward.z], SYNTHETIC_LOOKAT_DISTANCE_CM),
-            fovDeg: camera.fov,
-          };
-        }
-        return {
+        const mode = cameraModeRef.current === "walk" && walkControlsRef.current ? "walk" : "orbit";
+        const forward = walkControlsRef.current?.getDirection(new THREE.Vector3()) ?? new THREE.Vector3();
+        const reading = deriveLiveCameraReading(
           eye,
-          lookAt: [controls.target.x, controls.target.y, controls.target.z],
-          fovDeg: camera.fov,
-        };
+          camera.fov,
+          mode,
+          [controls.target.x, controls.target.y, controls.target.z],
+          [forward.x, forward.y, forward.z],
+        );
+        return { eye: reading.eye, lookAt: reading.lookAt, fovDeg: reading.fovDeg };
       },
       // improvements-v2.1 §5 (camera-viewpoint compatibility, other half):
       // every saved CameraPosition was captured as an orbit-style eye+target
@@ -1815,6 +2299,14 @@ export const Viewport = forwardRef<
         if (!camera || !controls) return;
         applyModeRef.current?.("orbit");
         applyCameraPreset(camera, controls, preset);
+        // improvements-minor-fixes.md §17 (proposal §3): recalling a saved
+        // viewpoint sets camera.fov directly, bypassing App.tsx's lifted
+        // lens-picker state entirely — report the fov this recall actually
+        // landed on back up so the HUD picker's active-pill highlight
+        // doesn't go stale (snaps to the nearest preset, or shows no
+        // highlight/"Custom" if the saved viewpoint's fovDeg doesn't match
+        // any of the three named presets — see nearestLensPresetId).
+        onFovRecalledRef.current?.(camera.fov);
       },
       // preserveDrawingBuffer (see the renderer construction above) means
       // whatever animate() last rendered is still sitting in the buffer, so
@@ -1915,13 +2407,22 @@ export const Viewport = forwardRef<
     // eslint-disable-next-line react-hooks/exhaustive-deps -- buildVersion is a signal (rebuild happened), not a value read in the effect
   }, [calibration, buildVersion]);
 
-  // Live sun/hemisphere updates (improvements-v2.2 §4a): same "mutate the
+  // Live sun/hemisphere updates (improvements-v2.2 §4a; extended by
+  // improvements-minor-fixes §9 for location mode): same "mutate the
   // structural effect's already-created objects in place, no renderer/camera
   // churn" shape as the calibration effect above, just simpler — lighting is
   // plain numbers (no async texture decode/dispose), so there's only ever
   // the "cheap path" and no diffing against a previously-applied value is
-  // needed; recomputing is trivial and idempotent.
-  const lightingSettings = lighting ?? sceneFile.room.lighting ?? DEFAULT_LIGHTING;
+  // needed; recomputing is trivial and idempotent. resolveSunLighting is the
+  // single seam (shared with buildScene's initial build) that decides
+  // manual-vs-location — see buildScene.ts.
+  const effectiveLighting = lighting ?? sceneFile.room.lighting;
+  const effectiveLightingMode = lightingMode ?? sceneFile.room.lightingMode;
+  const effectiveLocation = location ?? sceneFile.room.location;
+  const lightingSettings = useMemo(
+    () => resolveSunLighting({ lighting: effectiveLighting, lightingMode: effectiveLightingMode, location: effectiveLocation }),
+    [effectiveLighting, effectiveLightingMode, effectiveLocation],
+  );
 
   useEffect(() => {
     const built = builtRef.current;
@@ -1934,6 +2435,38 @@ export const Viewport = forwardRef<
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps -- buildVersion is a signal (rebuild happened), not a value read in the effect
   }, [lightingSettings, buildVersion]);
+
+  // improvements-minor-fixes.md §17: live lens-picker FOV, modeled directly
+  // on the lighting live-update effect above — "plain numbers... no diffing
+  // against a previously-applied value is needed; recomputing is trivial and
+  // idempotent" applies here too. ViewportChrome's Wide/Normal/Tele picker
+  // lives in App.tsx as ephemeral state (mirroring globalLock) and is
+  // threaded down as the `fovDeg` prop; this is the only place that actually
+  // mutates `camera.fov` in response to it.
+  //
+  // Deliberately no-ops while `fovDeg` is undefined (App.tsx's initial
+  // state, before the structural effect's first-mount report-back above has
+  // told it what fov the initial camera/preset actually landed on) rather
+  // than falling back to HUMAN_FOV here. Falling back would run on the very
+  // first commit with App's not-yet-synced default and clobber a saved
+  // viewpoint's own fovDeg the structural effect had *just* applied moments
+  // earlier in the very same commit — effects run in declaration order
+  // within one commit, on every mount, regardless of whether their own
+  // dependencies "changed," so this one would otherwise always win on
+  // mount. `buildVersion` IS a dependency (unlike the plain `[fovDeg]` in
+  // the docs/proposals/camera-lens-picker.md sketch) so that a *later*
+  // structural rebuild (e.g. an import) reapplies the picker's current
+  // choice onto the fresh camera object the rebuild just constructed — safe
+  // specifically because the structural effect above only reports its own
+  // preset/default fov back to App.tsx on the very first mount, never on a
+  // later rebuild, so the two effects don't fight over which value wins.
+  useEffect(() => {
+    const camera = cameraRef.current;
+    if (!camera || fovDeg === undefined) return;
+    camera.fov = fovDeg;
+    camera.updateProjectionMatrix();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- buildVersion is a signal (rebuild happened), not a value read in the effect
+  }, [fovDeg, buildVersion]);
 
   // v2 spike (W-A) — placement reconciliation: the other half of the
   // mutate-during-gesture/commit-on-drop seam (the drag/rotate handlers in
@@ -2117,7 +2650,7 @@ export const Viewport = forwardRef<
     const group = built.furnitureGroups.get(selId);
     if (group) updateCollisionHighlight(selId, group); // refreshes selectedCollidingRef too
     // §3: both handles are multi-mesh THREE.Group instances (ring+knob,
-    // stem+cones) now, not a single Mesh with a top-level `.material` —
+    // stem+chevrons) now, not a single Mesh with a top-level `.material` —
     // setHandleColor traverses and recolors every mesh underneath.
     // Code-review fix: collision- and lock-aware (gestureAffordanceColor),
     // not lock-only — a locked-and-colliding item's handles should stay red,
@@ -2152,12 +2685,24 @@ export const Viewport = forwardRef<
     <>
       <div ref={containerRef} className="viewport" />
       {selectedItem && (
-        <ObjectInspector
-          key={selectedItem.id}
-          item={selectedItem}
-          onEdit={(patch) => onEditItem?.(selectedItem.id, patch)}
-          onClose={() => setSelectedItemId(null)}
-        />
+        // §11: ref'd directly (not routed through ObjectInspector's own
+        // props) so updateInspectorAnchor can position the hint pill + card
+        // as one anchored unit — see inspectorWrapRef's declaration.
+        <div className="object-inspector-wrap" ref={inspectorWrapRef}>
+          <ObjectInspector
+            key={selectedItem.id}
+            item={selectedItem}
+            onEdit={(patch) => onEditItem?.(selectedItem.id, patch)}
+            onClose={() => setSelectedItemId(null)}
+            onReimport={onReimport}
+          />
+          {/* docs/proposals/keyboard-cheatsheet.md §3 (item 2): "L" has zero
+           *  in-app discoverability today — this is the cheap, always-on
+           *  complement to the `?` cheatsheet overlay (ViewportChrome),
+           *  putting the shortcuts relevant to *what's currently selected*
+           *  right next to it, mirroring walk mode's own hint pill below. */}
+          <p className="viewport-mode-hint">L lock · Q/E rotate · PgUp/PgDn elevate · Esc cancel</p>
+        </div>
       )}
       <Minimap ref={minimapRef} room={sceneFile.room} items={sceneFile.items} commands={currentLayoutCommands} />
       <div className="viewport-mode-toggle">

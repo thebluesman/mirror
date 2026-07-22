@@ -9,7 +9,8 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { getAsset } from "../storage/assets";
-import type { Dims, ModelRotation } from "../schema/scene";
+import type { Dims, ModelRotation, TintBlendMode } from "../schema/scene";
+import { applyTintBlend } from "./tintBlend";
 
 /** Decodes a stored GLB into a fresh THREE.Object3D. Throws if the hash isn't
  *  in the asset store — callers should already know it's there (it came from
@@ -94,23 +95,31 @@ export function fitModelToDims(model: THREE.Object3D, dims: Dims, modelRotationD
 }
 
 /**
- * Applies an item's tint (improvements-v2.2 §5) to a loaded GLB, multiplying
- * `tintColor` into every mesh material's own color — mirrors
- * shellMaterials.ts's multiplicative tint-over-base, but skips the "reset to
- * base" step that module needs: this model is freshly decoded from OPFS on
- * every call (loadFurnitureModel above always returns a new Object3D with
- * its own new materials, never a cached/shared one), so its material colors
- * already *are* the untinted base — nothing stale to undo first. Duck-types
- * on `.color` rather than checking specific Material subclasses, since a
- * glTF import can carry any of several color-bearing material types.
+ * Applies an item's tint (improvements-v2.2 §5; blend-mode dispatch added
+ * improvements-minor-fixes §10) to a loaded GLB, blending `tintColor` into
+ * every mesh material's own color via the shared applyTintBlend helper
+ * (src/scene/tintBlend.ts) — mirrors shellMaterials.ts's multiplicative
+ * tint-over-base, but skips the "reset to base" step that module needs: this
+ * model is freshly decoded from OPFS on every call (loadFurnitureModel above
+ * always returns a new Object3D with its own new materials, never a cached/
+ * shared one), so its material colors already *are* the untinted base —
+ * nothing stale to undo first. Duck-types on `.color` rather than checking
+ * specific Material subclasses, since a glTF import can carry any of several
+ * color-bearing material types; `mode` defaults to "multiply" so a call site
+ * that hasn't been updated (or an item with no `tintBlendMode` set) keeps
+ * today's exact behavior.
  */
-export function applyModelTint(model: THREE.Object3D, tintColor: string): void {
-  const tint = new THREE.Color(tintColor);
+export function applyModelTint(
+  model: THREE.Object3D,
+  tintColor: string,
+  mode: TintBlendMode = "multiply",
+): void {
   model.traverse((child) => {
     if (!(child instanceof THREE.Mesh)) return;
     const materials = Array.isArray(child.material) ? child.material : [child.material];
     materials.forEach((mat) => {
-      (mat as THREE.Material & { color?: THREE.Color }).color?.multiply(tint);
+      if (!(mat as THREE.Material & { color?: THREE.Color }).color) return;
+      applyTintBlend(mat as THREE.MeshStandardMaterial, tintColor, mode);
     });
   });
 }

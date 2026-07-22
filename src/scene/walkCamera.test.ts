@@ -3,6 +3,8 @@ import type { AABB } from "./collision";
 import {
   computeWalkStep,
   deriveSyntheticLookAt,
+  isWalkCollidableItem,
+  resolveWalkCollision,
   walkCameraFootprintAABB,
   walkStepCollides,
   type WalkInput,
@@ -129,5 +131,70 @@ describe("walkStepCollides", () => {
   it("grows with a larger radius, catching a collision a smaller radius would miss", () => {
     expect(walkStepCollides(120, 100, 5, [item], [])).toBe(false);
     expect(walkStepCollides(120, 100, 30, [item], [])).toBe(true);
+  });
+});
+
+// improvements-minor-fixes.md §12 (revisited): rug exclusion. The function
+// only reads `category`, so a minimal object is enough to exercise it
+// without pulling in a full FurnitureItem fixture.
+describe("isWalkCollidableItem", () => {
+  it("is false for a rug-category item (e.g. sonderod-rug)", () => {
+    expect(isWalkCollidableItem({ category: "rug" })).toBe(false);
+  });
+
+  it("is true for a non-rug category item", () => {
+    expect(isWalkCollidableItem({ category: "seating" })).toBe(true);
+  });
+
+  it("is true when category is unset (uncategorized items still collide)", () => {
+    expect(isWalkCollidableItem({ category: undefined })).toBe(true);
+  });
+});
+
+// improvements-minor-fixes.md §12 (revisited): axis-independent sliding.
+describe("resolveWalkCollision", () => {
+  it("keeps both axes when neither collides", () => {
+    expect(resolveWalkCollision(0, 0, 10, 20, 30, [], [])).toEqual({ x: 10, z: 20 });
+  });
+
+  it("reverts only X when the X-only candidate collides but the Z-only candidate doesn't (old whole-frame revert would have frozen Z too)", () => {
+    // A wall spanning a wide X range at Z in [-5, 5]: moving to (nextX, prevZ=0)
+    // collides because prevZ is still inside the wall's Z band, but moving to
+    // (prevX=0, nextZ) is clear because Z is moving away from the wall.
+    const wall: AABB = { minX: -500, maxX: 500, minZ: -5, maxZ: 5 };
+    const result = resolveWalkCollision(0, 0, 50, 40, 30, [], [wall]);
+    // X candidate (50, 0) overlaps the wall -> X reverts to prevX.
+    // Z candidate (0, 40) is clear of the wall -> Z advances to nextZ.
+    expect(result.x).toBe(0);
+    expect(result.z).toBe(40);
+  });
+
+  it("reverts only Z when only the Z-only candidate collides", () => {
+    const item: AABB = { minX: -5, maxX: 5, minZ: 90, maxZ: 110 };
+    const result = resolveWalkCollision(0, 0, 40, 100, 30, [item], []);
+    // Z candidate (0, 100) overlaps the item -> Z reverts to prevZ.
+    // X candidate (40, 0) is clear -> X advances to nextX.
+    expect(result.x).toBe(40);
+    expect(result.z).toBe(0);
+  });
+
+  it("reverts both axes when both candidates collide (corner case, matches old hard-stop behavior)", () => {
+    const item: AABB = { minX: -200, maxX: 200, minZ: -200, maxZ: 200 };
+    const result = resolveWalkCollision(0, 0, 50, 50, 30, [item], []);
+    expect(result).toEqual({ x: 0, z: 0 });
+  });
+
+  it("advances both axes when both candidates are clear, even though the combined diagonal step would have overlapped a corner item under whole-frame revert", () => {
+    // Item corner AABB positioned so the diagonal destination (60, 60) would
+    // have overlapped it under the old "check combined (x+dx, z+dz)" logic,
+    // but neither axis-isolated candidate (60, 0) nor (0, 60) does.
+    const cornerItem: AABB = { minX: 45, maxX: 75, minZ: 45, maxZ: 75 };
+    // Sanity: the old whole-frame check would have reverted this step.
+    expect(walkStepCollides(60, 60, 30, [cornerItem], [])).toBe(true);
+    expect(walkStepCollides(60, 0, 30, [cornerItem], [])).toBe(false);
+    expect(walkStepCollides(0, 60, 30, [cornerItem], [])).toBe(false);
+
+    const result = resolveWalkCollision(0, 0, 60, 60, 30, [cornerItem], []);
+    expect(result).toEqual({ x: 60, z: 60 });
   });
 });

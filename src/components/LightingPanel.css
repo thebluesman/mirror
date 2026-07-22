@@ -66,3 +66,86 @@
   outline: none;
   box-shadow: 0 0 0 2px rgba(76, 110, 230, 0.65);
 }
+
+/* improvements-minor-fixes §9: the Manual/By-location mode toggle — a plain
+ * labelled radio pair (proposal §3.1: "no bespoke widget"), styled with the
+ * same soft-stone row/token language as .lighting-row rather than a new
+ * visual vocabulary. */
+.lighting-mode-toggle {
+  background: var(--color-soft-stone);
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: var(--space-12);
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-16);
+}
+
+.lighting-mode-toggle legend {
+  padding: 0;
+}
+
+.lighting-mode-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  font: var(--text-body);
+  font-size: 13px;
+  color: var(--color-ink);
+  cursor: pointer;
+}
+
+.lighting-mode-option input[type="radio"] {
+  accent-color: var(--color-action-blue);
+}
+
+/* improvements-minor-fixes §9: latitude/longitude/orientation/time/date
+ * fields — same idiom as ObjectEditFields.css's `.object-edit-field`
+ * (`<label><span>Label</span><input/></label>`, text-input styling via the
+ * same tokens), reproduced here as a sibling class rather than a shared
+ * import, matching this file's existing "sibling classes, same tokens"
+ * precedent (see the header comment). */
+.lighting-location-row {
+  display: flex;
+  gap: var(--space-8);
+}
+
+.lighting-location-field {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font: var(--text-body);
+  font-size: 12px;
+  color: var(--color-body-muted);
+}
+
+.lighting-location-field select,
+.lighting-location-field input {
+  width: 100%;
+  font: var(--text-body);
+  font-size: 13px;
+  padding: var(--space-8);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-xs);
+  background: var(--color-canvas);
+  color: var(--color-ink);
+}
+
+.lighting-location-field select:focus-visible,
+.lighting-location-field input:focus-visible {
+  outline: none;
+  border-color: var(--color-focus-blue);
+  box-shadow: 0 0 0 2px rgba(76, 110, 230, 0.65);
+}
+
+.lighting-location-hint {
+  font: var(--text-mono-label);
+  font-size: 11px;
+  color: var(--color-muted-slate);
+  margin: 0;
+  text-transform: none;
+  letter-spacing: normal;
+  line-height: 1.5;
+}

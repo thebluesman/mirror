@@ -1,5 +1,29 @@
 # Proposal: switchable camera lenses (live FOV presets) — improvements-minor-fixes §17
 
+**Built (2026-07-22).** `src/scene/cameraLens.ts` is the new single source of
+truth: `HUMAN_FOV` now lives there (Viewport.tsx imports it instead of
+redeclaring it), `fovDegFromFocalLengthMm` derives Wide/Tele from the same
+36×24mm full-frame convention `HUMAN_FOV`'s own "~35mm-equivalent" comment
+already implied (confirmed by sanity-check: `fovDegFromFocalLengthMm(35) ≈
+37.85°`, within 1° of the existing `HUMAN_FOV = 38`), and `Normal` is pinned
+to `HUMAN_FOV` directly, not re-derived. State lives in `App.tsx` as
+`liveFovDeg` (mirroring `globalLock` exactly, per §2), threaded to
+`ViewportChrome` (new `.viewport-chrome-lens` grouped pill, §17's
+"Wide"/"Normal"/"Tele"-only labels — the `focalLengthLabel` shows in a
+`title` tooltip, never a degree) and to `Viewport.tsx` as `fovDeg`, applied
+by a new live-update effect modeled on the lighting effect. Recall-sync
+(§3): `flyTo` and the structural effect's first-mount both report the
+actually-applied fov back via a new `onFovRecalled` callback;
+`nearestLensPresetId` snaps to the nearest preset within **3°** or returns
+`null` ("Custom" — no pill highlighted) otherwise — see that function's
+comment in `cameraLens.ts` for the full reasoning on why 3° (comfortably
+absorbs float/rounding noise from the irrational trig results without
+falsely claiming a meaningfully different saved-viewpoint framing is one of
+the three named lenses). Structural-rebuild persistence (§2's tail
+question): the live-update effect depends on `buildVersion` so a rebuild
+reapplies the picker's current choice onto the fresh camera — resolved as
+"stays," per this doc's own lean.
+
 **Status:** approved for build (2026-07-22 review), with one scope change
 from this doc's own recommendation: **presets, not a slider** (confirmed),
 but labeled and specified by **35mm-equivalent focal length**, not FOV

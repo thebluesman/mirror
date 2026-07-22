@@ -32,12 +32,36 @@
   padding: var(--space-8);
 }
 
+/* §1/§2 icon-placement fix (b) (improvements-minor-fixes.md, review round):
+ * each saved-view/layout row used to be a bordered `.viewport-chrome-pill`
+ * (the name) followed by two separate borderless icon buttons pulled snug
+ * via a negative margin — no shared boundary actually wrapped all three, so
+ * the pencil/× rendered past the name pill's own rounded border. This row
+ * now owns the ONE shared pill border/background itself; the name button
+ * inside it goes borderless (`.viewport-chrome-pill--nested`, below) and the
+ * icon buttons sit as trailing children inside this same boundary. */
 .viewport-chrome-view {
   display: flex;
   align-items: center;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: var(--radius-pill);
+}
+
+.viewport-chrome-view:hover {
+  border-color: var(--color-canvas);
 }
 
 .viewport-chrome-pill {
+  /* §1/§2 icon-placement fix (a): this flex/align-items/gap treatment used
+   * to live only on the `.viewport-chrome-lock` modifier below, so any pill
+   * rendering icon+text children WITHOUT that modifier (e.g. Snapshot) fell
+   * back to default inline flow — baseline-aligned, not vertically centered.
+   * Moved onto the base class so every icon-plus-label pill centers
+   * consistently, not just the one that happened to get a bespoke modifier. */
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-8);
   font: var(--text-button);
   font-size: 13px;
   background: transparent;
@@ -57,16 +81,23 @@
   border-style: dashed;
 }
 
-/* improvements-v2.1 §4: global lock toggle — same pill shape as the rest of
- * the bar, plus an icon+label pairing (the bar's other pills are text-only
- * or icon-only, never both) since "Lock all" alone reads ambiguously as an
- * action label vs. a state, and the icon alone doesn't carry the word
- * "all" that distinguishes it from a per-item lock. */
-.viewport-chrome-lock {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-8);
+/* §1/§2 icon-placement fix (b): the name button inside a `.viewport-chrome-
+ * view` row no longer paints its own border — the wrapping row does that
+ * now (above) — so this modifier strips it back to a transparent, borderless
+ * pill segment that reads as part of the row's single shared boundary. */
+.viewport-chrome-pill--nested {
+  border: none;
+  padding-right: var(--space-4);
 }
+
+/* improvements-v2.1 §4: global lock toggle — icon+label pairing (the bar's
+ * other pills are text-only or icon-only, never both) since "Lock all"
+ * alone reads ambiguously as an action label vs. a state, and the icon
+ * alone doesn't carry the word "all" that distinguishes it from a per-item
+ * lock. `.viewport-chrome-lock` itself carries no declarations anymore —
+ * the flex/align-items/gap it used to own on its own now lives on the base
+ * `.viewport-chrome-pill` class above (§1/§2 fix a) — it stays in the JSX
+ * purely as the hook `.viewport-chrome-lock--active` (below) attaches to. */
 
 /* Active state deliberately does NOT reuse Viewport.tsx's collision-red
  * (COLLISION_COLOR) — locked-and-safe isn't an error state. Solid fill in
@@ -82,6 +113,11 @@
   border-color: var(--color-canvas);
 }
 
+/* §1/§2 icon-placement fix (b): both icon buttons now sit inside the row's
+ * own shared border (`.viewport-chrome-view`, above) rather than being
+ * pulled snug against a separately-bordered name pill via negative margin —
+ * that hack is gone; vertical padding matches the name pill's own
+ * (`--space-8`) so all three segments read as one uniform pill height. */
 .viewport-chrome-remove {
   display: inline-flex;
   align-items: center;
@@ -89,7 +125,7 @@
   border: none;
   color: var(--color-muted-slate);
   cursor: pointer;
-  padding: 0 var(--space-8) 0 var(--space-2);
+  padding: var(--space-8) var(--space-12) var(--space-8) var(--space-2);
   line-height: 1;
 }
 
@@ -97,10 +133,6 @@
   color: var(--color-canvas);
 }
 
-/* Sits between the pill and the (optional) remove button — pulled snug
- * against the pill the same way .viewport-chrome-remove originally was,
- * since it's now the first icon-button neighbor; .viewport-chrome-remove's
- * own pull was dropped so the two icon buttons don't overlap each other. */
 .viewport-chrome-rename {
   display: inline-flex;
   align-items: center;
@@ -108,13 +140,49 @@
   border: none;
   color: var(--color-muted-slate);
   cursor: pointer;
-  padding: 0 var(--space-2);
-  margin-left: calc(var(--space-8) * -1);
+  padding: var(--space-8) var(--space-2);
   line-height: 1;
 }
 
 .viewport-chrome-rename:hover {
   color: var(--color-canvas);
+}
+
+/* improvements-minor-fixes.md §17: lens picker — Wide/Normal/Tele grouped as
+ * one pill-shaped control (mutually exclusive states of a single control,
+ * not three standalone actions like Snapshot), same near-black-on-primary
+ * visual language as the outer `.viewport-chrome-bar`. */
+.viewport-chrome-lens {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: var(--radius-pill);
+  padding: var(--space-2);
+}
+
+.viewport-chrome-lens-option {
+  font: var(--text-button);
+  font-size: 12px;
+  background: transparent;
+  color: var(--color-canvas);
+  border: none;
+  border-radius: var(--radius-pill);
+  padding: var(--space-6) var(--space-12);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.viewport-chrome-lens-option:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* Same solid canvas-on-ink fill as `.viewport-chrome-lock--active` — the
+ * established "pressed/armed" treatment for a persistent-state pill in this
+ * bar, reused rather than inventing a second active-state visual language. */
+.viewport-chrome-lens-option--active {
+  background: var(--color-canvas);
+  color: var(--color-ink);
 }
 
 .viewport-chrome-naming {
