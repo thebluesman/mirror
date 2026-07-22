@@ -32,6 +32,15 @@
   --text-section-heading: 400 48px/1.2 var(--font-display);
   --text-card-heading: 400 32px/1.2 var(--font-display);
   --text-feature-heading: 400 24px/1.3 var(--font-display);
+  /* improvements-minor-fixes.md §7: heavier variant of feature-heading, for
+     sidebar panel titles only (ShellPanel/LightingPanel/SettingsPanel/
+     ImportPanel). --text-feature-heading itself also backs .app-title
+     (App.css), a different context that must stay regular-weight, so this is
+     an addition, not a bump of the shared token. 600 matches this app's
+     existing bold-weight convention for sub-headings (.shell-row-title et
+     al, one per panel CSS file) and cohere/DESIGN.md's "avoid heavy bold
+     weights" guidance — 600 over a heavier 700. */
+  --text-feature-heading-bold: 600 24px/1.3 var(--font-display);
   --text-body-large: 400 18px/1.4 var(--font-display);
   --text-body: 400 16px/1.5 var(--font-display);
   --text-button: 500 14px/1.71 var(--font-display);
