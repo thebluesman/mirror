@@ -4,7 +4,8 @@ import { loadFalKey } from "../storage/settings";
 import { putAsset } from "../storage/assets";
 import { generateFurnitureGlb, FalKeyMissingError, type GenerationPhase } from "../import/falClient";
 import { applyFurnitureImport } from "../import/applyImport";
-import { furnitureOverallDims } from "../scene/buildScene";
+import { applyFlatTexture } from "../import/applyFlatTexture";
+import { furnitureOverallDims, isBoxFurnitureItem, type BoxFurnitureItem } from "../scene/buildScene";
 import { slugify, uniqueId } from "../util/slug";
 import "./ImportPanel.css";
 
@@ -124,6 +125,20 @@ export function ImportPanel({
     setSelection("__new__");
   }
 
+  // Phase 6 (PRD §7.6): the flat-texture upload control, replacing the only
+  // prior path of hand-editing flatTextureHash into the persisted project
+  // record. No fal.ai call, no dims/rotation confirmation step — the raw
+  // photo is stored as-is (Viewport.tsx does content-box detection and the
+  // cover-fit crop live, from the item's real dimsCm, at render time; see
+  // its `detectContentBox` and `computeFlatTextureFit` usage), so this is a
+  // one-step upload -> commit, same "discrete, deliberate action, persist
+  // immediately" treatment `onImported` already gives a completed import.
+  async function handleFlatTextureUpload(itemId: string, file: File): Promise<void> {
+    const hash = await putAsset(file);
+    const next = applyFlatTexture(sceneFile, itemId, hash);
+    onImported(next);
+  }
+
   const canPickPhoto =
     hasFalKey === true && (selection !== "__new__" || newName.trim().length > 0) && stage.kind === "pick";
 
@@ -187,6 +202,10 @@ export function ImportPanel({
           >
             Upload photo…
           </button>
+
+          {selectedItem && isBoxFurnitureItem(selectedItem) && (
+            <FlatTextureRow item={selectedItem} onUpload={(file) => handleFlatTextureUpload(selectedItem.id, file)} />
+          )}
         </>
       )}
 
@@ -257,6 +276,78 @@ export function ImportPanel({
 // positivity constraint, persist that way with no in-app fix in v1.
 function isValidDim(n: number): boolean {
   return Number.isFinite(n) && n > 0;
+}
+
+// Phase 6 (PRD §7.6): per-item "use flat photo texture" control, mirroring
+// ShellPanel.tsx's SurfaceRow (status pill + upload/replace button + error
+// state) rather than inventing a new upload pattern. Box items only — see
+// isBoxFurnitureItem's call site above and schema/scene.ts's flatTextureHash
+// comment for why (a compound-sofa's multi-part footprint has no single "top
+// face" to map a flat photo onto).
+function FlatTextureRow({
+  item,
+  onUpload,
+}: {
+  item: BoxFurnitureItem;
+  onUpload: (file: File) => Promise<void>;
+}) {
+  const [status, setStatus] = useState<"idle" | "processing" | "error">("idle");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  async function handleFile(file: File) {
+    setStatus("processing");
+    try {
+      await onUpload(file);
+      setStatus("idle");
+    } catch (err) {
+      console.error("[ImportPanel] flat-texture upload failed", err);
+      setStatus("error");
+    }
+  }
+
+  return (
+    <section className="import-panel-flat-texture">
+      <header className="import-panel-flat-texture-header">
+        <span className="import-panel-flat-texture-title">Flat photo texture</span>
+        <span
+          className={`import-panel-flat-texture-status import-panel-flat-texture-status--${
+            item.flatTextureHash ? "photo" : "none"
+          }`}
+        >
+          {item.flatTextureHash ? "photo applied" : "none"}
+        </span>
+      </header>
+
+      <p className="import-panel-flat-texture-hint">
+        For flat, pattern-is-the-point items (rugs and the like) — a straight-on photo mapped 1:1 onto
+        "{item.name}"'s real footprint, instead of generating a 3D model.
+        {item.glbHash && " This item already has a generated model, which takes priority if both are set."}
+      </p>
+
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        className="import-panel-file-input"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) void handleFile(file);
+          e.target.value = "";
+        }}
+      />
+      <button
+        type="button"
+        className="import-panel-button-secondary"
+        onClick={() => inputRef.current?.click()}
+        disabled={status === "processing"}
+      >
+        {status === "processing" ? "Processing…" : item.flatTextureHash ? "Replace photo" : "Upload photo"}
+      </button>
+      {status === "error" && (
+        <p className="import-panel-dims-error">Couldn't store that photo — try another.</p>
+      )}
+    </section>
+  );
 }
 
 const ROTATION_STEPS = [0, 90, 180, 270] as const;
