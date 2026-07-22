@@ -410,3 +410,154 @@ before implementation, per this doc's own sequencing notes:
 
 **Still blocked** — §15 (rug bug repro still not provided). **No action
 needed** — §8, §16 (unchanged from prior round).
+
+---
+
+## Review round — 2026-07-22 (Shyam tests PR #27, calls made on all 8 proposals)
+
+Shyam manually tested the build-round items and reviewed all 8 proposal
+docs plus the §6 DESIGN.md audit. Feedback below; nothing in this round has
+been built yet — this is the punch list for the *next* round.
+
+### 12 (revisited). Walk-mode hard-stop collision needs a rethink — not just polish
+
+Confirmed problem, not a nitpick: the whole-frame hard-stop makes tight
+spaces hard to navigate, and the floor rug (`sonderod-rug`) is itself
+colliding — you can't walk near it at all. **Decided: do both of the
+following**, not either/or:
+
+1. **Exclude flat floor coverings from collision entirely.** Rugs shouldn't
+   block walking in real life. The `category` field shipped this same PR
+   (`docs/proposals/object-categories.md`) already tags `sonderod-rug` as
+   `category: "rug"` — `allItemFootprintAABBs()` (`Viewport.tsx`) should skip
+   any item whose `category === "rug"` when building the walk-collision
+   AABB list. (Room-shell walls presumably stay collidable — only rug/flat-
+   covering *furniture items* are meant to fall out, not the walls
+   `wallFootprintAABBs` already covers.)
+2. **Replace the whole-frame hard revert with axis-independent sliding.**
+   Check X and Z movement separately (not just revert the entire XZ step on
+   any overlap) so brushing a wall or item on one axis doesn't freeze
+   movement on the other — the standard "slide along the surface" collision
+   response `walkStepCollides`'s own header comment already named as the
+   deferred alternative to the v1 hard-stop scope. This is the harder half
+   of the two fixes; `walkCameraFootprintAABB`/`walkStepCollides`
+   (`walkCamera.ts`) will need per-axis variants or an equivalent refactor,
+   not a one-line change.
+
+### 3. Keyboard cheatsheet — approved for build
+
+Mode-toggle key is **`V`**, not `M` (this doc's proposal recommended `M`;
+Shyam picked `V`). Build **both** the cheatsheet overlay and the revived `L`
+hint pill (open question 1: do both, not one or the other). Build the
+shared `SHORTCUTS` table (§4.3 of the proposal) as both `onKeyDown` and the
+`?` overlay's source of truth. The `?` cheatsheet stays anchored in the
+existing bottom-center HUD pill group — no new HUD position.
+
+**New scope added at review, not in the original proposal:** the global
+"Lock all" HUD button (`ViewportChrome.tsx`) needs to reflect real lock
+state. Today it only tracks its own toggle flag (`globalLock`); if items get
+individually locked via the `L` key independent of that button, the button's
+"Lock all"/"All locked" label can silently go stale relative to what's
+actually locked. Fix: derive the label from whether every item is currently
+locked, not from a separately-tracked boolean.
+
+See `docs/proposals/keyboard-cheatsheet.md`'s updated status line for the
+full detail.
+
+### 14. Re-import entry point — approved for build
+
+Go with the proposal's own lean on both open questions: switching to the
+Import tab via "Re-import" leaves `ObjectInspector` open behind the sidebar
+(doesn't deselect the item); icon is `RefreshCw`. See
+`docs/proposals/reimport-entry-point.md`.
+
+### 17. Camera lens picker — approved for build, scope corrected
+
+Shyam's ask was **focal-length presets, not FOV**: **Wide 24mm / Normal
+35mm / Tele 85mm**, shown to the user by focal length only — the UI must
+never surface a degree value. This is a change from the proposal doc's own
+55°/38°/20° FOV-degree preset table; whoever builds this needs to re-derive
+each preset's actual `camera.fov` from its 35mm-equivalent focal length
+(check `HUMAN_FOV = 38`'s existing "~35mm-equivalent" derivation in
+`Viewport.tsx`/`walkCamera.ts` first, so the three new presets and the
+existing default share one sensor-format convention rather than inventing a
+second one). See `docs/proposals/camera-lens-picker.md`.
+
+### 5. Handle reskin — approved for build
+
+**Option B** (shape + palette reskin) confirmed. The three smaller open
+questions (Coral on hover vs. drag-only; document handle colors in
+`DESIGN.md`; align collision-red to the documented Error hex or keep the
+brighter one) weren't explicitly revisited — proposal's own recommended
+leans carry forward unless corrected at build time. See
+`docs/proposals/handle-reskin.md`.
+
+### 18. Shell texture preview — approved for build, scope corrected
+
+**P-2** (narrow draft — preview gates only the *photo*, not the whole
+calibration), overriding the proposal's own P-1 recommendation. Remaining
+open questions (defer `putAsset` to Confirm; tooltip mechanism T-1 vs. T-2;
+inline vs. larger preview) weren't explicitly revisited — proposal's leans
+carry forward unless corrected at build time. See
+`docs/proposals/shell-texture-preview.md`.
+
+### 9. Location-driven lighting — approved for build
+
+**Hour + date**, confirming the proposal's own recommendation — date
+defaults to today. See `docs/proposals/location-lighting.md`.
+
+### 10. Tint blend modes — approved for build, reduced scope
+
+Ship **multiply + screen only** this round (both free on the flat/
+placeholder-box path); overlay/soft-light/darken deferred to a follow-up,
+not dropped. See `docs/proposals/tint-blend-modes.md`.
+
+### 11. ObjectInspector anchor — not addressed this round
+
+Shyam didn't review this one in this round (the only one of the 8 proposals
+without an explicit call) — status in `docs/proposals/object-inspector-anchor.md`
+is unchanged: direction decided, implementation-detail open questions still
+open. Flag for Shyam next time rather than assuming an answer.
+
+### §1/§2 (icon placement) — reopened, still unresolved
+
+The size fix landed this PR, but Shyam says icon *placement* within their
+buttons still looks "weird" — unlike the size question, this one has no
+diagnosed root cause yet. Likely candidates worth checking first: button
+padding/centering box not accounting for the icon's actual visual bounding
+box (Lucide icons have internal padding that varies slightly by glyph), or
+the `--space-8` icon-to-text gap reading unevenly against different icon
+shapes. Needs actual visual inspection in the running app before guessing
+further — not a decision Shyam can make in the abstract, a bug to
+diagnose next round.
+
+### 15. SONDEROD rug bug — repro obtained, ready to diagnose
+
+Photo confirmed: `spike-v2/assets/sonderod-rug-photo.png` (already in-repo
+from the spike work) — Shyam confirms this is the exact file he's been
+uploading. Item: `sonderod-rug` in `seed/living-room.json`
+(`category: "rug"` per the schema field shipped this PR).
+
+**Symptom, precisely:** upload completes with no thrown error and no
+console message — but the rug's rendered appearance shows **no change
+whatsoever**, not a distortion/stretch/wrong-orientation bug. It reads as a
+no-op: either the new texture never gets applied to the material, or it's
+being applied but is visually indistinguishable from whatever was already
+there (worth checking both).
+
+**Also confirmed:** Shyam has personally exercised this in the running app
+and it has never worked for him live — the earlier renders that looked
+correct were from separate test worktrees/branches, not this app running
+end-to-end, so don't assume those prove any current code path works. Ready
+to diagnose next round with this repro in hand — no further info needed
+from Shyam first.
+
+## Sequencing note (review round)
+
+Everything above except §11 (not reviewed) and §15 (diagnosis, not a
+proposal) is now approved straight to build — no further proposal gate.
+Suggested order for whoever picks this up: §15 (rug bug) and §12's
+collision rethink first (both are regressions/bugs affecting the app today,
+not new features), then the approved proposals in whatever order is
+convenient, then circle back to Shyam for §11 and the icon-placement
+diagnosis.

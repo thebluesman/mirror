@@ -1,6 +1,11 @@
 # Proposal: additional tint blend modes (`tintBlendMode` field) — improvements-minor-fixes §10
 
-**Status:** proposed — awaiting Shyam's review (2026-07-22)
+**Status:** approved for build, reduced scope (2026-07-22 review) — ship
+**multiply + screen only** this round (open question 1: "start smaller"),
+both free on the flat/placeholder-box path with no `onBeforeCompile` shader
+work needed. Overlay/soft-light/darken (and the excluded HSL "Color" mode)
+are deferred to a follow-up round, not dropped — this doc's survey/shortlist
+stays the reference when that round happens.
 **Date:** 2026-07-22
 **Scope frame:** additive per-item option alongside the existing multiply
 tint, not a replacement. realladygrey surveys and shortlists per §10's

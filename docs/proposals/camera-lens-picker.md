@@ -1,6 +1,17 @@
 # Proposal: switchable camera lenses (live FOV presets) — improvements-minor-fixes §17
 
-**Status:** proposal — awaiting Shyam's build call.
+**Status:** approved for build (2026-07-22 review), with one scope change
+from this doc's own recommendation: **presets, not a slider** (confirmed),
+but labeled and specified by **35mm-equivalent focal length**, not FOV
+degrees — **Wide 24mm / Normal 35mm / Tele 85mm**. The UI must never show a
+degree value; focal length is the only unit the user sees. This doc's §1.2
+preset table (55°/38°/20°) needs to be re-derived from these three focal
+lengths instead, using whatever sensor-format convention (e.g. standard
+36×24mm full-frame equivalent) the app already assumes elsewhere for "35mm-
+equivalent" — check `HUMAN_FOV = 38`'s own derivation
+(`walkCamera.ts`/`Viewport.tsx`) for the existing convention before picking
+a new one, so the three presets and the existing default stay on the same
+basis. This conversion is new work the original proposal didn't need to do.
 **Date:** 2026-07-22
 **Scope frame:** a HUD control that changes the *live* orbit/walk camera's
 `fov` in the moment, independent of saved viewpoints. Does not touch

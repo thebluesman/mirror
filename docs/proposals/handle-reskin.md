@@ -1,10 +1,13 @@
 # Proposal: give the manipulation handles a design-system voice — improvements-minor-fixes §5
 
-**Status:** proposal — awaiting Shyam's call. Options presented, one
-recommended; nothing built. Per §5's instruction ("bring options back before
-implementing, consistent with the 'no undocumented interaction variants'
-rule"), this document lays out concrete reskin options for review, it does not
-commit to a build.
+**Status:** approved for build (2026-07-22 review) — **Option B** (shape +
+palette reskin) confirmed. The three open sub-questions (Coral-on-hover vs.
+Coral-only-while-dragging; whether to document handle colors in `DESIGN.md`;
+whether to align collision-red to the documented Error hex) were not
+explicitly re-decided at review time — carry forward this doc's own
+recommended leans (hover-triggers-Coral; document the mapping in
+`DESIGN.md`; keep the brighter `#ff5c5c` over the darker documented Error
+red) unless Shyam says otherwise when this is actually built.
 **Date:** 2026-07-22
 **Scope frame:** a *visual* reskin of the three existing manipulation handles
 (rotate ring, rotate knob, elevation double-arrow). No change to what they do,

@@ -1,6 +1,17 @@
 # Proposal: keyboard shortcuts + a discoverable cheatsheet — improvements-minor-fixes.md §3
 
-**Status:** proposed — awaiting Shyam's build call.
+**Status:** approved for build (2026-07-22 review). Decisions: mode-toggle
+key is **`V`** (not `M` — overrides this doc's recommendation); build
+**both** the cheatsheet overlay and the revived `L`-lock hint pill (open
+question 1: yes to both); build the shared `SHORTCUTS` table (§4.3) that
+both `onKeyDown` and the `?` overlay read from; cheatsheet stays in the
+existing bottom-center HUD pill group, not a new position. **New scope
+added at review time, not in the original proposal:** the global "Lock all"
+HUD button (`ViewportChrome.tsx`) should reflect *actual* lock state — right
+now it only tracks its own toggle, so if items end up individually locked
+via the `L` key (independent of that button), the button's label/icon can
+drift out of sync with reality. Needs a real state read (e.g. "all items
+currently locked?") driving the label, not just the button's own flag.
 **Date:** 2026-07-22
 **Scope frame:** a walk/orbit mode-toggle key, a discoverability audit of the
 existing `L` lock shortcut, and a one-click cheatsheet overlay driven by a

@@ -1,6 +1,9 @@
 # Proposal: location-driven sun/lighting — improvements-minor-fixes §9
 
-**Status:** proposed — awaiting Shyam's calls on the open questions in §6.
+**Status:** approved for build (2026-07-22 review) — **hour + date** input
+confirmed (§2's open question), per this doc's own recommendation: the date
+field defaults to today's date, capturing the seasonal sun-height swing
+rather than shipping a control that's only correct one season a year.
 Scope (toggle-not-replacement, raw lat/long, separate orientation input,
 basic form styled per `cohere/DESIGN.md`) is already resolved by Shyam
 (2026-07-22, `improvements-minor-fixes.md` §9); this document brings back the

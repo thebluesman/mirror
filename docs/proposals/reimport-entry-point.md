@@ -1,6 +1,9 @@
 # Proposal: re-import entry point from ObjectInspector — improvements-minor-fixes.md §14
 
-**Status:** proposed — awaiting Shyam's build call.
+**Status:** approved for build (2026-07-22 review) — go with this doc's own
+lean on both open questions: switching to the Import tab via "Re-import"
+leaves `ObjectInspector` open behind the sidebar (does not deselect the
+item); icon is `RefreshCw`.
 **Date:** 2026-07-22
 **Scope frame:** a UI entry-point/routing question, per the source doc's own
 framing — no new import logic. `ImportPanel.tsx`'s `confirm-cost` /

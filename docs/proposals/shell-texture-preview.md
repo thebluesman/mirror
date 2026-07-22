@@ -1,9 +1,12 @@
 # Proposal: shell texturing — preview before commit + slider microcopy — improvements-minor-fixes §18
 
-**Status:** proposal — awaiting Shyam's call. Options presented for each of the
-two asks; a pick recommended for each; nothing built. §18 explicitly calls for
-"a short proposal rather than a blind build" for both the preview-render
-approach and the tooltip mechanism.
+**Status:** approved for build (2026-07-22 review) — **Option P-2** (narrow
+draft: preview gates only the *photo*, not the whole calibration), overriding
+this doc's own P-1 recommendation — Shyam's call was P-2 is enough. The
+other open questions (deferring `putAsset` to Confirm, tooltip mechanism
+T-1 vs. T-2, inline vs. larger preview placement) were not explicitly
+re-decided — carry forward this doc's recommended leans unless corrected
+when this is actually built.
 **Date:** 2026-07-22
 **Scope frame:** two related changes to `ShellPanel.tsx`'s surface-photo flow —
 (1) an isolated preview so an uploaded/imported texture is judged *before* it
