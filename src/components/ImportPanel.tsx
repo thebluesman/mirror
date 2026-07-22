@@ -31,7 +31,7 @@ const ZERO_ROTATION: ModelRotation = { x: 0, y: 0, z: 0 };
 const PROGRESS_LABEL: Record<GenerationPhase, string> = {
   uploading: "Uploading photo…",
   queued: "Queued on fal.ai…",
-  generating: "Generating mesh via Meshy…",
+  generating: "Generating mesh via Hunyuan3D…",
   downloading: "Downloading model…",
 };
 
@@ -218,7 +218,7 @@ export function ImportPanel({
             </p>
           )}
           <p>
-            Generating a 3D model via fal.ai's Meshy costs real money on your fal.ai account. Proceed
+            Generating a 3D model via fal.ai's Hunyuan3D costs real money on your fal.ai account. Proceed
             with this generation?
           </p>
           <div className="import-panel-actions">
@@ -389,7 +389,7 @@ function DimsConfirmForm({
 
       <p className="import-panel-dims-hint">
         If the model is lying on its side or facing the wrong way, correct it here before
-        placing — Meshy doesn't always output the model upright/forward-facing. Corrections are
+        placing — the generator doesn't always output the model upright/forward-facing. Corrections are
         applied in X, then Y, then Z order; if only one axis is off, set just that one. If the
         model needs two axes corrected at once, order matters and there's no way to change it
         here — try each axis alone first to see which one it actually needs.

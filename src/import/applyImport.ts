@@ -5,6 +5,8 @@
 
 import type { Dims, FurnitureItem, ModelRotation, SceneFile } from "../schema/scene";
 import { commitToActiveLayout } from "../scene/commit";
+import { itemFootprintAABB, wallFootprintAABBs, type AABB } from "../scene/collision";
+import { findClearDefaultPosition, largestFloorRect } from "../scene/defaultPlacement";
 
 export interface ImportResult {
   /** Existing item id to attach the import to, or a fresh id for a brand-new
@@ -16,7 +18,7 @@ export interface ImportResult {
   dimsCm: Dims;
   sourcePhotoHash: string;
   glbHash: string;
-  /** Pre-scale orientation correction for a Meshy GLB that came out lying
+  /** Pre-scale orientation correction for a generated GLB that came out lying
    *  on its side or facing backwards (see loadFurnitureModel.ts). Omitted
    *  (or all-zero) means the model needs no correction. */
   modelRotationDeg?: ModelRotation;
@@ -75,10 +77,39 @@ export function applyFurnitureImport(scene: SceneFile, result: ImportResult): Sc
     // existing position/rotation untouched (only the item's asset hashes,
     // updated above, change).
     if (commands.some((c) => c.itemId === result.itemId)) return [...commands];
-    // New to this layout — give it a default placement command so it renders.
-    // Position [0,0,0] is the origin corner; Phase 4 (PRD §7.4) replaces this
-    // with a collision-nudged visible default. Kept here as the seam that
-    // guarantees a placement exists at all.
-    return [...commands, { type: "place", itemId: result.itemId, position: [0, 0, 0], rotationDeg: 0 }];
+    // New to this layout — give it a *visible* default placement (PRD-v2 §7.4).
+    // v1 used [0,0,0], the room's origin corner buried in the wall, which D0
+    // traced the "TV not showing" report to; this centers the item in the
+    // largest floor rect and nudges it off any collision using the same
+    // footprint/collision math the live drag path uses (defaultPlacement.ts).
+    const position = defaultPlacementForNewItem(scene, items, result.itemId);
+    return [...commands, { type: "place", itemId: result.itemId, position, rotationDeg: 0 }];
   });
+}
+
+/** The collision-nudged default position (§7.4) for an item newly placed in the
+ *  active layout, computed from the scene's room and the items already placed in
+ *  that layout. Factored out so the seam above reads as one line. Rotation is
+ *  the default 0deg and `position[1]` is 0 — a brand-new item rests on the floor
+ *  with no established elevation (elevation is `position[1]`, never re-read from
+ *  `item.elevationCm`; see elevation.ts). Falls back to the origin only in the
+ *  degenerate no-floor case, where there's nothing to center against. */
+function defaultPlacementForNewItem(
+  scene: SceneFile,
+  items: readonly FurnitureItem[],
+  newItemId: string,
+): [number, number, number] {
+  const room = largestFloorRect(scene.room.floor);
+  if (!room) return [0, 0, 0];
+
+  const newItem = items.find((i) => i.id === newItemId)!;
+  const itemsById = new Map(scene.items.map((i) => [i.id, i]));
+  const activeCommands = scene.layouts.find((l) => l.id === scene.current)?.commands ?? [];
+  const others: Array<{ itemId: string; aabb: AABB }> = [];
+  activeCommands.forEach((c) => {
+    const placed = itemsById.get(c.itemId);
+    if (placed) others.push({ itemId: c.itemId, aabb: itemFootprintAABB(placed, c.position, c.rotationDeg) });
+  });
+
+  return findClearDefaultPosition(newItem, 0, room, others, wallFootprintAABBs(scene.room));
 }
