@@ -1,11 +1,13 @@
 # Proposal: reposition `ObjectInspector` relative to the selected object — improvements-minor-fixes §11
 
-**Status:** proposal — direction already decided by Shyam (see
-`improvements-minor-fixes.md` §11: anchor to the selected object in
-viewport-space instead of a fixed HUD corner; clamp on-screen rather than
-hide/fade). This document proposes the concrete anchor rule, clamp margin,
-and screen-projection plumbing needed to build it — Shyam's call is on the
-specifics below, not on the direction.
+**Status:** approved for build (2026-07-22 review) — all three open
+questions confirmed per this doc's own leans: (a) cache the panel height,
+re-measure via `ResizeObserver` on content change, not a per-frame
+`getBoundingClientRect()` read; (b) yes, the panel follows the selected
+object through camera moves too (saved-viewpoint recall, `flyTo`), not just
+drag/orbit; (c) the existing title bar (`Edit "{item.name}"`) is sufficient
+context for the off-screen/behind-camera clamp fallback — no extra
+"which item" affordance needed there.
 **Date:** 2026-07-22
 **Scope frame:** repositioning logic for the existing `ObjectInspector`
 panel only. Does not change what it edits (`ObjectEditFields`' name/dims/

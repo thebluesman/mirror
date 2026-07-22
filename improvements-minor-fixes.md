@@ -512,24 +512,50 @@ Ship **multiply + screen only** this round (both free on the flat/
 placeholder-box path); overlay/soft-light/darken deferred to a follow-up,
 not dropped. See `docs/proposals/tint-blend-modes.md`.
 
-### 11. ObjectInspector anchor — not addressed this round
+### 11. ObjectInspector anchor — approved for build
 
-Shyam didn't review this one in this round (the only one of the 8 proposals
-without an explicit call) — status in `docs/proposals/object-inspector-anchor.md`
-is unchanged: direction decided, implementation-detail open questions still
-open. Flag for Shyam next time rather than assuming an answer.
+All three open questions confirmed (see
+`docs/proposals/object-inspector-anchor.md`'s updated status line): cache +
+`ResizeObserver` for panel height; panel follows the object through camera
+moves, not just drag/orbit; title bar alone is enough context for the
+off-screen clamp fallback, no extra affordance needed.
 
-### §1/§2 (icon placement) — reopened, still unresolved
+### §1/§2 (icon placement) — root cause found, three concrete fixes needed
 
-The size fix landed this PR, but Shyam says icon *placement* within their
-buttons still looks "weird" — unlike the size question, this one has no
-diagnosed root cause yet. Likely candidates worth checking first: button
-padding/centering box not accounting for the icon's actual visual bounding
-box (Lucide icons have internal padding that varies slightly by glyph), or
-the `--space-8` icon-to-text gap reading unevenly against different icon
-shapes. Needs actual visual inspection in the running app before guessing
-further — not a decision Shyam can make in the abstract, a bug to
-diagnose next round.
+Diagnosed against `ViewportChrome.tsx`/`.css` (shared by `LayoutChrome.tsx`
+for the layout-pill row) from Shyam's screenshots of the viewport-chrome and
+layout-chrome pill bars. Three distinct bugs, not one:
+
+1. **Snapshot pill: icon+text not vertically centered.** The base
+   `.viewport-chrome-pill` class has no `display:flex`/`align-items:center`
+   — icon and text just flow as default inline content (baseline-aligned).
+   "Lock all" only looks right because it has an *extra* modifier class,
+   `.viewport-chrome-lock`, that separately adds
+   `display:inline-flex; align-items:center; gap:var(--space-8)` — Snapshot
+   never got that modifier. **Fix:** move that flex/align-items/gap
+   treatment onto the base `.viewport-chrome-pill` class (or any pill
+   rendering icon+text children) so every icon-plus-label pill centers
+   consistently, not just the one that happened to get a bespoke modifier.
+2. **Rename/delete icons render outside the pill.** This is structural, not
+   optical: each saved-view/layout row is a bordered pill (`.viewport-chrome-
+   pill`, the name/label) followed by two *separate*, borderless icon
+   buttons (`.viewport-chrome-rename`/`.viewport-chrome-remove`) pulled
+   snug via a negative margin — there's no single pill-shaped container
+   wrapping all three. The icons genuinely sit past the name pill's rounded
+   border, not inside a shared boundary. **Fix:** restructure `.viewport-
+   chrome-view` so the name + pencil + × share one pill-shaped
+   border/background, with the icons as trailing buttons *inside* that
+   boundary, instead of the name owning its own separate border with icons
+   tacked on after it.
+3. **"+ Save view" / "+ Save layout" use a literal `+` character, not an
+   icon.** Confirmed in the JSX (`+ Save view` as a plain string). Shyam
+   wants a `Plus` (lucide-react) icon in its place, 16px per the DESIGN.md
+   §6 inline-icon rule, followed by the "Save view"/"Save layout" text —
+   same icon+label shape as Snapshot/Lock all, not a special case.
+
+All three fixes live in the same two files (`ViewportChrome.tsx`/`.css`,
+`LayoutChrome.tsx` reuses the same CSS classes) — one batch, not three
+separate changes.
 
 ### 15. SONDEROD rug bug — repro obtained, ready to diagnose
 
@@ -556,10 +582,11 @@ from Shyam first.
 
 ## Sequencing note (review round)
 
-Everything above except §11 (not reviewed) and §15 (diagnosis, not a
-proposal) is now approved straight to build — no further proposal gate.
-Suggested order for whoever picks this up: §15 (rug bug) and §12's
-collision rethink first (both are regressions/bugs affecting the app today,
-not new features), then the approved proposals in whatever order is
-convenient, then circle back to Shyam for §11 and the icon-placement
-diagnosis.
+This round is fully closed — all 8 proposals called, §11 confirmed, and the
+icon-placement bug diagnosed with concrete fixes. Everything above is
+approved straight to build — no further proposal gate, no open questions
+left for Shyam. Suggested order for whoever picks this up: §15 (rug bug)
+and §12's collision rethink first (both are regressions/bugs affecting the
+app today, not new features), then the icon-placement fixes (§1/§2, small
+and self-contained), then the approved proposals in whatever order is
+convenient.
