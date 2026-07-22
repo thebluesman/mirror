@@ -9,6 +9,7 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import { parseScene, type CameraPosition, type SceneFile, type SurfaceCalibration } from "./schema/scene";
 import { makeCameraPosition } from "./scene/cameraViewpoints";
 import { makeLayout } from "./scene/layouts";
+import { commitToActiveLayout, setPlaceCommand } from "./scene/commit";
 import { loadProject, saveProjectDebounced, saveProjectNow } from "./storage/autosave";
 import "./App.css";
 
@@ -64,53 +65,60 @@ function App() {
     });
   }
 
-  // Import completion is a discrete, deliberate commit (not a drag gesture
-  // like the shell sliders) — persist immediately rather than debouncing, so
-  // a newly-generated GLB's hashes are never lost to a closed tab.
-  function handleImported(next: SceneFile) {
+  // The single persistence tail every discrete, deliberate scene commit
+  // shares — import, viewpoint save/delete, layout save/delete/switch, and a
+  // placement drag/rotate release. Each such action is persisted immediately
+  // (not the debounced path updateShellSurface uses for a continuously-dragged
+  // slider) because the action itself is the discrete moment; there's nothing
+  // after it to coalesce, and a newly-generated GLB's hashes must never be
+  // lost to a closed tab.
+  //
+  // `next` is always computed from a closed-over `sceneFile`, then handed to
+  // both setSceneFile and saveProjectNow — deliberately NOT the
+  // setSceneFile(prev => ...) functional-update form updateShellSurface uses.
+  // saveProjectNow (unlike saveProjectDebounced) isn't idempotent-by-timer, so
+  // putting the write inside a functional updater would fire two real
+  // IndexedDB writes per action under React 18 StrictMode's dev double-invoke
+  // (code-review finding). Centralizing the tail here keeps that reasoning in
+  // one spot and gives a later phase (undo) a single place to observe every
+  // committed SceneFile.
+  function commit(next: SceneFile) {
     setSceneFile(next);
     void saveProjectNow(next);
   }
 
+  // Import completion attaches the generated asset to its item and ensures the
+  // active layout has a placement command for it (see applyImport.ts, which
+  // writes through the shared commitToActiveLayout helper) — `next` arrives
+  // already-computed from ImportPanel.
+  function handleImported(next: SceneFile) {
+    commit(next);
+  }
+
   const viewportRef = useRef<ViewportHandle>(null);
 
-  // A saved/deleted viewpoint is a discrete, deliberate action (like an
-  // import commit) — persist immediately rather than debouncing. Computed
-  // from `sceneFile` directly and passed to setSceneFile, same as
-  // handleImported below — not the setSceneFile(prev => ...) functional-
-  // update form updateShellSurface uses, because saveProjectNow (unlike
-  // saveProjectDebounced) isn't idempotent-by-timer: React 18 StrictMode
-  // double-invokes functional updaters in dev, which would fire two real
-  // IndexedDB writes per click if the write lived inside the updater
-  // (code-review finding). ViewportChrome only renders once `sceneFile` is
-  // loaded, so it's never null here.
+  // ViewportChrome only renders once `sceneFile` is loaded, so it's never null
+  // here (the guard is a type-narrowing formality).
   function handleSaveView(name: string): boolean {
     if (!sceneFile) return false;
     const view = viewportRef.current?.getCurrentView();
     if (!view) return false;
     const cam: CameraPosition = makeCameraPosition(name, view.eye, view.lookAt, view.fovDeg, sceneFile.cameras);
-    const next: SceneFile = { ...sceneFile, cameras: [...sceneFile.cameras, cam] };
-    setSceneFile(next);
-    void saveProjectNow(next);
+    commit({ ...sceneFile, cameras: [...sceneFile.cameras, cam] });
     return true;
   }
 
   function handleDeleteView(id: string) {
     if (!sceneFile) return;
-    const next: SceneFile = { ...sceneFile, cameras: sceneFile.cameras.filter((c) => c.id !== id) };
-    setSceneFile(next);
-    void saveProjectNow(next);
+    commit({ ...sceneFile, cameras: sceneFile.cameras.filter((c) => c.id !== id) });
   }
 
   // D3 (v2 spike, W-A persistence): saving/deleting a layout, and switching
   // which one is `current`, are each a discrete, deliberate action — same
-  // immediate-persist treatment as handleSaveView/handleDeleteView above,
-  // for the same reason (not a continuously-dragged value to debounce).
+  // immediate-persist treatment (via `commit`) as viewpoint save/delete.
   function handleSwitchLayout(id: string) {
     if (!sceneFile) return;
-    const next: SceneFile = { ...sceneFile, current: id };
-    setSceneFile(next);
-    void saveProjectNow(next);
+    commit({ ...sceneFile, current: id });
   }
 
   function handleSaveLayout(name: string): boolean {
@@ -118,9 +126,7 @@ function App() {
     const source = sceneFile.layouts.find((l) => l.id === sceneFile.current);
     if (!source) return false;
     const layout = makeLayout(name, source, sceneFile.layouts);
-    const next: SceneFile = { ...sceneFile, layouts: [...sceneFile.layouts, layout], current: layout.id };
-    setSceneFile(next);
-    void saveProjectNow(next);
+    commit({ ...sceneFile, layouts: [...sceneFile.layouts, layout], current: layout.id });
     return true;
   }
 
@@ -130,35 +136,19 @@ function App() {
     // the currently active one (so `current` never dangles) — this is a
     // second guard against the same invariant, not the only one.
     if (id === sceneFile.current || sceneFile.layouts.length <= 1) return;
-    const next: SceneFile = { ...sceneFile, layouts: sceneFile.layouts.filter((l) => l.id !== id) };
-    setSceneFile(next);
-    void saveProjectNow(next);
+    commit({ ...sceneFile, layouts: sceneFile.layouts.filter((l) => l.id !== id) });
   }
 
   // v2 spike (W-A, `v2/spike-arrange`): Viewport's drag-release/rotate-step
   // gesture handlers call this exactly once per gesture (never per-frame —
   // see Viewport.tsx's mutate-during-gesture seam) with the item's final
-  // position/rotation. Folds that into the current layout's PlaceCommand
-  // and persists immediately, same "discrete, deliberate commit" treatment
-  // handleSaveView/handleImported give a save/import — not the debounced
-  // path updateShellSurface uses for a continuously-dragged slider, since a
-  // drop/rotate-release is itself the discrete moment, there's nothing
-  // after it to coalesce. Same closed-over-`sceneFile`-not-functional-
-  // updater pattern as handleSaveView, for the same StrictMode
-  // double-invoke reason.
+  // position/rotation. The command write goes through commitToActiveLayout /
+  // setPlaceCommand (src/scene/commit.ts) — the single seam every
+  // placement-affecting action shares (drag/rotate here, default placement in
+  // applyImport.ts), so Phase 7's undo has one place to hook, not four.
   function commitPlacement(itemId: string, position: [number, number, number], rotationDeg: number) {
     if (!sceneFile) return;
-    const layouts = sceneFile.layouts.map((layout) =>
-      layout.id === sceneFile.current
-        ? {
-            ...layout,
-            commands: layout.commands.map((cmd) => (cmd.itemId === itemId ? { ...cmd, position, rotationDeg } : cmd)),
-          }
-        : layout,
-    );
-    const next: SceneFile = { ...sceneFile, layouts };
-    setSceneFile(next);
-    void saveProjectNow(next);
+    commit(commitToActiveLayout(sceneFile, (commands) => setPlaceCommand(commands, itemId, position, rotationDeg)));
   }
 
   return (
