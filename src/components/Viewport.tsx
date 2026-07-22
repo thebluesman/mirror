@@ -804,7 +804,7 @@ export const Viewport = forwardRef<
       const group = builtRef.current?.furnitureGroups.get(itemId);
       if (!group) return;
       let stepDeg = 0;
-      let elevationDir: 1 | -1 | 0 = 0;
+      let elevationDir: 1 | -1 | null = null;
       if (evt.key === "q" || evt.key === "Q" || evt.key === "[") stepDeg = -ROTATE_STEP_DEG;
       else if (evt.key === "e" || evt.key === "E" || evt.key === "]") stepDeg = ROTATE_STEP_DEG;
       else if (evt.key === ELEVATION_KEY_UP) elevationDir = 1;
@@ -813,7 +813,7 @@ export const Viewport = forwardRef<
       evt.preventDefault();
       if (stepDeg !== 0) {
         group.rotation.y += THREE.MathUtils.degToRad(stepDeg);
-      } else {
+      } else if (elevationDir !== null) {
         group.position.y = stepElevationCm(group.position.y, elevationDir, ELEVATION_STEP_CM);
       }
       const rotationDeg = normalizeDeg(THREE.MathUtils.radToDeg(group.rotation.y));
