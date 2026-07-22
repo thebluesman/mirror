@@ -1,0 +1,63 @@
+/* DESIGN.md §5 "info-tooltip" component (added improvements-minor-fixes.md
+ * §18) — near-black (#17171c, --color-primary) field per DESIGN.md's dark
+ * chrome/deep-UI-card vocabulary, chosen over the Soft Stone alternative for
+ * contrast against InfoTip's usual home (a Soft Stone shell-row card, see
+ * ShellPanel.css) — flat, no shadow, per DESIGN.md §5 elevation rules. */
+.info-tip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.info-tip-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  padding: 0;
+  margin-left: var(--space-2);
+  color: var(--color-muted-slate);
+  cursor: help;
+  line-height: 0;
+}
+
+.info-tip-trigger:hover,
+.info-tip-trigger:focus-visible {
+  color: var(--color-ink);
+}
+
+/* DESIGN.md §5 form fields: focus state = colored border + 2px glow ring. */
+.info-tip-trigger:focus-visible {
+  outline: none;
+  border-radius: var(--radius-xs);
+  box-shadow: 0 0 0 2px rgba(76, 110, 230, 0.65);
+}
+
+.info-tip-bubble {
+  position: absolute;
+  z-index: 10;
+  bottom: calc(100% + var(--space-6));
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 220px;
+  background: var(--color-primary);
+  color: var(--color-canvas);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-xs);
+  padding: var(--space-6) var(--space-8);
+  /* mono-label token per DESIGN.md's tooltip copy call — its default
+     uppercase/tracking is for short pill-style labels, not a full-sentence
+     tooltip body, so both are overridden here for legibility. */
+  font: var(--text-mono-label);
+  font-size: 11px;
+  line-height: 1.4;
+  text-transform: none;
+  letter-spacing: normal;
+  pointer-events: none;
+}
+
+.info-tip-bubble[hidden] {
+  display: none;
+}

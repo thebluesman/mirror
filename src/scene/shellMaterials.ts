@@ -86,7 +86,12 @@ function resetToBase(mat: THREE.MeshStandardMaterial, surface: ShellSurface, has
   mat.roughness = base.roughness;
 }
 
-function applyCalibrationToMaterial(
+// Exported (docs/proposals/shell-texture-preview.md §1.1, built 2026-07-22)
+// so ShellTexturePreview3D.tsx can build its preview material via the exact
+// same calibration path the real shell uses, instead of forking this math —
+// the explicit non-goal both that proposal and this file's own header call
+// out ("reuse, don't reimplement").
+export function applyCalibrationToMaterial(
   mat: THREE.MeshStandardMaterial,
   surface: ShellSurface,
   calib: SurfaceCalibration,
@@ -100,7 +105,9 @@ function applyCalibrationToMaterial(
   mat.needsUpdate = true;
 }
 
-function makeTexture(bitmap: ImageBitmap, repeat: [number, number]): THREE.Texture {
+// Exported for the same reason as applyCalibrationToMaterial above — reused
+// directly by ShellTexturePreview3D.tsx.
+export function makeTexture(bitmap: ImageBitmap, repeat: [number, number]): THREE.Texture {
   const texture = new THREE.Texture(bitmap);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.wrapS = texture.wrapT = THREE.RepeatWrapping;

@@ -75,6 +75,14 @@ substitutes preserving Cohere's extracted scale.
 - **table** — hairline borders, soft-stone header row.
 - **elevation** — no shadows; depth communicated via flat white / bordered / dark-field /
   gradient-media, not box-shadow blur.
+- **info-tooltip** — new ground, not in the Cohere extraction, codified here per
+  improvements-minor-fixes.md §18 (`InfoTip` component, 2026-07-22): a 16px Lucide
+  `Info` icon (§6 inline size) after a form-field label; hover/focus reveals a
+  near-black (`#17171c`) popover — canvas text, 4px radius (`--radius-xs`), 1px
+  hairline (`#d9d9dd`) border, body copy at 11px, no shadow (flat, per this
+  section's elevation rule). Replaces the native `title` attribute, which can't
+  carry this design language. One component, reused wherever a control needs
+  brief on-demand help copy — not a general popover system.
 
 ## 6. Icon sizing
 
