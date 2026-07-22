@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { computeWalkStep, deriveSyntheticLookAt, type WalkInput } from "./walkCamera";
+import type { AABB } from "./collision";
+import {
+  computeWalkStep,
+  deriveSyntheticLookAt,
+  walkCameraFootprintAABB,
+  walkStepCollides,
+  type WalkInput,
+} from "./walkCamera";
 
 const NONE: WalkInput = { forward: false, back: false, left: false, right: false };
 
@@ -81,5 +88,46 @@ describe("deriveSyntheticLookAt", () => {
   it("is a no-op displacement when distance is zero", () => {
     const eye: [number, number, number] = [3, 4, 5];
     expect(deriveSyntheticLookAt(eye, [1, 0, 0], 0)).toEqual(eye);
+  });
+});
+
+describe("walkCameraFootprintAABB", () => {
+  it("centers a radius-sized square on the given XZ position", () => {
+    expect(walkCameraFootprintAABB(100, -50, 30)).toEqual({
+      minX: 70,
+      maxX: 130,
+      minZ: -80,
+      maxZ: -20,
+    });
+  });
+});
+
+describe("walkStepCollides", () => {
+  const wall: AABB = { minX: -5, maxX: 5, minZ: -500, maxZ: 500 };
+  const item: AABB = { minX: 90, maxX: 110, minZ: 90, maxZ: 110 };
+
+  it("is false in open space with no items or walls", () => {
+    expect(walkStepCollides(0, 0, 30, [], [])).toBe(false);
+  });
+
+  it("is true when the eye footprint overlaps a wall AABB", () => {
+    expect(walkStepCollides(0, 0, 30, [], [wall])).toBe(true);
+  });
+
+  it("is false when the eye footprint is clear of a nearby wall", () => {
+    expect(walkStepCollides(100, 0, 30, [], [wall])).toBe(false);
+  });
+
+  it("is true when the eye footprint overlaps an item AABB", () => {
+    expect(walkStepCollides(100, 100, 30, [item], [])).toBe(true);
+  });
+
+  it("is false when the eye footprint is clear of a nearby item", () => {
+    expect(walkStepCollides(0, 0, 30, [item], [])).toBe(false);
+  });
+
+  it("grows with a larger radius, catching a collision a smaller radius would miss", () => {
+    expect(walkStepCollides(120, 100, 5, [item], [])).toBe(false);
+    expect(walkStepCollides(120, 100, 30, [item], [])).toBe(true);
   });
 });
