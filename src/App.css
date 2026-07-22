@@ -19,6 +19,31 @@
   color: var(--color-canvas);
 }
 
+/* Undo control (PRD-v2 §7.9): pill-outline button (DESIGN.md button-pill-outline)
+   adapted to the dark header — hairline-on-dark border, canvas text, pushed to
+   the header's right edge. Greyed and non-interactive when there's nothing to
+   undo. */
+.app-undo {
+  margin-left: auto;
+  font: var(--text-button);
+  color: var(--color-canvas);
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: var(--radius-pill);
+  padding: var(--space-6) var(--space-16);
+  cursor: pointer;
+}
+
+.app-undo:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.7);
+}
+
+.app-undo:disabled {
+  color: var(--color-muted-slate);
+  border-color: rgba(255, 255, 255, 0.12);
+  cursor: default;
+}
+
 .app-body {
   flex: 1 1 auto;
   display: flex;

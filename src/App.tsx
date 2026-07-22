@@ -10,6 +10,7 @@ import { parseScene, type CameraPosition, type SceneFile, type SurfaceCalibratio
 import { makeCameraPosition, renameCameraPosition } from "./scene/cameraViewpoints";
 import { makeLayout, renameLayout } from "./scene/layouts";
 import { commitToActiveLayout, setPlaceCommand } from "./scene/commit";
+import { applyUndo, recordUndo, type UndoSlot } from "./scene/undo";
 import { loadProject, saveProjectDebounced, saveProjectNow } from "./storage/autosave";
 import "./App.css";
 
@@ -32,6 +33,14 @@ function App() {
   const [sceneFile, setSceneFile] = useState<SceneFile | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("Shell");
+
+  // Single-step undo slot (PRD-v2 §7.9). Holds the SceneFile as it was just
+  // before the most recent committed action; `null` means nothing to undo.
+  // Deliberately in-memory only (plain component state, not persisted): undo
+  // does NOT survive a reload — PRD-v2 says nothing about it surviving, and the
+  // slot's meaning ("the action you just took") doesn't carry across a session
+  // boundary. A fresh load starts with an empty slot / disabled button.
+  const [undoSlot, setUndoSlot] = useState<UndoSlot>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -80,12 +89,74 @@ function App() {
   // putting the write inside a functional updater would fire two real
   // IndexedDB writes per action under React 18 StrictMode's dev double-invoke
   // (code-review finding). Centralizing the tail here keeps that reasoning in
-  // one spot and gives a later phase (undo) a single place to observe every
-  // committed SceneFile.
+  // one spot and gives Phase 7 (undo) a single place to observe every committed
+  // SceneFile.
+  //
+  // Phase 7 (single-step undo, §7.9) hooks here: every discrete action funnels
+  // through `commit`, so recording the *previous* `sceneFile` into the undo
+  // slot on each call captures all of them — move/rotate/elevation (via
+  // commitPlacement), import/replace (handleImported), and layout/view
+  // save-delete-rename — from one seam, without an undo-aware wrapper in each
+  // handler. `sceneFile` here is the state as it was before `next`, so it's
+  // exactly the snapshot undo restores. Shell-texture calibration is
+  // deliberately NOT covered: it takes the debounced updateShellSurface path,
+  // not commit(), because it's a continuously-adjusted slider, not a discrete
+  // action (§7.9).
   function commit(next: SceneFile) {
+    if (sceneFile) setUndoSlot(recordUndo(sceneFile));
     setSceneFile(next);
     void saveProjectNow(next);
   }
+
+  // Restores the single undo snapshot as the current scene and persists it
+  // through the same saveProjectNow path a commit uses, so the reverted state
+  // survives a reload. Restoring the *whole* SceneFile (not popping one
+  // commands[] entry) is what lets one code path undo any action type: a
+  // deleted layout comes back in layouts[] AND `current` is restored to
+  // whatever it was, an added view disappears, a move reverts — uniformly.
+  //
+  // The slot is cleared (not re-recorded), so this is single-step with no
+  // redo: a second press does nothing until another action records a fresh
+  // slot. Deliberately does NOT route through commit() — doing so would record
+  // the post-undo state as a new undo target, which is redo, explicitly out of
+  // scope (§7.9).
+  function handleUndo() {
+    const result = applyUndo(undoSlot);
+    if (!result) return;
+    setUndoSlot(result.next);
+    setSceneFile(result.restored);
+    void saveProjectNow(result.restored);
+  }
+
+  // Ref to the latest handleUndo so the once-bound window listener below always
+  // calls the current closure (undoSlot changes on every action) without
+  // re-binding the listener each render.
+  const undoRef = useRef(handleUndo);
+  undoRef.current = handleUndo;
+
+  // Undo keyboard shortcut (Cmd/Ctrl+Z). Deliberately a window-level listener,
+  // NOT the viewport's canvas-scoped onKeyDown (Phase 1's focus-ownership
+  // model): that model exists because rotate/elevation act on the *selected
+  // item in the canvas*, so they should only fire when the canvas owns focus.
+  // Undo is a whole-app-document action that must work when the canvas does not
+  // have focus — e.g. right after clicking a layout pill's × to delete it,
+  // focus is on that button, not the canvas. So global-but-input-safe is the
+  // right fit: bail when the event target is an editable element, so Cmd/Ctrl+Z
+  // inside a rename/name field does the browser's native text-undo instead of
+  // reverting a scene action. Shift/Alt+Z (a redo chord on some platforms) is
+  // ignored — there is no redo in v2 (§7.9).
+  useEffect(() => {
+    function onKeyDown(evt: KeyboardEvent) {
+      if (!(evt.ctrlKey || evt.metaKey) || evt.shiftKey || evt.altKey) return;
+      if (evt.key !== "z" && evt.key !== "Z") return;
+      const target = evt.target as HTMLElement | null;
+      if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
+      evt.preventDefault();
+      undoRef.current();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   // Import completion attaches the generated asset to its item and ensures the
   // active layout has a placement command for it (see applyImport.ts, which
@@ -169,6 +240,21 @@ function App() {
     <div className="app-shell">
       <header className="app-header">
         <span className="app-title">mirror</span>
+        {/* Single-step undo (PRD-v2 §7.9). Lives in the app header, not the
+         *  viewport/layout chrome, because it reverts any discrete action —
+         *  placement, import, or a layout/view op — so it belongs to the whole
+         *  document, not one surface. Disabled (greyed) when there's nothing to
+         *  undo. Keyboard equivalent: Cmd/Ctrl+Z (see the window listener). */}
+        <button
+          type="button"
+          className="app-undo"
+          onClick={handleUndo}
+          disabled={!undoSlot}
+          title="Undo last action (Cmd/Ctrl+Z)"
+          aria-label="Undo last action"
+        >
+          ↶ Undo
+        </button>
       </header>
       <div className="app-body">
         <main className="app-viewport">
