@@ -169,6 +169,17 @@ const ROTATE_HANDLE_HOVER_COLOR = 0xd6f5ff;
 // footprint currently overlaps another item or a wall — the plan's
 // "decision support, not physics" bar means we flag, we don't block.
 const COLLISION_COLOR = 0xff5c5c;
+// improvements-v2.1 §4: the selection outline (and rotate handle) recolor to
+// this when the selected item is locked — its own `locked` flag or the
+// global "lock all" toggle, either counts (see isPlacementLocked) — and NOT
+// currently flagged as colliding. Amber, distinct from both the cyan
+// selection default and the red collision flag, so "locked" reads as its own
+// state rather than a shade of either. Collision still wins when both are
+// true (see updateCollisionHighlight's color composition): a physical
+// overlap is worth surfacing even on a locked item, since locking only
+// guards against accidental drags, not against another item having already
+// been placed on top of it before the lock was set.
+const LOCKED_COLOR = 0xffc94f;
 
 /** World-space position for the rotate handle, given the item's live group
  *  and its definition (for overall dims). Not parented under the group (see
@@ -213,8 +224,19 @@ export const Viewport = forwardRef<
      *  rotation. Never fired per-frame mid-drag; see the pointer-handler
      *  effect below for the mutate-during-gesture seam this reconciles. */
     onCommitPlacement?: (itemId: string, position: [number, number, number], rotationDeg: number) => void;
+    /** improvements-v2.1 §4: fired once per "L" keypress on the selected
+     *  item — a discrete metadata edit (App.tsx's handleToggleLock), same
+     *  "fire on the discrete moment, not per-frame" shape as
+     *  onCommitPlacement, just without a live gesture behind it. */
+    onToggleLock?: (itemId: string) => void;
+    /** improvements-v2.1 §4: "lock all" safety toggle — ephemeral view state
+     *  owned by App.tsx (like undoSlot), NOT part of sceneFile. When true, no
+     *  item can be dragged/rotated/elevated regardless of its own `locked`
+     *  flag. Defaults to false so existing callers/tests that don't pass it
+     *  see today's unlocked behavior. */
+    globalLock?: boolean;
   }
->(function Viewport({ sceneFile, shellCalibration, onCommitPlacement }, handleRef) {
+>(function Viewport({ sceneFile, shellCalibration, onCommitPlacement, onToggleLock, globalLock }, handleRef) {
   const containerRef = useRef<HTMLDivElement>(null);
   const builtRef = useRef<BuiltScene | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -225,6 +247,15 @@ export const Viewport = forwardRef<
   // DOM listeners every time App.tsx passes a new closure.
   const onCommitPlacementRef = useRef(onCommitPlacement);
   onCommitPlacementRef.current = onCommitPlacement;
+  // improvements-v2.1 §4: same "ref so the once-bound pointer/keyboard
+  // effect always sees the latest closure/value" treatment as
+  // onCommitPlacementRef above — onToggleLock is a new callback prop,
+  // globalLock is a new plain value prop, but both are read from inside
+  // onPointerDown/onKeyDown, which only rebind on a structural rebuild.
+  const onToggleLockRef = useRef(onToggleLock);
+  onToggleLockRef.current = onToggleLock;
+  const globalLockRef = useRef(globalLock ?? false);
+  globalLockRef.current = globalLock ?? false;
 
   // W-A selection: which placed item (by itemId) is currently selected, plus
   // a BoxHelper wireframe outline (cheapest indicator per the plan — a plain
@@ -236,6 +267,25 @@ export const Viewport = forwardRef<
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const selectedItemIdRef = useRef<string | null>(null);
   selectedItemIdRef.current = selectedItemId;
+  // improvements-v2.1 §4: a structural rebuild (see structuralSceneFile's
+  // comment) unconditionally drops the current selection in its cleanup
+  // below — fine when the rebuild is triggered by something unrelated to
+  // the selected item (nothing was usually selected during an import), but
+  // toggling an item's own `locked` flag *is* an items-array mutation that
+  // targets the currently-selected item on purpose. Without this, pressing
+  // "L" would lock the item and simultaneously deselect it, defeating the
+  // "stays selectable so you can see it's locked / toggle it back off"
+  // requirement. Captured in cleanup (before it nulls the live selection)
+  // and consumed once by the next setup run, which re-selects the same item
+  // if it still exists post-rebuild — a no-op for any rebuild that isn't
+  // "the same item, mutated," e.g. one where the item was actually removed.
+  const pendingReselectRef = useRef<string | null>(null);
+  // improvements-v2.1 §4: paired with pendingReselectRef above — whether the
+  // canvas actually had keyboard focus right before a structural rebuild
+  // tore it down, so the next setup run knows whether to restore it (see
+  // that effect's focus-restore comment for why this matters now that "L"
+  // can trigger a rebuild from a keyboard shortcut).
+  const pendingRefocusRef = useRef(false);
   const selectionHelperRef = useRef<THREE.BoxHelper | null>(null);
   // C1 follow-up: the rotate-drag handle mesh — a small sphere, lifecycle
   // paired with selectionHelperRef (created/destroyed alongside it in the
@@ -249,6 +299,17 @@ export const Viewport = forwardRef<
   // collision check rather than recomputed per pointer event.
   const wallAABBsRef = useRef<AABB[]>([]);
   const itemsByIdRef = useRef<Map<string, FurnitureItem>>(new Map());
+
+  // improvements-v2.1 §4: whether a gesture/keystep targeting `itemId`
+  // should be blocked — either the item's own persisted `locked` flag or the
+  // ephemeral global "lock all" toggle. Centralized here (rather than
+  // inlined at each of onPointerDown's two gesture-start sites and
+  // onKeyDown's rotate/elevation branch) so the two ways an item can end up
+  // locked can't drift out of sync with each other.
+  function isPlacementLocked(itemId: string): boolean {
+    if (globalLockRef.current) return true;
+    return itemsByIdRef.current.get(itemId)?.locked === true;
+  }
 
   // D2: recolors the selection outline to flag footprint overlap — called
   // after any live mutation (drag move, rotate step, a committed layout
@@ -278,7 +339,10 @@ export const Viewport = forwardRef<
     });
     const { itemIds, wall } = checkCollisions(aabb, others, wallAABBsRef.current);
     const colliding = itemIds.length > 0 || wall;
-    (helper.material as THREE.LineBasicMaterial).color.set(colliding ? COLLISION_COLOR : SELECTION_COLOR);
+    // improvements-v2.1 §4: collision (a physical fact) outranks lock (a
+    // safety-toggle fact) — see LOCKED_COLOR's comment for why.
+    const color = colliding ? COLLISION_COLOR : isPlacementLocked(itemId) ? LOCKED_COLOR : SELECTION_COLOR;
+    (helper.material as THREE.LineBasicMaterial).color.set(color);
   }
 
   // Per-surface tracking for the calibration effect below: the last
@@ -369,6 +433,16 @@ export const Viewport = forwardRef<
     // lifetime never reads stale walls/items from a previous room.
     wallAABBsRef.current = wallFootprintAABBs(structuralSceneFile.room);
     itemsByIdRef.current = new Map(structuralSceneFile.items.map((item) => [item.id, item]));
+
+    // improvements-v2.1 §4: restore the selection the previous run's cleanup
+    // stashed (see pendingReselectRef's comment) if that item is still
+    // present post-rebuild — e.g. a lock toggle mutated it in place rather
+    // than removing it. `selectItem` is a hoisted function declaration
+    // (defined further down in this same effect body), safe to call here.
+    if (pendingReselectRef.current && itemsByIdRef.current.has(pendingReselectRef.current)) {
+      selectItem(pendingReselectRef.current);
+    }
+    pendingReselectRef.current = null;
 
     // Phase 4: items with a completed Meshy import get their real GLB loaded
     // and fit into the placeholder group buildScene already positioned —
@@ -552,17 +626,26 @@ export const Viewport = forwardRef<
     }
 
     // Rotate handle brightens while hovered — its own material, so this never
-    // touches the shared furniture material.
+    // touches the shared furniture material. improvements-v2.1 §4: the
+    // un-hovered base color is now lock-aware (LOCKED_COLOR vs
+    // SELECTION_COLOR) rather than a fixed SELECTION_COLOR, so the handle
+    // itself signals lock state even before a click swallows the gesture.
     function setHandleHovered(hovered: boolean) {
       const handleMesh = rotateHandleRef.current;
-      if (!handleMesh) return;
-      (handleMesh.material as THREE.MeshBasicMaterial).color.set(hovered ? ROTATE_HANDLE_HOVER_COLOR : SELECTION_COLOR);
+      const itemId = selectedItemIdRef.current;
+      if (!handleMesh || !itemId) return;
+      const baseColor = isPlacementLocked(itemId) ? LOCKED_COLOR : SELECTION_COLOR;
+      (handleMesh.material as THREE.MeshBasicMaterial).color.set(hovered ? ROTATE_HANDLE_HOVER_COLOR : baseColor);
     }
 
     // Idle-hover affordances (not during a drag): `cursor: grab` over the
     // rotate handle or a selectable item, and the handle's hover highlight.
     // O(items) per move, same order as the drag-path collision recompute the
-    // plan accepts at ~13 items.
+    // plan accepts at ~13 items. improvements-v2.1 §4: the cursor now reads
+    // "not-allowed" instead of "grab" over anything gesture-locked (the
+    // handle or an item's body) — a locked item is still selectable, but a
+    // "grab" cursor over something that can't actually be grabbed is a worse
+    // affordance than none.
     function updateHover(evt: PointerEvent) {
       const dom = renderer.domElement;
       setPointerNdcFromEvent(evt);
@@ -571,12 +654,14 @@ export const Viewport = forwardRef<
       const overHandle = handleMesh ? raycaster.intersectObject(handleMesh, false).length > 0 : false;
       setHandleHovered(overHandle);
       if (overHandle) {
-        dom.style.cursor = "grab";
+        const selId = selectedItemIdRef.current;
+        dom.style.cursor = selId && isPlacementLocked(selId) ? "not-allowed" : "grab";
         return;
       }
       const hit = raycaster.intersectObjects(scene.children, true)[0];
-      const overItem = hit ? findItemGroup(hit.object) !== null : false;
-      dom.style.cursor = overItem ? "grab" : "";
+      const hitGroup = hit ? findItemGroup(hit.object) : null;
+      const hitItemId = hitGroup ? (hitGroup.userData.itemId as string) : null;
+      dom.style.cursor = hitItemId ? (isPlacementLocked(hitItemId) ? "not-allowed" : "grab") : "";
     }
 
     // Walks up from a raycast hit to the placed item's THREE.Group — every
@@ -645,6 +730,15 @@ export const Viewport = forwardRef<
           const itemId = selectedItemIdRef.current;
           const group = itemId ? built.furnitureGroups.get(itemId) : undefined;
           if (itemId && group) {
+            // improvements-v2.1 §4: a locked item's handle is still visible
+            // and still hit-tests (so it keeps signaling lock state via
+            // color/cursor — see setHandleHovered/updateHover), but a click
+            // on it must not start a rotate-drag. Return here rather than
+            // falling through to the body hit-test below, which would
+            // otherwise treat this click as if it landed on empty space
+            // (the handle isn't part of `scene.children`'s raycast walk) and
+            // deselect.
+            if (isPlacementLocked(itemId)) return;
             dragPlane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 1, 0), group.position);
             rotateDrag = { itemId, group };
             gestureStart = { position: group.position.clone(), rotationY: group.rotation.y };
@@ -662,7 +756,13 @@ export const Viewport = forwardRef<
         selectItem(null);
         return;
       }
-      selectItem(hitGroup.userData.itemId as string);
+      const hitItemId = hitGroup.userData.itemId as string;
+      selectItem(hitItemId);
+      // improvements-v2.1 §4: selection always happens (above) so a locked
+      // item can still be inspected/unlocked — only the drag gesture itself
+      // is gated here, after selection, so this reads as "selectable but not
+      // draggable" rather than "not clickable at all."
+      if (isPlacementLocked(hitItemId)) return;
 
       // Floor-plane drag, not screen-space: a horizontal plane through the
       // item's current height, so the item tracks where the cursor ray
@@ -672,7 +772,7 @@ export const Viewport = forwardRef<
       dragPlane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 1, 0), hitGroup.position);
       if (!raycaster.ray.intersectPlane(dragPlane, planeHit)) return;
       grabOffset.set(hitGroup.position.x - planeHit.x, 0, hitGroup.position.z - planeHit.z);
-      drag = { itemId: hitGroup.userData.itemId as string, group: hitGroup };
+      drag = { itemId: hitItemId, group: hitGroup };
       gestureStart = { position: hitGroup.position.clone(), rotationY: hitGroup.rotation.y };
       controls.enabled = false; // gesture owns the pointer, not the orbit camera
       renderer.domElement.style.cursor = "grabbing";
@@ -801,6 +901,21 @@ export const Viewport = forwardRef<
       }
       const itemId = selectedItemIdRef.current;
       if (!itemId) return;
+
+      // improvements-v2.1 §4: "L" toggles the selected item's own lock flag
+      // — deliberately checked before any lock gate below, and deliberately
+      // ignores both the current lock state and the global toggle, since it
+      // has to be able to unlock an item, not just lock one. Follows the
+      // same "keyboard step on the selected item" pattern as q/e/PageUp/
+      // PageDown below (own key, no existing binding — see the constants'
+      // comments), just editing scene data (through App.tsx's commit) rather
+      // than mutating a live THREE.Group.
+      if (evt.key === "l" || evt.key === "L") {
+        evt.preventDefault();
+        onToggleLockRef.current?.(itemId);
+        return;
+      }
+
       const group = builtRef.current?.furnitureGroups.get(itemId);
       if (!group) return;
       let stepDeg = 0;
@@ -811,6 +926,12 @@ export const Viewport = forwardRef<
       else if (evt.key === ELEVATION_KEY_DOWN) elevationDir = -1;
       else return;
       evt.preventDefault();
+      // improvements-v2.1 §4: swallow the keypress either way (consistent
+      // with every other recognized key above always calling preventDefault)
+      // but skip the actual step — a locked item (own flag or the global
+      // toggle) ignores rotate/elevation keys the same way onPointerDown
+      // ignores a drag/rotate-drag gesture on it.
+      if (isPlacementLocked(itemId)) return;
       if (stepDeg !== 0) {
         group.rotation.y += THREE.MathUtils.degToRad(stepDeg);
       } else if (elevationDir !== null) {
@@ -826,6 +947,23 @@ export const Viewport = forwardRef<
     // shortcuts are scoped to it rather than living on `window`.
     renderer.domElement.tabIndex = 0;
     renderer.domElement.style.outline = "none";
+    // improvements-v2.1 §4: a structural rebuild tears down and recreates
+    // the canvas DOM node (see the cleanup below), which drops browser focus
+    // entirely — the new node was never focused. Previously harmless (only
+    // import mutated `items`, and nothing chained a keyboard shortcut right
+    // after it), but the new "L" lock toggle does exactly that: mutating
+    // `items` via the keyboard, from a handler that's only reachable because
+    // the canvas already had focus. Without this, locking/unlocking via "L"
+    // works once, then silently strands every subsequent q/e/PageUp/L press
+    // — the rebuilt canvas is present but unfocused, so onKeyDown never
+    // fires. Restores focus only when the *previous* canvas actually had it
+    // (see the cleanup's pendingRefocusRef capture), not unconditionally, so
+    // this doesn't steal focus from, say, a sidebar input mid-edit when an
+    // unrelated import happens to land.
+    if (pendingRefocusRef.current) {
+      renderer.domElement.focus();
+      pendingRefocusRef.current = false;
+    }
     renderer.domElement.addEventListener("pointerdown", onPointerDown);
     renderer.domElement.addEventListener("pointermove", onPointerMove);
     renderer.domElement.addEventListener("pointerup", onPointerUp);
@@ -872,6 +1010,10 @@ export const Viewport = forwardRef<
 
     return () => {
       cancelled = true;
+      // improvements-v2.1 §4: capture focus ownership before anything below
+      // tears the canvas down — see pendingRefocusRef's declaration and the
+      // setup-side comment for why this matters now.
+      pendingRefocusRef.current = document.activeElement === renderer.domElement;
       // Code-review finding: a structural rebuild can land mid-drag — e.g. an
       // unrelated background import completing changes `sceneFile.items`,
       // which this effect depends on (via `structuralSceneFile`) independent
@@ -904,6 +1046,9 @@ export const Viewport = forwardRef<
       // down owns disposing the helper itself (keyed off buildVersion), but
       // the selection *state* has to drop too, or a stale itemId would leave
       // the app thinking something's selected with nothing to show for it.
+      // improvements-v2.1 §4: stash it first so the next setup run can
+      // restore it if the item survived the rebuild (see pendingReselectRef).
+      pendingReselectRef.current = selectedItemIdRef.current;
       selectItem(null);
       // Any texture the calibration effect had applied belonged to this
       // build's materials — dispose them all now rather than leak.
@@ -1157,7 +1302,13 @@ export const Viewport = forwardRef<
     const item = itemsByIdRef.current.get(selectedItemId);
     if (item) {
       const handleGeo = new THREE.SphereGeometry(ROTATE_HANDLE_RADIUS_CM, 16, 16);
-      const handleMat = new THREE.MeshBasicMaterial({ color: SELECTION_COLOR, depthTest: false });
+      // improvements-v2.1 §4: lock-aware initial color (own flag or the
+      // global toggle), same composition setHandleHovered uses for its
+      // un-hovered base color — a freshly-selected locked item's handle
+      // should read as locked from the first frame, not just after the
+      // first hover.
+      const initialColor = isPlacementLocked(selectedItemId) ? LOCKED_COLOR : SELECTION_COLOR;
+      const handleMat = new THREE.MeshBasicMaterial({ color: initialColor, depthTest: false });
       const handle = new THREE.Mesh(handleGeo, handleMat);
       handle.renderOrder = 999;
       handle.userData.isRotateHandle = true;
@@ -1167,6 +1318,28 @@ export const Viewport = forwardRef<
       rotateHandleRef.current = handle;
     }
   }, [selectedItemId, buildVersion]);
+
+  // improvements-v2.1 §4: globalLock is ephemeral App.tsx state, not part of
+  // `sceneFile` — it's deliberately NOT one of structuralSceneFile's deps
+  // (toggling it must not tear down/rebuild the renderer, same reasoning as
+  // every other view-only piece of state this component keeps out of that
+  // memo). That means flipping it doesn't fire a structural rebuild, so
+  // nothing else here would otherwise re-sync the already-live selection
+  // outline/handle color to the new lock state until the next unrelated
+  // mutation. This is that seam: re-runs the same color composition
+  // updateCollisionHighlight/handle-creation already use, purely to catch
+  // "toggled global lock while something was already selected."
+  useEffect(() => {
+    const built = builtRef.current;
+    const selId = selectedItemIdRef.current;
+    if (!built || !selId) return;
+    const group = built.furnitureGroups.get(selId);
+    if (group) updateCollisionHighlight(selId, group);
+    const handle = rotateHandleRef.current;
+    if (handle) {
+      (handle.material as THREE.MeshBasicMaterial).color.set(isPlacementLocked(selId) ? LOCKED_COLOR : SELECTION_COLOR);
+    }
+  }, [globalLock]);
 
   return <div ref={containerRef} className="viewport" />;
 });

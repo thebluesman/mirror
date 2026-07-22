@@ -43,6 +43,13 @@ function App() {
   // boundary. A fresh load starts with an empty slot / disabled button.
   const [undoSlot, setUndoSlot] = useState<UndoSlot>(null);
 
+  // improvements-v2.1 §4: "lock all" HUD toggle. View-only interaction
+  // safety ("can't be accidentally dragged while orbiting"), not a scene
+  // fact — deliberately ephemeral component state, same treatment as
+  // undoSlot above, NOT folded into `sceneFile`/autosave/undo. A reload
+  // starts unlocked, same as undo starts empty.
+  const [globalLock, setGlobalLock] = useState(false);
+
   useEffect(() => {
     let cancelled = false;
     loadInitialScene()
@@ -237,6 +244,19 @@ function App() {
     commit(commitToActiveLayout(sceneFile, (commands) => setPlaceCommand(commands, itemId, position, rotationDeg)));
   }
 
+  // improvements-v2.1 §4: per-item placement lock — a scene fact (persists,
+  // round-trips through save/export), so it goes through the same discrete
+  // commit() tail as rename/delete rather than the ephemeral globalLock
+  // state above. Same shape as handleRenameLayout/handleDeleteLayout: map
+  // over the relevant array, replace the one matching item.
+  function handleToggleLock(itemId: string) {
+    if (!sceneFile) return;
+    commit({
+      ...sceneFile,
+      items: sceneFile.items.map((i) => (i.id === itemId ? { ...i, locked: !i.locked } : i)),
+    });
+  }
+
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -266,6 +286,8 @@ function App() {
                 sceneFile={sceneFile}
                 shellCalibration={sceneFile.room.shell}
                 onCommitPlacement={commitPlacement}
+                onToggleLock={handleToggleLock}
+                globalLock={globalLock}
               />
               <LayoutChrome
                 layouts={sceneFile.layouts}
@@ -281,6 +303,8 @@ function App() {
                 onSave={handleSaveView}
                 onDelete={handleDeleteView}
                 onRename={handleRenameView}
+                globalLock={globalLock}
+                onToggleGlobalLock={() => setGlobalLock((v) => !v)}
               />
             </>
           ) : (

@@ -102,6 +102,31 @@ describe("furniture union", () => {
     const parsed = SceneFileSchema.parse(scene) as any;
     expect(parsed.items[0].legHeightCm).toBe(20);
   });
+
+  // improvements-v2.1 §4: `locked` is declared explicitly on both union
+  // branches (not just carried through `.loose()`) so it's typed, not just
+  // parsed — these two cases cover a box item and the compound-sofa shape.
+  it("accepts and defaults `locked` on a box item", () => {
+    const scene = minimalV1() as any;
+    scene.items = [{ id: "b", name: "Box", dimsCm: { w: 1, d: 1, h: 1 }, locked: true }];
+    const parsed = SceneFileSchema.parse(scene);
+    expect(parsed.items[0].locked).toBe(true);
+    expect(parsed.items[0]).not.toHaveProperty("locked", undefined); // sanity: key present when set
+  });
+
+  it("`locked` is optional — an item with no lock field still validates and reads as undefined", () => {
+    const parsed = SceneFileSchema.parse(minimalV1());
+    expect(parsed.items[0].locked).toBeUndefined();
+  });
+
+  it("accepts `locked` on a compound-sofa item", () => {
+    const scene = minimalV1() as any;
+    scene.items = [
+      { id: "sofa", name: "Sofa", shape: "compound-sofa", main: { w: 290, d: 93 }, chaise: { w: 91, d: 162 }, locked: true },
+    ];
+    const parsed = SceneFileSchema.parse(scene);
+    expect(parsed.items[0].locked).toBe(true);
+  });
 });
 
 describe("migrate", () => {
