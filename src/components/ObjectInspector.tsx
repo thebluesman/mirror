@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { X } from "lucide-react";
+import { RefreshCw, X } from "lucide-react";
 import type { Dims, FurnitureItem, ModelRotation } from "../schema/scene";
 import { furnitureOverallDims } from "../scene/buildScene";
 import { dimsAreValid, ObjectEditFields } from "./ObjectEditFields";
@@ -36,10 +36,18 @@ export function ObjectInspector({
   item,
   onEdit,
   onClose,
+  onReimport,
 }: {
   item: FurnitureItem;
   onEdit: (patch: ObjectEditPatch) => void;
   onClose: () => void;
+  /** docs/proposals/reimport-entry-point.md §14: fires the "Re-import…"/
+   *  "Import…" button below, with this item's id — threaded up through
+   *  Viewport.tsx to App.tsx's handleRequestReimport, which switches to the
+   *  Import tab and pre-selects this item there. Optional so any existing/
+   *  test caller that doesn't pass it just doesn't render the button (same
+   *  "onX?" shape as onEdit's sibling callbacks elsewhere in this app). */
+  onReimport?: (itemId: string) => void;
 }) {
   // Code-review fix: a compound-sofa's W/D are derived from its `main`/
   // `chaise` sub-footprints (buildScene.ts's `furnitureFootprint`), which
@@ -126,6 +134,19 @@ export function ObjectInspector({
         onRotationChange={handleRotationChange}
         dimsAxes={dimsAxes}
       />
+      {/* docs/proposals/reimport-entry-point.md §14: full-width, below the
+       *  form fields — the same "primary action button under the form
+       *  fields" placement ImportPanel itself uses for e.g. "Upload photo…"
+       *  (ImportPanel.css's .import-panel-button). Label is conditional on
+       *  whether this item already has a generated model, mirroring
+       *  ImportPanel's own dropdown convention ("(re-import, replaces
+       *  current model)"). Routes through App.tsx's handleRequestReimport
+       *  (switch to the Import tab + pre-select this item there) — no import
+       *  logic lives here. */}
+      <button type="button" className="object-inspector-reimport" onClick={() => onReimport?.(item.id)}>
+        <RefreshCw size={16} aria-hidden="true" />
+        {item.glbHash ? "Re-import…" : "Import…"}
+      </button>
     </div>
   );
 }

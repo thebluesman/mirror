@@ -1,5 +1,27 @@
 # Proposal: reposition `ObjectInspector` relative to the selected object — improvements-minor-fixes §11
 
+**Built (2026-07-22):** implemented per this doc's §1–§3, with one
+reconciliation against work that landed after this proposal was drafted —
+`improvements-minor-fixes.md §3`'s keyboard-cheatsheet pass wrapped
+`ObjectInspector` in a new `.object-inspector-wrap` (a selection-hint pill
+stacked above the card) and moved the fixed-corner positioning onto that
+wrapper. Rather than the forwardRef/useImperativeHandle route into
+`ObjectInspector` this doc's §3 describes (written before the wrap existed),
+`Viewport.tsx` anchors `.object-inspector-wrap` directly via a plain DOM
+ref — it already renders that element itself, so this is simpler than
+routing a ref through a child component, and it's the right unit anyway:
+the hint pill and the card move together as one anchored block. The
+below/above/side/clamp decision math lives in `src/scene/inspectorAnchor.ts`
+as a pure, unit-tested function (`inspectorAnchor.test.ts`), fed by a
+projection helper (`updateInspectorAnchor`) inside `Viewport.tsx`'s existing
+`animate()` loop, called there and once synchronously from `selectItem`, per
+§3. Panel size is cached via `ResizeObserver` (open question 1's lean), the
+projection re-derives from live camera state every frame so `flyTo`/
+saved-viewpoint recall is covered for free (open question 2), and the
+off-screen/behind-camera fallback reuses the old fixed corner with no extra
+"which item" affordance (open question 3). `npm run test`/`build`/`lint`
+all pass.
+
 **Status:** approved for build (2026-07-22 review) — all three open
 questions confirmed per this doc's own leans: (a) cache the panel height,
 re-measure via `ResizeObserver` on content change, not a per-frame

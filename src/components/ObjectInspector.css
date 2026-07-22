@@ -53,3 +53,32 @@
 .object-inspector-close:hover {
   color: var(--color-ink);
 }
+
+/* docs/proposals/reimport-entry-point.md §14: full-width secondary action,
+ * matching ImportPanel.css's `.import-panel-button-secondary` visual
+ * language (outline, not filled — this isn't the panel's primary action,
+ * editing name/dims/rotation is) but stretched to the card's full width
+ * rather than that button's `align-self: flex-start`, since a 220px-wide
+ * card has no room for a second button beside it the way ImportPanel's
+ * 320px sidebar does. Icon+label centered, DESIGN.md §6 inline sizing
+ * (--icon-size-inline, 16px) — not the proposal's originally-drafted 13px,
+ * written before that icon-sizing system existed. */
+.object-inspector-reimport {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-8);
+  width: 100%;
+  font: var(--text-button);
+  background: none;
+  color: var(--color-body-muted);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-pill);
+  padding: var(--space-8) var(--space-16);
+  cursor: pointer;
+}
+
+.object-inspector-reimport:hover {
+  color: var(--color-ink);
+  border-color: var(--color-ink);
+}

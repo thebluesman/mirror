@@ -61,16 +61,24 @@
 
 /* improvements-minor-fixes.md §3 (docs/proposals/keyboard-cheatsheet.md §3,
  * item 2 — "revive the walk-mode hint pattern, scoped to selection"): owns
- * the bottom-left anchor ObjectInspector.css used to own directly, so a
- * selection-hint pill (reusing `.viewport-mode-hint` above — the same
- * pattern walk mode's own hint already uses) can stack above the docked
- * editor at that one anchor point without two independently-computed
- * positions drifting apart. `column-reverse` + DOM order [ObjectInspector,
- * hint] puts the panel at the anchor (like today) and the hint directly
- * above it, growing upward as the panel's own height varies with its
- * content (compound-sofa items show fewer fields) — no dynamic height
- * measurement needed for this simpler "hint pill, not a full anchor system"
- * scope (contrast the still-unbuilt object-inspector-anchor.md proposal). */
+ * the anchor ObjectInspector.css used to own directly, so a selection-hint
+ * pill (reusing `.viewport-mode-hint` above — the same pattern walk mode's
+ * own hint already uses) stacks above the docked editor as one unit.
+ * `column-reverse` + DOM order [ObjectInspector, hint] puts the panel first
+ * and the hint directly above it.
+ *
+ * docs/proposals/object-inspector-anchor.md §11/§3: `left`/`top` are now set
+ * imperatively, per frame, by Viewport.tsx's updateInspectorAnchor — NOT by
+ * this file (see that function's header comment for why: a per-frame
+ * setState-driven position would re-render Viewport/ObjectInspector 60x/sec
+ * for a value nothing in the form depends on). The `left`/`bottom` below are
+ * only the *static fallback* for the one frame before the first animate()
+ * tick runs (or before a fresh selection's DOM node exists for
+ * updateInspectorAnchor's synchronous call to reach) — reusing the old fixed
+ * corner so that one frame looks identical to pre-anchor-system behavior.
+ * The imperative path overwrites `top` and sets `bottom: auto` on its first
+ * write (see updateInspectorAnchor), so `top`/`bottom` are never both
+ * "meaningfully set" at once from the CSS's own point of view. */
 .object-inspector-wrap {
   position: absolute;
   left: var(--space-24);

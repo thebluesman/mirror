@@ -109,6 +109,30 @@ function App() {
   // ViewportChrome — not worth threading through sceneFile.
   const [showShortcuts, setShowShortcuts] = useState(false);
 
+  // docs/proposals/reimport-entry-point.md §14: which item ObjectInspector's
+  // "Re-import…" button asked to pre-select in ImportPanel's picker, once
+  // the tab switches to "Import". Ephemeral UI-routing state, same shape as
+  // showShortcuts above — not a scene fact, never persisted. Consumed only
+  // as ImportPanel's `useState` initializer (see that component: it's
+  // freshly mounted every time `tab === "Import"` becomes true, a plain
+  // conditional render below, not a keep-alive), so this doesn't need to be
+  // "cleared after use" on that path — but it DOES need clearing on a
+  // direct click of the Import tab button (see TABS.map below), so a stale
+  // pre-selection from an earlier Re-import click can't silently resurface
+  // on a later plain click of the tab.
+  const [reimportTarget, setReimportTarget] = useState<string | null>(null);
+
+  // docs/proposals/reimport-entry-point.md §14: ObjectInspector's
+  // "Re-import…"/"Import…" button, threaded up through Viewport.tsx's
+  // onReimport prop. Per the proposal's confirmed lean: leaves
+  // ObjectInspector open behind the sidebar (does not deselect the item) —
+  // the item stays visibly selected/outlined in the viewport as useful
+  // context while re-importing it.
+  function handleRequestReimport(itemId: string) {
+    setReimportTarget(itemId);
+    setTab("Import");
+  }
+
   useEffect(() => {
     let cancelled = false;
     loadInitialScene()
@@ -443,6 +467,7 @@ function App() {
                 onToggleLock={handleToggleLock}
                 globalLock={globalLock}
                 onEditItem={handleEditItem}
+                onReimport={handleRequestReimport}
                 fovDeg={liveFovDeg}
                 onFovRecalled={setLiveFovDeg}
               />
@@ -479,7 +504,19 @@ function App() {
                 key={t}
                 type="button"
                 className={`app-panel-tab${tab === t ? " app-panel-tab--active" : ""}`}
-                onClick={() => setTab(t)}
+                onClick={() => {
+                  // docs/proposals/reimport-entry-point.md §14 gotcha: a
+                  // direct click of the Import tab must clear any stale
+                  // reimportTarget from an earlier "Re-import" click —
+                  // handleRequestReimport is the only other writer, and
+                  // ImportPanel only ever consumes this once, as its
+                  // `useState` initializer on mount — so without this clear,
+                  // clicking Re-import once, backing out, then later
+                  // clicking Import normally would silently re-apply that
+                  // stale pre-selection.
+                  setReimportTarget(null);
+                  setTab(t);
+                }}
               >
                 {t}
               </button>
@@ -499,7 +536,9 @@ function App() {
                 onChangeLocation={updateLocation}
               />
             )}
-            {sceneFile && tab === "Import" && <ImportPanel sceneFile={sceneFile} onImported={handleImported} />}
+            {sceneFile && tab === "Import" && (
+              <ImportPanel sceneFile={sceneFile} onImported={handleImported} initialSelection={reimportTarget ?? undefined} />
+            )}
             {tab === "Settings" && (
               <SettingsPanel sceneFile={sceneFile} onImportProject={handleImportProject} />
             )}

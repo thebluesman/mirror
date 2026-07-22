@@ -1,5 +1,22 @@
 # Proposal: re-import entry point from ObjectInspector — improvements-minor-fixes.md §14
 
+**Built (2026-07-22):** implemented per §2/§3, option (a). `ObjectInspector`
+gained the full-width `RefreshCw` button below `ObjectEditFields` and an
+`onReimport?: (itemId: string) => void` prop, threaded through
+`Viewport.tsx` (same pass-through shape as `onEditItem`/`onToggleLock`) to
+`App.tsx`'s `handleRequestReimport`, which sets `reimportTarget` and
+switches to the Import tab, leaving `ObjectInspector` open behind the
+sidebar per the confirmed lean. `ImportPanel` gained `initialSelection?:
+string`, consumed only as its `selection` `useState` initializer — confirmed
+`App.tsx` still mounts `ImportPanel` fresh on every switch to `tab ===
+"Import"` (plain conditional render, no keep-alive). The Import tab's own
+nav `onClick` now clears `reimportTarget` before switching, per §3's
+explicit gotcha. One deviation from this doc's drafted JSX snippet: the icon
+is sized 16px (`--icon-size-inline`), not the originally-proposed 13px —
+`DESIGN.md`'s §6 icon-sizing system landed after this proposal was written
+and standardizes inline icon+label buttons on 16px. `npm run test`/`build`/
+`lint` all pass.
+
 **Status:** approved for build (2026-07-22 review) — go with this doc's own
 lean on both open questions: switching to the Import tab via "Re-import"
 leaves `ObjectInspector` open behind the sidebar (does not deselect the

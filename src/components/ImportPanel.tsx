@@ -47,15 +47,24 @@ const PROGRESS_LABEL: Record<GenerationPhase, string> = {
 export function ImportPanel({
   sceneFile,
   onImported,
+  initialSelection,
 }: {
   sceneFile: SceneFile;
   onImported: (next: SceneFile) => void;
+  /** docs/proposals/reimport-entry-point.md §14: pre-selects an item in the
+   *  picker below when arriving here via ObjectInspector's "Re-import…"
+   *  button. Consumed only as `selection`'s `useState` initializer — safe
+   *  because App.tsx only mounts this component while `tab === "Import"`
+   *  (a plain conditional render, not a `display:none`-style keep-alive),
+   *  so every switch to this tab is a fresh mount, not a re-render of a
+   *  live instance an effect would need to sync into. */
+  initialSelection?: string;
 }) {
   // All items are selectable, including ones with a glbHash already —
   // picking an already-imported item re-runs the import and replaces its
   // photo/model/dims/orientation (fixes a wrong source photo without
   // needing a separate "delete and re-add" flow).
-  const [selection, setSelection] = useState<string>("__new__");
+  const [selection, setSelection] = useState<string>(initialSelection ?? "__new__");
   const [newName, setNewName] = useState("");
   const [hasFalKey, setHasFalKey] = useState<boolean | null>(null);
   const [stage, setStage] = useState<Stage>({ kind: "pick" });

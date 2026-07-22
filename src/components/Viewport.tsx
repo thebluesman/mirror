@@ -18,6 +18,12 @@ import { loadShellTexture } from "../scene/loadShellTexture";
 import { applyModelTint, fitModelToDims, loadFurnitureModel } from "../scene/loadFurnitureModel";
 import { computeFlatTextureFit, FULL_CONTENT_BOX, type ContentBox } from "../scene/flatItemTexture";
 import { checkCollisions, itemFootprintAABB, wallFootprintAABBs, type AABB } from "../scene/collision";
+import {
+  computeInspectorAnchor,
+  fixedCornerAnchor,
+  rectOverlapsViewport,
+  type ScreenRect,
+} from "../scene/inspectorAnchor";
 import { snapPosition } from "../scene/snapping";
 import { relativeYawDeg, rotateHandleWorldXZ, snapYawDeg, yawDegFromPointer } from "../scene/rotateHandle";
 import { clampElevationCm, ELEVATION_STEP_CM, stepElevationCm } from "../scene/elevation";
@@ -243,6 +249,19 @@ const HANDLE_REF_DISTANCE_CM = 500;
 const HANDLE_MIN_SCALE = 0.5;
 const HANDLE_MAX_SCALE = 4;
 
+// docs/proposals/object-inspector-anchor.md §2: two distinct pixel budgets
+// for `updateInspectorAnchor`'s below/above/side/clamp rule (src/scene/
+// inspectorAnchor.ts) — MARGIN is the viewport-edge clamp inset, reusing
+// the exact `--space-24` inset `.object-inspector-wrap` already used as its
+// fixed corner; GAP is the smaller, distinct object-to-panel spacing
+// (`--space-16`) for the non-clamped anchored case. Kept as literal px
+// (not read from CSS custom properties) since `updateInspectorAnchor` does
+// this math against `container.clientWidth/Height` — real CSS pixels, not
+// world units — every frame; see tokens.css for the source of truth these
+// mirror.
+const INSPECTOR_ANCHOR_MARGIN_PX = 24; // var(--space-24)
+const INSPECTOR_ANCHOR_GAP_PX = 16; // var(--space-16)
+
 const SELECTION_COLOR = 0x4fd1ff;
 // A handle brightens to this while hovered, so it reads as a grabbable
 // affordance (paired with a `cursor: grab` on the canvas — see updateHover).
@@ -452,6 +471,13 @@ export const Viewport = forwardRef<
      *  action shape as onCommitPlacement/onToggleLock, App.tsx maps it onto
      *  the matching item in `sceneFile.items` and runs it through `commit()`. */
     onEditItem?: (itemId: string, patch: ObjectEditPatch) => void;
+    /** docs/proposals/reimport-entry-point.md §14: ObjectInspector's
+     *  "Re-import…"/"Import…" button, fired with the selected item's id —
+     *  same pass-through shape as onEditItem/onToggleLock above. App.tsx's
+     *  handleRequestReimport is the only consumer; this component doesn't
+     *  know anything about the Import tab or ImportPanel, it just forwards
+     *  the click. */
+    onReimport?: (itemId: string) => void;
     /** improvements-minor-fixes.md §17: live lens-picker FOV — ephemeral
      *  App.tsx state (mirrors globalLock), applied without a structural
      *  rebuild by the live-update effect below. `undefined` until this
@@ -480,6 +506,7 @@ export const Viewport = forwardRef<
     onToggleLock,
     globalLock,
     onEditItem,
+    onReimport,
     fovDeg,
     onFovRecalled,
   },
@@ -573,6 +600,33 @@ export const Viewport = forwardRef<
   // that effect's focus-restore comment for why this matters now that "L"
   // can trigger a rebuild from a keyboard shortcut).
   const pendingRefocusRef = useRef(false);
+
+  // docs/proposals/object-inspector-anchor.md §11 open question 1: keeps
+  // inspectorSizeRef current without a per-frame DOM read. A small, separate
+  // effect (not folded into the giant WebGL effect below) since it only
+  // touches the DOM/React ref, not Three.js state — keyed on selectedItemId
+  // so it (re)attaches whenever `.object-inspector-wrap` mounts (a fresh
+  // selection) or unmounts (deselection), and ResizeObserver itself covers
+  // in-place content-size changes for the lifetime of one selection (a
+  // different item swapped in via the wrap's own re-render doesn't remount
+  // the wrap — only the keyed ObjectInspector child does — so this effect
+  // re-running per selectedItemId is a touch more than strictly necessary
+  // but keeps "attach once while mounted, re-measure on resize" simple).
+  useEffect(() => {
+    const el = inspectorWrapRef.current;
+    if (!el) {
+      inspectorSizeRef.current = { width: 0, height: 0 };
+      return;
+    }
+    function measure() {
+      if (!el) return;
+      inspectorSizeRef.current = { width: el.offsetWidth, height: el.offsetHeight };
+    }
+    measure();
+    const resizeObserver = new ResizeObserver(measure);
+    resizeObserver.observe(el);
+    return () => resizeObserver.disconnect();
+  }, [selectedItemId]);
   // Bug fix (improvements-minor-fixes.md §15 investigation): a structural
   // rebuild fires for ANY furniture-item edit (tint, flat-texture upload,
   // lock toggle, ObjectInspector edits, ...) via structuralSceneFile's
@@ -608,6 +662,26 @@ export const Viewport = forwardRef<
   // only the PageUp/PageDown keyboard step). Same lifecycle/reposition shape
   // as the rotate handle, its own raycast target and vertical-drag gesture.
   const elevationHandleRef = useRef<THREE.Group | null>(null);
+
+  // docs/proposals/object-inspector-anchor.md §11 (§3's plumbing): the
+  // anchored `.object-inspector-wrap` DOM node, positioned imperatively
+  // every animate() frame — see updateInspectorAnchor below. A plain DOM
+  // ref, not a forwardRef into ObjectInspector: the wrap (hint pill + card)
+  // is rendered directly by this component's own JSX (added by
+  // improvements-minor-fixes.md §3's keyboard-cheatsheet work, after this
+  // proposal was drafted assuming ObjectInspector owned its own root node),
+  // so anchoring the wrap Viewport already renders is simpler than routing
+  // through a forwardRef/useImperativeHandle pair on a child component —
+  // and it's the right unit anyway: the hint pill and the inspector card
+  // should move together, not be independently anchored.
+  const inspectorWrapRef = useRef<HTMLDivElement | null>(null);
+  // Cached wrap size (§1 open question 1's recommended lean: measure via
+  // ResizeObserver on content change, not a per-frame getBoundingClientRect
+  // read) — see the ResizeObserver effect below, which keeps this current
+  // whenever the wrap mounts, unmounts, or its content's rendered size
+  // changes (a different item selected, compound-sofa's fewer fields, the
+  // hint pill's text).
+  const inspectorSizeRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 });
 
   // D2: wall AABBs and the item-id -> definition lookup only change when a
   // structural rebuild happens (room/items are structuralSceneFile deps), so
@@ -1083,6 +1157,11 @@ export const Viewport = forwardRef<
     // mode's forward direction) — a single preallocated Vector3, same "avoid
     // a per-frame allocation" treatment as the drag-gesture vectors above.
     const minimapForward = new THREE.Vector3();
+    // §11 (object-inspector-anchor): reused every updateInspectorAnchor call
+    // (animate()'s per-frame call and selectItem's one-off call) for
+    // projecting the selected item's AABB corners through the camera — same
+    // "avoid a per-frame allocation" treatment as minimapForward above.
+    const inspectorProjectScratch = new THREE.Vector3();
     let drag: { itemId: string; group: THREE.Group } | null = null;
     // §3: a second, mutually-exclusive gesture — dragging the rotate ring/knob
     // turns group.rotation.y by the angle the pointer has swept around the
@@ -1231,6 +1310,107 @@ export const Viewport = forwardRef<
     function selectItem(itemId: string | null) {
       selectedItemIdRef.current = itemId;
       setSelectedItemId(itemId);
+      // §11: computed once synchronously here (not only from animate()) so a
+      // same-frame reselect (one item already selected, another clicked)
+      // doesn't render at a stale anchor for one visible frame. A fresh
+      // empty->selected transition still waits one frame regardless —
+      // inspectorWrapRef.current is null until React commits the wrap's DOM
+      // node, and updateInspectorAnchor no-ops on that — but animate()'s own
+      // rAF tick (<16ms later) picks it up immediately after.
+      updateInspectorAnchor();
+    }
+
+    /** docs/proposals/object-inspector-anchor.md §11/§3: projects the
+     *  selected item's world-space AABB (XZ footprint from itemFootprintAABB,
+     *  height from furnitureOverallDims — same two functions
+     *  updateCollisionHighlight/the elevation handle already trust for
+     *  per-frame work) through the camera, and imperatively positions
+     *  `.object-inspector-wrap` via computeInspectorAnchor's below/above/
+     *  side/clamp rule (src/scene/inspectorAnchor.ts) — direct DOM style
+     *  writes, NOT React state (see this file's header comment on
+     *  positionRotateHandle/positionElevationHandle for why: a per-frame
+     *  setState here would re-render Viewport *and* ObjectInspector 60x/sec
+     *  for a value nothing in the form actually depends on).
+     *
+     *  Called from animate() every frame a selection exists — so the panel
+     *  tracks a live drag/rotate/elevation gesture, an orbit drag, AND a
+     *  flyTo/saved-viewpoint recall alike, since this re-derives from live
+     *  `camera` state regardless of what moved it (open question 2's
+     *  confirmed answer) — and once synchronously from selectItem, per that
+     *  call site's comment. */
+    function updateInspectorAnchor() {
+      // Same "re-check inside the nested function" shape as resize() above —
+      // TS can't carry the outer `if (!container) return` narrowing into a
+      // separate function declaration's body.
+      if (!container) return;
+      const itemId = selectedItemIdRef.current;
+      const el = inspectorWrapRef.current;
+      if (!itemId || !el) return;
+      const group = built.furnitureGroups.get(itemId);
+      const item = itemsByIdRef.current.get(itemId);
+      if (!group || !item) return;
+
+      const containerWidth = container.clientWidth;
+      const containerHeight = container.clientHeight;
+      if (containerWidth === 0 || containerHeight === 0) return;
+
+      const rotationDeg = normalizeDeg(THREE.MathUtils.radToDeg(group.rotation.y));
+      const footprint = itemFootprintAABB(item, [group.position.x, group.position.y, group.position.z], rotationDeg);
+      const dims = furnitureOverallDims(item);
+      const groupY = group.position.y;
+
+      // Project all 8 world-space corners of the footprint × height box
+      // (proposal §1: exact for any yaw/camera angle, unlike projecting just
+      // the center and estimating a radius) and take the min/max of the
+      // resulting container-pixel points. `z > 1` on any corner (behind the
+      // camera's near/far clip, in the "behind camera" sense) flags the item
+      // as not-currently-visible, same as the resulting rect not overlapping
+      // the viewport at all (see the edge case below).
+      let behindCamera = false;
+      let minX = Infinity;
+      let maxX = -Infinity;
+      let minY = Infinity;
+      let maxY = -Infinity;
+      for (const x of [footprint.minX, footprint.maxX]) {
+        for (const z of [footprint.minZ, footprint.maxZ]) {
+          for (const y of [groupY, groupY + dims.h]) {
+            inspectorProjectScratch.set(x, y, z).project(camera);
+            if (inspectorProjectScratch.z > 1) behindCamera = true;
+            const px = (inspectorProjectScratch.x * 0.5 + 0.5) * containerWidth;
+            const py = (-inspectorProjectScratch.y * 0.5 + 0.5) * containerHeight;
+            if (px < minX) minX = px;
+            if (px > maxX) maxX = px;
+            if (py < minY) minY = py;
+            if (py > maxY) maxY = py;
+          }
+        }
+      }
+
+      const objRect: ScreenRect = { left: minX, top: minY, right: maxX, bottom: maxY };
+      const { width: panelWidth, height: panelHeight } = inspectorSizeRef.current;
+      // Edge case (§1): object behind the camera, or its projected box
+      // doesn't overlap the viewport at all — skip the anchor rule and fall
+      // back to the *old* fixed corner, so "not currently visible" degrades
+      // to exactly the pre-anchor-system behavior instead of a new edge
+      // case to design (Shyam's "always reachable while selected"
+      // requirement — the title bar's `Edit "{item.name}"` already says
+      // which item, per open question 3's resolution).
+      const visible = !behindCamera && rectOverlapsViewport(objRect, containerWidth, containerHeight);
+      const anchor = visible
+        ? computeInspectorAnchor(
+            objRect,
+            panelWidth,
+            panelHeight,
+            containerWidth,
+            containerHeight,
+            INSPECTOR_ANCHOR_GAP_PX,
+            INSPECTOR_ANCHOR_MARGIN_PX,
+          )
+        : fixedCornerAnchor(panelHeight, containerHeight, INSPECTOR_ANCHOR_MARGIN_PX);
+
+      el.style.left = `${anchor.left}px`;
+      el.style.top = `${anchor.top}px`;
+      el.style.bottom = "auto";
     }
 
     function commitDrag() {
@@ -1829,6 +2009,11 @@ export const Viewport = forwardRef<
           if (elevationHandle) positionElevationHandle(elevationHandle, group, item, camera);
         }
       }
+      // §11: not gated on rotateHandle/elevationHandle existing (unlike the
+      // block above) — the inspector is up whenever something's selected
+      // regardless of whether its handles built successfully; the selection
+      // and DOM-node-exists checks live inside updateInspectorAnchor itself.
+      updateInspectorAnchor();
       renderer.render(scene, camera);
     }
     animate();
@@ -2361,12 +2546,16 @@ export const Viewport = forwardRef<
     <>
       <div ref={containerRef} className="viewport" />
       {selectedItem && (
-        <div className="object-inspector-wrap">
+        // §11: ref'd directly (not routed through ObjectInspector's own
+        // props) so updateInspectorAnchor can position the hint pill + card
+        // as one anchored unit — see inspectorWrapRef's declaration.
+        <div className="object-inspector-wrap" ref={inspectorWrapRef}>
           <ObjectInspector
             key={selectedItem.id}
             item={selectedItem}
             onEdit={(patch) => onEditItem?.(selectedItem.id, patch)}
             onClose={() => setSelectedItemId(null)}
+            onReimport={onReimport}
           />
           {/* docs/proposals/keyboard-cheatsheet.md §3 (item 2): "L" has zero
            *  in-app discoverability today — this is the cheap, always-on
