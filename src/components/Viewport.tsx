@@ -490,13 +490,13 @@ export const Viewport = forwardRef<
     // `drag` above. Only one of `drag`/`rotateDrag` is ever set at a time
     // (onPointerDown picks one based on what the ray hit first).
     let rotateDrag: { itemId: string; group: THREE.Group } | null = null;
-    // Drag-path hot-loop cleanup (PRD-v2 §7.1): the canvas rect, cached at
-    // gesture-start so onPointerMove reuses it instead of forcing a layout
-    // read (getBoundingClientRect) on every pointermove — the canvas doesn't
-    // move under a captured pointer. Refreshed by resize() while a gesture is
-    // live (a mid-drag window resize is rare but possible); null when idle, so
-    // the pre-gesture hit-test in onPointerDown reads the rect fresh.
-    let gestureRect: DOMRect | null = null;
+    // Hot-loop cleanup (PRD-v2 §7.1): the canvas rect, cached once and reused
+    // by every pointermove — drag, rotate-drag, and idle hover alike — instead
+    // of forcing a layout read (getBoundingClientRect) on every single move.
+    // The canvas doesn't move under a captured pointer, and resize() below
+    // keeps this fresh on any actual size change (kept in sync unconditionally,
+    // not just mid-gesture, since hover needs it live just as much as drag).
+    let viewportRect: DOMRect = renderer.domElement.getBoundingClientRect();
     // Pre-gesture transform, captured on pointerdown, so an interrupted gesture
     // (browser-stolen pointercancel, or Escape) can revert to it rather than
     // commit a partial mid-drag state (PRD-v2 §7.1: "explicit revert on
@@ -508,16 +508,14 @@ export const Viewport = forwardRef<
     }
 
     function setPointerNdcFromEvent(evt: PointerEvent) {
-      const rect = gestureRect ?? renderer.domElement.getBoundingClientRect();
-      pointerNdc.x = ((evt.clientX - rect.left) / rect.width) * 2 - 1;
-      pointerNdc.y = -((evt.clientY - rect.top) / rect.height) * 2 + 1;
+      pointerNdc.x = ((evt.clientX - viewportRect.left) / viewportRect.width) * 2 - 1;
+      pointerNdc.y = -((evt.clientY - viewportRect.top) / viewportRect.height) * 2 + 1;
     }
 
     // Shared teardown for the end of any gesture (commit or revert): drop the
-    // cached rect + pre-gesture snapshot, hand the pointer back to the orbit
-    // camera, and reset the cursor. The next hover move recomputes the cursor.
+    // pre-gesture snapshot, hand the pointer back to the orbit camera, and
+    // reset the cursor. The next hover move recomputes the cursor.
     function endGesture() {
-      gestureRect = null;
       gestureStart = null;
       controls.enabled = true;
       renderer.domElement.style.cursor = "";
@@ -633,7 +631,6 @@ export const Viewport = forwardRef<
           if (itemId && group) {
             dragPlane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 1, 0), group.position);
             rotateDrag = { itemId, group };
-            gestureRect = renderer.domElement.getBoundingClientRect();
             gestureStart = { position: group.position.clone(), rotationY: group.rotation.y };
             controls.enabled = false; // gesture owns the pointer, not the orbit camera
             renderer.domElement.style.cursor = "grabbing";
@@ -660,7 +657,6 @@ export const Viewport = forwardRef<
       if (!raycaster.ray.intersectPlane(dragPlane, planeHit)) return;
       grabOffset.set(hitGroup.position.x - planeHit.x, 0, hitGroup.position.z - planeHit.z);
       drag = { itemId: hitGroup.userData.itemId as string, group: hitGroup };
-      gestureRect = renderer.domElement.getBoundingClientRect();
       gestureStart = { position: hitGroup.position.clone(), rotationY: hitGroup.rotation.y };
       controls.enabled = false; // gesture owns the pointer, not the orbit camera
       renderer.domElement.style.cursor = "grabbing";
@@ -819,8 +815,8 @@ export const Viewport = forwardRef<
       renderer.setSize(w, h, false);
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
-      // Keep the cached drag rect fresh if the canvas is resized mid-gesture.
-      if (gestureRect) gestureRect = renderer.domElement.getBoundingClientRect();
+      // Keep the cached rect fresh on any real size change, gesture or not.
+      viewportRect = renderer.domElement.getBoundingClientRect();
     }
     resize();
     const resizeObserver = new ResizeObserver(resize);
