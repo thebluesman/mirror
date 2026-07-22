@@ -162,6 +162,14 @@ const BoxFurniture = z
     // `z.infer` actually types it on FurnitureItem instead of leaving it
     // reachable only via an `any`-typed loose access.
     locked: z.boolean().optional(),
+    // improvements-v2.2 §5: per-item color tint, extending the shell-surface
+    // tint pattern (SurfaceCalibrationSchema.tint above) to furniture.
+    // Undefined means "no tint, render at the material's natural color" —
+    // distinct from an explicit "#ffffff" (a no-op multiplicatively, but a
+    // set value). Declared on both union branches for the same reason as
+    // `locked` just above: so z.infer types it directly instead of leaving
+    // it reachable only through `.loose()`'s any-typed passthrough.
+    tintColor: z.string().optional(),
   })
   .loose();
 
@@ -182,6 +190,8 @@ const CompoundSofaFurniture = z
     purchaseInfo: z.string().optional(),
     // See BoxFurniture's `locked` comment — same field, same rationale.
     locked: z.boolean().optional(),
+    // See BoxFurniture's `tintColor` comment — same field, same rationale.
+    tintColor: z.string().optional(),
   })
   .loose();
 

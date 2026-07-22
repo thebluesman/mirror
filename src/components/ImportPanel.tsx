@@ -7,7 +7,14 @@ import { applyFurnitureImport } from "../import/applyImport";
 import { applyFlatTexture } from "../import/applyFlatTexture";
 import { furnitureOverallDims, isBoxFurnitureItem, type BoxFurnitureItem } from "../scene/buildScene";
 import { slugify, uniqueId } from "../util/slug";
+import { useDebouncedCallback } from "../util/useDebouncedCallback";
 import "./ImportPanel.css";
+
+// improvements-v2.2 §5: same debounce window ShellPanel.tsx's surface tint
+// picker uses — a `<input type="color">` drag fires onChange continuously,
+// and each commit here triggers a full structural scene rebuild (see
+// TintRow below), not just a cheap in-place material tweak.
+const TINT_DEBOUNCE_MS = 120;
 
 type Stage =
   | { kind: "pick" }
@@ -139,6 +146,19 @@ export function ImportPanel({
     onImported(next);
   }
 
+  // improvements-v2.2 §5: per-item tint commit, same shape as
+  // handleFlatTextureUpload above — a direct field set on the matching item,
+  // no async asset store involved (a color string persists straight into
+  // the scene file, unlike a photo). `tintColor` undefined clears the tint
+  // (renders at the material's natural color); the union spread preserves
+  // whichever branch (box vs. compound-sofa) `item` actually is.
+  function handleTintChange(itemId: string, tintColor: string | undefined) {
+    const items: FurnitureItem[] = sceneFile.items.map((item) =>
+      item.id === itemId ? { ...item, tintColor } : item,
+    );
+    onImported({ ...sceneFile, items });
+  }
+
   const canPickPhoto =
     hasFalKey === true && (selection !== "__new__" || newName.trim().length > 0) && stage.kind === "pick";
 
@@ -202,6 +222,13 @@ export function ImportPanel({
           >
             Upload photo…
           </button>
+
+          {selectedItem && (
+            <TintRow
+              item={selectedItem}
+              onChange={(tintColor) => handleTintChange(selectedItem.id, tintColor)}
+            />
+          )}
 
           {selectedItem && isBoxFurnitureItem(selectedItem) && (
             <FlatTextureRow item={selectedItem} onUpload={(file) => handleFlatTextureUpload(selectedItem.id, file)} />
@@ -276,6 +303,65 @@ export function ImportPanel({
 // positivity constraint, persist that way with no in-app fix in v1.
 function isValidDim(n: number): boolean {
   return Number.isFinite(n) && n > 0;
+}
+
+// The picker's own "no color chosen" value — shown when an item has no
+// tintColor, and what "Clear tint" resets the live picker display to (the
+// actual persisted field goes to `undefined`, not this string; see
+// handleTintChange's comment for why those two are kept distinct).
+const NO_TINT = "#ffffff";
+
+// improvements-v2.2 §5: per-item color tint control, extending the shell
+// surface tint pattern (ShellPanel.tsx's SurfaceRow) to furniture. Shown for
+// both box and compound-sofa items (unlike FlatTextureRow below, which is
+// box-only), so it's its own conditional block at the call site rather than
+// nested inside an isBoxFurnitureItem check.
+function TintRow({
+  item,
+  onChange,
+}: {
+  item: FurnitureItem;
+  onChange: (tintColor: string | undefined) => void;
+}) {
+  // Local mirror of the picker's color for instant feedback while dragging —
+  // same reasoning as ShellPanel.tsx's SurfaceRow liveCalib: onChange is
+  // debounced below (it drives a full structural scene rebuild), so the
+  // input itself needs its own unthrottled state to feel live.
+  const [liveColor, setLiveColor] = useState(item.tintColor ?? NO_TINT);
+  useEffect(() => setLiveColor(item.tintColor ?? NO_TINT), [item.tintColor]);
+  const debouncedOnChange = useDebouncedCallback(onChange, TINT_DEBOUNCE_MS);
+
+  function handlePick(next: string) {
+    setLiveColor(next);
+    debouncedOnChange(next);
+  }
+
+  function handleClear() {
+    setLiveColor(NO_TINT);
+    onChange(undefined); // a discrete click, not a drag — commit immediately, no debounce
+  }
+
+  return (
+    <section className="import-panel-tint">
+      <header className="import-panel-tint-header">
+        <span className="import-panel-tint-title">Tint</span>
+        <span
+          className={`import-panel-tint-status import-panel-tint-status--${item.tintColor ? "set" : "none"}`}
+        >
+          {item.tintColor ? "tinted" : "natural color"}
+        </span>
+      </header>
+      <label className="import-field">
+        <span>Color</span>
+        <input type="color" value={liveColor} onChange={(e) => handlePick(e.target.value)} />
+      </label>
+      {item.tintColor && (
+        <button type="button" className="import-panel-button-secondary" onClick={handleClear}>
+          Clear tint
+        </button>
+      )}
+    </section>
+  );
 }
 
 // Phase 6 (PRD §7.6): per-item "use flat photo texture" control, mirroring

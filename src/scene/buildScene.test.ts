@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
-import { buildScene } from "./buildScene";
+import { buildScene, addFurnitureBoxMeshes } from "./buildScene";
 import type { SceneFile } from "./types";
 
 // v2 spike D4 (W-B, rug fix ladder lever 2 — see spike-v2/OUTCOME.md):
@@ -111,5 +111,78 @@ describe("buildScene — flat-textured furniture (v2 spike D4)", () => {
     expect(group.children).toHaveLength(1);
     const mesh = group.children[0] as THREE.Mesh;
     expect(mesh.material).not.toBeInstanceOf(Array); // shared single MAT.furniture, not a per-face array
+  });
+});
+
+// improvements-v2.2 §5: per-object material tint. Compares two items built
+// in the same buildScene() call (rather than just asserting materials
+// differ) so the "shared instance for untinted items" behavior is also
+// pinned — not just "a tinted item gets its own material."
+describe("buildScene — furniture tint (improvements-v2.2 §5)", () => {
+  const plainA = { id: "plain-a", name: "Plain A", shape: "box" as const, dimsCm: { w: 50, d: 50, h: 50 } };
+  const plainB = { id: "plain-b", name: "Plain B", shape: "box" as const, dimsCm: { w: 50, d: 50, h: 50 } };
+  const tinted = { ...plainA, id: "tinted", tintColor: "#ff0000" };
+
+  function sceneFileWithItems(items: SceneFile["items"]): SceneFile {
+    return {
+      meta: { source: "test", units: "cm", schemaVersion: "v1" },
+      room: {
+        ceilingHeightCm: 260,
+        floor: [{ name: "main", x: 0, z: 0, w: 500, d: 500 }],
+        walls: [],
+      },
+      items,
+      cameras: [],
+      layouts: [
+        {
+          id: "default",
+          name: "Default",
+          base: null,
+          commands: items.map((item, i) => ({
+            type: "place" as const,
+            itemId: item.id,
+            position: [100 * (i + 1), 0, 100 * (i + 1)] as [number, number, number],
+            rotationDeg: 0,
+          })),
+        },
+      ],
+      current: "default",
+    };
+  }
+
+  it("an untinted item's mesh uses the shared MAT.furniture instance", () => {
+    const built = buildScene(sceneFileWithItems([plainA, plainB]));
+    const meshA = built.furnitureGroups.get("plain-a")!.children[0] as THREE.Mesh;
+    const meshB = built.furnitureGroups.get("plain-b")!.children[0] as THREE.Mesh;
+    expect(meshA.material).toBe(meshB.material); // same shared instance across untinted items
+  });
+
+  it("a tinted item's mesh gets its own material, distinct from the shared instance", () => {
+    const built = buildScene(sceneFileWithItems([plainA, tinted]));
+    const meshPlain = built.furnitureGroups.get("plain-a")!.children[0] as THREE.Mesh;
+    const meshTinted = built.furnitureGroups.get("tinted")!.children[0] as THREE.Mesh;
+    expect(meshTinted.material).not.toBe(meshPlain.material);
+    const tintedMat = meshTinted.material as THREE.MeshStandardMaterial;
+    const plainMat = meshPlain.material as THREE.MeshStandardMaterial;
+    // Tint multiplies over the base furniture color, so the tinted mesh's
+    // color must differ from the untinted base rather than just being "a
+    // different object with the same color."
+    expect(tintedMat.color.getHexString()).not.toBe(plainMat.color.getHexString());
+  });
+
+  it("a compound-sofa's main+chaise sub-meshes share one per-item tinted material, not two", () => {
+    const sofa = {
+      id: "sofa",
+      name: "Sofa",
+      shape: "compound-sofa" as const,
+      main: { w: 200, d: 90 },
+      chaise: { w: 90, d: 150 },
+      tintColor: "#0000ff",
+    };
+    const group = new THREE.Group();
+    addFurnitureBoxMeshes(group, sofa);
+    expect(group.children).toHaveLength(2);
+    const [main, chaise] = group.children as THREE.Mesh[];
+    expect(main.material).toBe(chaise.material);
   });
 });
