@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   DEFAULT_SURFACE_CALIBRATION,
   type ShellCalibration,
@@ -6,6 +6,7 @@ import {
 } from "../schema/scene";
 import { photoToTileableBlob } from "../texturing/pipeline";
 import { putAsset } from "../storage/assets";
+import { useDebouncedCallback } from "../util/useDebouncedCallback";
 import "./ShellPanel.css";
 
 // Range inputs fire `onChange` on every pixel of drag — without debouncing,
@@ -14,43 +15,6 @@ import "./ShellPanel.css";
 // 120ms lands comfortably under "feels instant" for a drag gesture while
 // collapsing a whole drag into a handful of commits.
 const SLIDER_DEBOUNCE_MS = 120;
-
-/** Debounces a callback by `delayMs`, always calling with the most recent
- *  args. Flushes any pending call on unmount so a drag-then-navigate-away
- *  doesn't drop the final value. */
-function useDebouncedCallback<Args extends unknown[]>(
-  fn: (...args: Args) => void,
-  delayMs: number,
-): (...args: Args) => void {
-  const fnRef = useRef(fn);
-  fnRef.current = fn;
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingArgsRef = useRef<Args | null>(null);
-
-  useEffect(
-    () => () => {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-        if (pendingArgsRef.current) fnRef.current(...pendingArgsRef.current);
-      }
-    },
-    [],
-  );
-
-  return useMemo(() => {
-    const debounced = (...args: Args) => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-      pendingArgsRef.current = args;
-      timerRef.current = setTimeout(() => {
-        timerRef.current = null;
-        pendingArgsRef.current = null;
-        fnRef.current(...args);
-      }, delayMs);
-    };
-    return debounced;
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fn is read via fnRef so it can change every render without re-debouncing
-  }, [delayMs]);
-}
 
 const SURFACES: Array<{ key: "wall" | "floor" | "ceiling"; label: string }> = [
   { key: "wall", label: "Wall" },

@@ -4,10 +4,17 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { Footprints, Orbit as OrbitIcon } from "lucide-react";
-import { addFurnitureBoxMeshes, buildScene, furnitureOverallDims, type BuiltScene } from "../scene/buildScene";
+import {
+  addFurnitureBoxMeshes,
+  buildScene,
+  furnitureOverallDims,
+  sunPositionFromAngles,
+  type BuiltScene,
+} from "../scene/buildScene";
+import { computeRoomBoundsCm, softClampCameraPosition, type RoomBoundsCm } from "../scene/cameraBounds";
 import { applyShellSurface, updateSurfaceCalibrationInPlace, type ShellSurface } from "../scene/shellMaterials";
 import { loadShellTexture } from "../scene/loadShellTexture";
-import { fitModelToDims, loadFurnitureModel } from "../scene/loadFurnitureModel";
+import { applyModelTint, fitModelToDims, loadFurnitureModel } from "../scene/loadFurnitureModel";
 import { computeFlatTextureFit, FULL_CONTENT_BOX, type ContentBox } from "../scene/flatItemTexture";
 import { checkCollisions, itemFootprintAABB, wallFootprintAABBs, type AABB } from "../scene/collision";
 import { snapPosition } from "../scene/snapping";
@@ -22,12 +29,15 @@ import {
   type WalkInput,
 } from "../scene/walkCamera";
 import {
+  DEFAULT_LIGHTING,
   DEFAULT_SURFACE_CALIBRATION,
   type CameraPosition,
+  type Lighting,
   type ShellCalibration,
   type SurfaceCalibration,
 } from "../schema/scene";
 import type { FurnitureItem, SceneFile } from "../scene/types";
+import { ObjectInspector, type ObjectEditPatch } from "./ObjectInspector";
 import "./Viewport.css";
 
 // v2 spike (W-A, `v2/spike-arrange` — see spike-v2/OUTCOME.md): move + rotate
@@ -47,6 +57,9 @@ export interface ViewportHandle {
   /** Snaps the live camera/controls to a saved viewpoint. No-op before the
    *  first structural build. */
   flyTo(preset: CameraPosition): void;
+  /** improvements-v2.2 §8: current frame as a PNG data URL, or null before
+   *  the first structural build (mirrors getCurrentView's null-guard). */
+  captureSnapshot(): string | null;
 }
 
 const HUMAN_FOV = 38; // ~35mm-equivalent, per spike 2's C2 feedback
@@ -382,6 +395,10 @@ export const Viewport = forwardRef<
     /** Live calibration, applied without rebuilding the scene/renderer — see
      *  the shell-update effect below. Defaults to sceneFile.room.shell. */
     shellCalibration?: ShellCalibration;
+    /** improvements-v2.2 §4a: live sun/hemisphere params, applied without
+     *  rebuilding the scene/renderer — see the lighting-update effect below.
+     *  Defaults to sceneFile.room.lighting (then DEFAULT_LIGHTING). */
+    lighting?: Lighting;
     /** v2 spike (W-A): fired once per gesture — on drag-release for a move,
      *  or per keypress for a rotate step — with the item's final position/
      *  rotation. Never fired per-frame mid-drag; see the pointer-handler
@@ -398,8 +415,16 @@ export const Viewport = forwardRef<
      *  flag. Defaults to false so existing callers/tests that don't pass it
      *  see today's unlocked behavior. */
     globalLock?: boolean;
+    /** improvements-v2.2 §6: post-import docked editor (ObjectInspector)
+     *  commits a name/dims/orientation-correction patch here — same discrete-
+     *  action shape as onCommitPlacement/onToggleLock, App.tsx maps it onto
+     *  the matching item in `sceneFile.items` and runs it through `commit()`. */
+    onEditItem?: (itemId: string, patch: ObjectEditPatch) => void;
   }
->(function Viewport({ sceneFile, shellCalibration, onCommitPlacement, onToggleLock, globalLock }, handleRef) {
+>(function Viewport(
+  { sceneFile, shellCalibration, lighting, onCommitPlacement, onToggleLock, globalLock, onEditItem },
+  handleRef,
+) {
   const containerRef = useRef<HTMLDivElement>(null);
   const builtRef = useRef<BuiltScene | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -485,6 +510,12 @@ export const Viewport = forwardRef<
   // collision check rather than recomputed per pointer event.
   const wallAABBsRef = useRef<AABB[]>([]);
   const itemsByIdRef = useRef<Map<string, FurnitureItem>>(new Map());
+  // improvements-v2.2 §2: the orbit camera's soft containment volume,
+  // derived from the room's own floor/ceiling extent — recomputed alongside
+  // wallAABBsRef on each structural rebuild (a room dimension is structural,
+  // same as the walls those AABBs are built from) and read every frame by
+  // animate()'s clamp, not recomputed per-frame.
+  const roomBoundsRef = useRef<RoomBoundsCm>({ minX: 0, maxX: 0, minZ: 0, maxZ: 0, minY: 0, maxY: 0 });
 
   // improvements-v2.1 §4: whether a gesture/keystep targeting `itemId`
   // should be blocked — either the item's own persisted `locked` flag or the
@@ -573,9 +604,9 @@ export const Viewport = forwardRef<
   // e.g. furniture/walls/camera edits, silently stopped rebuilding).
   //
   // The effect depends on `structuralSceneFile`, a useMemo'd reference to
-  // `sceneFile` that only changes when a *non-shell* top-level field
-  // changes — NOT on `sceneFile` directly. That distinction matters beyond
-  // "skip the work": an effect's cleanup always runs before its next
+  // `sceneFile` that only changes when a *non-shell, non-lighting* top-level
+  // field changes — NOT on `sceneFile` directly. That distinction matters
+  // beyond "skip the work": an effect's cleanup always runs before its next
   // invocation whenever its dependency changes, full stop, regardless of
   // what the new invocation's body decides to do — so gating the rebuild
   // with an early-return *inside* an effect keyed on raw `sceneFile` would
@@ -621,7 +652,15 @@ export const Viewport = forwardRef<
     const container = containerRef.current;
     if (!container) return;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    // preserveDrawingBuffer: true — improvements-v2.2 §8's snapshot feature
+    // reads renderer.domElement via toDataURL(), which by default can return
+    // a blank image once the browser clears the drawing buffer after
+    // present. animate() below renders continuously via rAF rather than
+    // on-demand, so there's no single "render, then immediately capture"
+    // tick to hook synchronously; keeping the buffer around is the robust
+    // fix at a small (typically negligible) perf cost, vs. a timing-fragile
+    // alternative tied to the render loop's internals.
+    const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.shadowMap.enabled = true;
@@ -641,6 +680,7 @@ export const Viewport = forwardRef<
     // lifetime never reads stale walls/items from a previous room.
     wallAABBsRef.current = wallFootprintAABBs(structuralSceneFile.room);
     itemsByIdRef.current = new Map(structuralSceneFile.items.map((item) => [item.id, item]));
+    roomBoundsRef.current = computeRoomBoundsCm(structuralSceneFile.room);
 
     // improvements-v2.1 §4: restore the selection the previous run's cleanup
     // stashed (see pendingReselectRef's comment) if that item is still
@@ -667,6 +707,10 @@ export const Viewport = forwardRef<
         .then((model) => {
           if (cancelled) return;
           fitModelToDims(model, furnitureOverallDims(item), item.modelRotationDeg);
+          // improvements-v2.2 §5: a real imported GLB is the common case for
+          // a placed item, not just the box placeholder — don't skip tinting
+          // it just because it has its own imported materials.
+          if (item.tintColor) applyModelTint(model, item.tintColor);
           group.add(model);
         })
         .catch((err) => {
@@ -1498,6 +1542,20 @@ export const Viewport = forwardRef<
         }
       } else {
         controls.update();
+        // improvements-v2.2 §2: soft containment — walk mode has its own
+        // fixed eye height/free WASD roaming and isn't in this feature's
+        // scope, so this only ever runs for the orbit camera. Runs after
+        // controls.update() (which is what actually moved the camera this
+        // frame) and writes straight back to camera.position; OrbitControls
+        // reads that position back at the start of its *next* update() call
+        // to derive its internal offset-from-target, so a clamp here feeds
+        // back into subsequent zoom/pan/orbit math instead of being undone
+        // next frame.
+        const clamped = softClampCameraPosition(
+          [camera.position.x, camera.position.y, camera.position.z],
+          roomBoundsRef.current,
+        );
+        camera.position.set(clamped[0], clamped[1], clamped[2]);
       }
       // v2 spike (W-A): the selection outline's bounding box has to track
       // whatever the drag/rotate handlers above just mutated the group to —
@@ -1650,6 +1708,14 @@ export const Viewport = forwardRef<
         applyModeRef.current?.("orbit");
         applyCameraPreset(camera, controls, preset);
       },
+      // preserveDrawingBuffer (see the renderer construction above) means
+      // whatever animate() last rendered is still sitting in the buffer, so
+      // this needs no on-demand render of its own before reading it.
+      captureSnapshot() {
+        const renderer = rendererRef.current;
+        if (!renderer) return null;
+        return renderer.domElement.toDataURL("image/png");
+      },
     }),
     [],
   );
@@ -1740,6 +1806,26 @@ export const Viewport = forwardRef<
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- buildVersion is a signal (rebuild happened), not a value read in the effect
   }, [calibration, buildVersion]);
+
+  // Live sun/hemisphere updates (improvements-v2.2 §4a): same "mutate the
+  // structural effect's already-created objects in place, no renderer/camera
+  // churn" shape as the calibration effect above, just simpler — lighting is
+  // plain numbers (no async texture decode/dispose), so there's only ever
+  // the "cheap path" and no diffing against a previously-applied value is
+  // needed; recomputing is trivial and idempotent.
+  const lightingSettings = lighting ?? sceneFile.room.lighting ?? DEFAULT_LIGHTING;
+
+  useEffect(() => {
+    const built = builtRef.current;
+    if (!built) return;
+    const { sun, hemisphere } = built.lighting;
+    hemisphere.intensity = lightingSettings.hemisphereIntensity;
+    sun.intensity = lightingSettings.sunIntensity;
+    sun.position.copy(
+      sunPositionFromAngles(lightingSettings.sunAzimuthDeg, lightingSettings.sunElevationDeg, sun.target.position),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- buildVersion is a signal (rebuild happened), not a value read in the effect
+  }, [lightingSettings, buildVersion]);
 
   // v2 spike (W-A) — placement reconciliation: the other half of the
   // mutate-during-gesture/commit-on-drop seam (the drag/rotate handlers in
@@ -1944,9 +2030,22 @@ export const Viewport = forwardRef<
   // or ViewportChrome (bottom-center) for screen real estate. Rendered as a
   // sibling of the canvas div (both direct children of App.tsx's
   // position:relative `.app-viewport`), same pattern those two chromes use.
+  // improvements-v2.2 §6: derived straight from props/state (not the
+  // imperative refs the drag/rotate/elevation code reads) since this only
+  // feeds the docked editor's render, not a per-frame/per-gesture hot path.
+  const selectedItem = selectedItemId ? sceneFile.items.find((i) => i.id === selectedItemId) : undefined;
+
   return (
     <>
       <div ref={containerRef} className="viewport" />
+      {selectedItem && (
+        <ObjectInspector
+          key={selectedItem.id}
+          item={selectedItem}
+          onEdit={(patch) => onEditItem?.(selectedItem.id, patch)}
+          onClose={() => setSelectedItemId(null)}
+        />
+      )}
       <div className="viewport-mode-toggle">
         <button
           type="button"

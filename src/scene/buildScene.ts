@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { CameraPosition, FurnitureItem, SceneFile, WallDef } from "./types";
 import { flatTextureBoxDims } from "./flatItemTexture";
+import { DEFAULT_LIGHTING, SUN_DISTANCE_CM, type Lighting } from "../schema/scene";
 
 // Exported for src/scene/collision.ts (v2 spike D2 code-review finding):
 // collision/snap wall AABBs need the exact same thickness the renderer
@@ -241,6 +242,23 @@ export function furnitureOverallDims(item: FurnitureItem): { w: number; d: numbe
   return { w: maxX - minX, d: maxZ - minZ, h };
 }
 
+// improvements-v2.2 §5: per-item color tint, extending the shell-surface
+// tint pattern (shellMaterials.ts's applyCalibrationToMaterial) to furniture.
+// MAT.furniture is shared across every untinted item's placeholder mesh(es)
+// (cheap, and the common case), so a tinted item needs its own clone rather
+// than mutating the shared instance in place — that would recolor every
+// other item using it. No "reset to base" step is needed the way
+// shellMaterials.ts has one: this clone is freshly made from MAT.furniture
+// on every buildScene() call, so there's no stale prior tint on it to undo
+// before multiplying the new one in (unlike the shell's long-lived,
+// repeatedly-recalibrated materials).
+function furnitureMaterialFor(item: FurnitureItem): THREE.MeshStandardMaterial {
+  if (!item.tintColor) return MAT.furniture;
+  const mat = MAT.furniture.clone();
+  mat.color.multiply(new THREE.Color(item.tintColor));
+  return mat;
+}
+
 // Elevation is already baked into a placement command's position[1] (see
 // e.g. table-lamp/tv-samsung-frame in seed/living-room.json) — don't add
 // item.elevationCm again here, or items with both end up floating 2x high.
@@ -249,9 +267,13 @@ export function furnitureOverallDims(item: FurnitureItem): { w: number; d: numbe
 // never end up permanently invisible just because its Meshy mesh failed to
 // decode from OPFS (code-review finding, Phase 4).
 export function addFurnitureBoxMeshes(group: THREE.Group, item: FurnitureItem): void {
+  // One material per item (not per part): a compound sofa's main+chaise
+  // sub-meshes are the same tinted item, so they share the one clone rather
+  // than each getting their own.
+  const material = furnitureMaterialFor(item);
   furnitureFootprint(item).forEach((part) => {
     const geo = new THREE.BoxGeometry(part.w, part.h, part.d);
-    const mesh = new THREE.Mesh(geo, MAT.furniture);
+    const mesh = new THREE.Mesh(geo, material);
     mesh.position.set(part.offsetX, part.h / 2, part.offsetZ);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
@@ -291,10 +313,15 @@ export function isBoxFurnitureItem(item: FurnitureItem): item is BoxFurnitureIte
 function addFlatTexturedFurnitureMesh(group: THREE.Group, item: BoxFurnitureItem): THREE.MeshStandardMaterial {
   const dims = flatTextureBoxDims(item.dimsCm);
   const topMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85 });
+  // The five non-top faces get the item's own (possibly tinted) furniture
+  // material — tint doesn't apply to the top face, which is the photo
+  // texture's material instead (a tint over a rug's actual pattern photo
+  // wouldn't read as a "color adjustment," it'd just discolor the photo).
+  const sideMaterial = furnitureMaterialFor(item);
   const geo = new THREE.BoxGeometry(dims.width, dims.height, dims.depth);
   // BoxGeometry's default material-group order is [+X, -X, +Y, -Y, +Z, -Z]
   // (right, left, top, bottom, front, back) — index 2 is the top face.
-  const materials = [MAT.furniture, MAT.furniture, topMaterial, MAT.furniture, MAT.furniture, MAT.furniture];
+  const materials = [sideMaterial, sideMaterial, topMaterial, sideMaterial, sideMaterial, sideMaterial];
   const mesh = new THREE.Mesh(geo, materials);
   mesh.position.set(0, dims.height / 2, 0);
   mesh.castShadow = true;
@@ -380,10 +407,41 @@ export interface PendingFlatTexture {
   material: THREE.MeshStandardMaterial;
 }
 
+/** improvements-v2.2 §4a: live-updatable lighting handles, kept separate from
+ *  the returned THREE.Scene the same way ShellMeshes is — so Viewport's
+ *  lighting-update effect can mutate `.intensity`/`.position` directly
+ *  without re-traversing the scene graph or rebuilding the renderer. */
+export interface LightingHandles {
+  sun: THREE.DirectionalLight;
+  hemisphere: THREE.HemisphereLight;
+}
+
+/** Sun position (world-space) for a given azimuth/elevation (degrees) at the
+ *  fixed SUN_DISTANCE_CM radius, orbiting `target` — schema/scene.ts's
+ *  DEFAULT_LIGHTING derivation comment shows this is the exact inverse of how
+ *  those defaults were computed from the original hardcoded position. Shared
+ *  by buildScene's initial construction and Viewport's live lighting-update
+ *  effect so the two never compute this differently. */
+export function sunPositionFromAngles(
+  azimuthDeg: number,
+  elevationDeg: number,
+  target: THREE.Vector3,
+): THREE.Vector3 {
+  const az = THREE.MathUtils.degToRad(azimuthDeg);
+  const el = THREE.MathUtils.degToRad(elevationDeg);
+  const horizontal = SUN_DISTANCE_CM * Math.cos(el);
+  return new THREE.Vector3(
+    target.x + horizontal * Math.sin(az),
+    target.y + SUN_DISTANCE_CM * Math.sin(el),
+    target.z + horizontal * Math.cos(az),
+  );
+}
+
 export interface BuiltScene {
   scene: THREE.Scene;
   cameras: CameraPosition[];
   shell: ShellMeshes;
+  lighting: LightingHandles;
   pendingModels: PendingFurnitureModel[];
   pendingFlatTextures: PendingFlatTexture[];
   /** v2 spike (W-A): every placed item's live THREE.Group, keyed by itemId —
@@ -398,9 +456,14 @@ export function buildScene(sceneFile: SceneFile): BuiltScene {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0xbfccd6);
 
-  const sun = new THREE.DirectionalLight(0xffdcae, 2.6);
-  sun.position.set(60, 330, 420);
-  sun.target.position.set(820, 0, 560);
+  // improvements-v2.2 §4a: was hardcoded (intensity 2.6, fixed position);
+  // now reads room.lighting (falling back to DEFAULT_LIGHTING, which
+  // reproduces the old hardcoded look exactly — see schema/scene.ts).
+  const lighting: Lighting = sceneFile.room.lighting ?? DEFAULT_LIGHTING;
+
+  const sun = new THREE.DirectionalLight(0xffdcae, lighting.sunIntensity);
+  sun.target.position.set(820, 0, 560); // fixed target — only angle/intensity are in scope, not distance
+  sun.position.copy(sunPositionFromAngles(lighting.sunAzimuthDeg, lighting.sunElevationDeg, sun.target.position));
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   sun.shadow.camera.near = 10;
@@ -413,7 +476,7 @@ export function buildScene(sceneFile: SceneFile): BuiltScene {
   sun.shadow.normalBias = 2.5;
   scene.add(sun, sun.target);
 
-  const bounce = new THREE.HemisphereLight(0xcfd8e0, 0xece6da, 1.05);
+  const bounce = new THREE.HemisphereLight(0xcfd8e0, 0xece6da, lighting.hemisphereIntensity);
   scene.add(bounce);
 
   const floorMeshes: THREE.Mesh[] = [];
@@ -449,5 +512,13 @@ export function buildScene(sceneFile: SceneFile): BuiltScene {
     floorMeshes,
   };
 
-  return { scene, cameras: sceneFile.cameras, shell, pendingModels, pendingFlatTextures, furnitureGroups };
+  return {
+    scene,
+    cameras: sceneFile.cameras,
+    shell,
+    lighting: { sun, hemisphere: bounce },
+    pendingModels,
+    pendingFlatTextures,
+    furnitureGroups,
+  };
 }

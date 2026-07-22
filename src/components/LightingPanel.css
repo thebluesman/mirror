@@ -1,0 +1,66 @@
+/* Styled after ShellPanel.css (DESIGN.md §5 product-card language) — sibling
+ * classes rather than a shared import, since the two panels aren't meant to
+ * couple, but the same tokens/shapes throughout. */
+
+.lighting-panel {
+  height: 100%;
+  overflow-y: auto;
+  padding: var(--space-16);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+}
+
+.lighting-panel-title {
+  font: var(--text-feature-heading);
+  color: var(--color-ink);
+  margin: 0;
+}
+
+.lighting-panel-hint {
+  font: var(--text-body);
+  font-size: 13px;
+  color: var(--color-body-muted);
+  margin: 0;
+}
+
+.lighting-row {
+  background: var(--color-soft-stone);
+  border-radius: var(--radius-sm);
+  padding: var(--space-12);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.lighting-row-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.lighting-row-title {
+  font: var(--text-body);
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+.lighting-row-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font: var(--text-body);
+  font-size: 12px;
+  color: var(--color-body-muted);
+}
+
+.lighting-row-field input[type="range"] {
+  width: 100%;
+  accent-color: var(--color-action-blue);
+}
+
+/* DESIGN.md §5 form fields: focus state = colored border + 2px glow ring. */
+.lighting-row-field input:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(76, 110, 230, 0.65);
+}

@@ -1,0 +1,59 @@
+/* improvements-v2.2 §6: shared field styling for ObjectEditFields, reused by
+ * both mounting contexts (ImportPanel's pre-confirm stage, Viewport's
+ * post-import docked editor) — generic classnames (not "import-panel-*")
+ * since this file is no longer import-flow-specific. Visually identical to
+ * ImportPanel.css's former inline dims-row styling (kept in sync on
+ * purpose: same DESIGN.md form-field language, same app). */
+.object-edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font: var(--text-body);
+  font-size: 12px;
+  color: var(--color-body-muted);
+}
+
+.object-edit-field select,
+.object-edit-field input {
+  width: 100%;
+  font: var(--text-body);
+  font-size: 13px;
+  padding: var(--space-8);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-xs);
+  background: var(--color-canvas);
+  color: var(--color-ink);
+}
+
+.object-edit-field select:focus-visible,
+.object-edit-field input:focus-visible {
+  outline: none;
+  border-color: var(--color-focus-blue);
+  box-shadow: 0 0 0 2px rgba(76, 110, 230, 0.65);
+}
+
+.object-edit-row {
+  display: flex;
+  gap: var(--space-8);
+}
+
+.object-edit-row .object-edit-field {
+  flex: 1;
+}
+
+.object-edit-error {
+  font: var(--text-body);
+  font-size: 12px;
+  color: var(--color-error);
+  margin: 0;
+}
+
+.object-edit-hint {
+  font: var(--text-mono-label);
+  font-size: 11px;
+  color: var(--color-muted-slate);
+  margin: 0;
+  text-transform: none;
+  letter-spacing: normal;
+  line-height: 1.5;
+}

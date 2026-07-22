@@ -2,12 +2,20 @@ import { useEffect, useRef, useState } from "react";
 import { Undo2 } from "lucide-react";
 import seedRaw from "../seed/living-room.json";
 import { Viewport, type ViewportHandle } from "./components/Viewport";
+import type { ObjectEditPatch } from "./components/ObjectInspector";
 import { ViewportChrome } from "./components/ViewportChrome";
 import { LayoutChrome } from "./components/LayoutChrome";
 import { ShellPanel } from "./components/ShellPanel";
+import { LightingPanel } from "./components/LightingPanel";
 import { ImportPanel } from "./components/ImportPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
-import { parseScene, type CameraPosition, type SceneFile, type SurfaceCalibration } from "./schema/scene";
+import {
+  parseScene,
+  type CameraPosition,
+  type Lighting,
+  type SceneFile,
+  type SurfaceCalibration,
+} from "./schema/scene";
 import { makeCameraPosition, renameCameraPosition } from "./scene/cameraViewpoints";
 import { makeLayout, renameLayout } from "./scene/layouts";
 import { commitToActiveLayout, setPlaceCommand } from "./scene/commit";
@@ -15,7 +23,7 @@ import { applyUndo, recordUndo, type UndoSlot } from "./scene/undo";
 import { loadProject, saveProjectDebounced, saveProjectNow } from "./storage/autosave";
 import "./App.css";
 
-const TABS = ["Shell", "Import", "Settings"] as const;
+const TABS = ["Shell", "Lighting", "Import", "Settings"] as const;
 type Tab = (typeof TABS)[number];
 
 // Load order (Phase 2 exit criterion — persists across a browser restart):
@@ -77,6 +85,19 @@ function App() {
         ...prev,
         room: { ...prev.room, shell: { ...prev.room.shell, [surface]: calib } },
       };
+      saveProjectDebounced(next);
+      return next;
+    });
+  }
+
+  // improvements-v2.2 §4a: sun/hemisphere sliders come from LightingPanel.
+  // Same debounced-autosave, kept-out-of-the-structural-Viewport-prop shape
+  // as updateShellSurface above — Viewport reads `lighting` as a separate
+  // prop and applies it live without rebuilding the WebGL scene.
+  function updateLighting(lighting: Lighting) {
+    setSceneFile((prev) => {
+      if (!prev) return prev;
+      const next: SceneFile = { ...prev, room: { ...prev.room, lighting } };
       saveProjectDebounced(next);
       return next;
     });
@@ -196,6 +217,19 @@ function App() {
     return true;
   }
 
+  // improvements-v2.2 §8: same download pattern as SettingsPanel's
+  // handleExport (create an <a>, set href/download, click, discard) — except
+  // captureSnapshot already returns a data URL rather than a Blob, so there's
+  // no object URL to create or revoke here.
+  function handleSnapshot() {
+    const dataUrl = viewportRef.current?.captureSnapshot();
+    if (!dataUrl) return;
+    const a = document.createElement("a");
+    a.href = dataUrl;
+    a.download = `mirror-snapshot-${Date.now()}.png`;
+    a.click();
+  }
+
   function handleDeleteView(id: string) {
     if (!sceneFile) return;
     commit({ ...sceneFile, cameras: sceneFile.cameras.filter((c) => c.id !== id) });
@@ -266,6 +300,38 @@ function App() {
     });
   }
 
+  // improvements-v2.2 §6: post-import docked editor (ObjectInspector, via
+  // Viewport.tsx). Same discrete-commit shape as handleToggleLock — map over
+  // items, replace the one field set that changed — except this patch always
+  // carries all three fields together (ObjectInspector debounces and bundles
+  // them), so a rapid multi-field edit lands as one commit, not three.
+  // `dimsCm` is written unconditionally, matching applyImport.ts's existing
+  // treatment of a compound-sofa's dimsCm as an explicit override (not just a
+  // box-only field) — see furnitureOverallDims's read side for why that's
+  // already the right thing to write.
+  //
+  // Code-review note: for a compound-sofa, ObjectInspector hides the W/D
+  // fields (they're not real for that shape — see its `dimsAxes` comment)
+  // but `patch.dimsCm` still carries whatever W/D `furnitureOverallDims`
+  // currently derives from `main`/`chaise`, unedited. Writing that through
+  // sets `dimsCm` explicitly for the first time on a sofa that never had
+  // one, which makes `furnitureOverallDims` start reading it as a frozen
+  // override instead of re-deriving from `main`/`chaise` on every call.
+  // Harmless today (nothing else in-app edits `main`/`chaise` after seeding,
+  // and every commit through this panel refreshes the freeze to whatever's
+  // currently derived) — but if `main`/`chaise` ever become independently
+  // editable, this would need to stop writing W/D for that shape rather
+  // than just hiding the fields.
+  function handleEditItem(itemId: string, patch: ObjectEditPatch) {
+    if (!sceneFile) return;
+    commit({
+      ...sceneFile,
+      items: sceneFile.items.map((i) =>
+        i.id === itemId ? { ...i, name: patch.name, dimsCm: patch.dimsCm, modelRotationDeg: patch.modelRotationDeg } : i,
+      ),
+    });
+  }
+
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -294,9 +360,11 @@ function App() {
                 ref={viewportRef}
                 sceneFile={sceneFile}
                 shellCalibration={sceneFile.room.shell}
+                lighting={sceneFile.room.lighting}
                 onCommitPlacement={commitPlacement}
                 onToggleLock={handleToggleLock}
                 globalLock={globalLock}
+                onEditItem={handleEditItem}
               />
               <LayoutChrome
                 layouts={sceneFile.layouts}
@@ -314,6 +382,7 @@ function App() {
                 onRename={handleRenameView}
                 globalLock={globalLock}
                 onToggleGlobalLock={() => setGlobalLock((v) => !v)}
+                onSnapshot={handleSnapshot}
               />
             </>
           ) : (
@@ -336,6 +405,9 @@ function App() {
           <div className="app-panel-body">
             {sceneFile && tab === "Shell" && (
               <ShellPanel shell={sceneFile.room.shell} onUpdateSurface={updateShellSurface} />
+            )}
+            {sceneFile && tab === "Lighting" && (
+              <LightingPanel lighting={sceneFile.room.lighting} onChange={updateLighting} />
             )}
             {sceneFile && tab === "Import" && <ImportPanel sceneFile={sceneFile} onImported={handleImported} />}
             {tab === "Settings" && (

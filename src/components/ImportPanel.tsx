@@ -7,7 +7,16 @@ import { applyFurnitureImport } from "../import/applyImport";
 import { applyFlatTexture } from "../import/applyFlatTexture";
 import { furnitureOverallDims, isBoxFurnitureItem, type BoxFurnitureItem } from "../scene/buildScene";
 import { slugify, uniqueId } from "../util/slug";
+import { dimsAreValid, ObjectEditFields } from "./ObjectEditFields";
+import { ObjectPreview3D } from "./ObjectPreview3D";
+import { useDebouncedCallback } from "../util/useDebouncedCallback";
 import "./ImportPanel.css";
+
+// improvements-v2.2 §5: same debounce window ShellPanel.tsx's surface tint
+// picker uses — a `<input type="color">` drag fires onChange continuously,
+// and each commit here triggers a full structural scene rebuild (see
+// TintRow below), not just a cheap in-place material tweak.
+const TINT_DEBOUNCE_MS = 120;
 
 type Stage =
   | { kind: "pick" }
@@ -139,6 +148,19 @@ export function ImportPanel({
     onImported(next);
   }
 
+  // improvements-v2.2 §5: per-item tint commit, same shape as
+  // handleFlatTextureUpload above — a direct field set on the matching item,
+  // no async asset store involved (a color string persists straight into
+  // the scene file, unlike a photo). `tintColor` undefined clears the tint
+  // (renders at the material's natural color); the union spread preserves
+  // whichever branch (box vs. compound-sofa) `item` actually is.
+  function handleTintChange(itemId: string, tintColor: string | undefined) {
+    const items: FurnitureItem[] = sceneFile.items.map((item) =>
+      item.id === itemId ? { ...item, tintColor } : item,
+    );
+    onImported({ ...sceneFile, items });
+  }
+
   const canPickPhoto =
     hasFalKey === true && (selection !== "__new__" || newName.trim().length > 0) && stage.kind === "pick";
 
@@ -203,6 +225,13 @@ export function ImportPanel({
             Upload photo…
           </button>
 
+          {selectedItem && (
+            <TintRow
+              item={selectedItem}
+              onChange={(tintColor) => handleTintChange(selectedItem.id, tintColor)}
+            />
+          )}
+
           {selectedItem && isBoxFurnitureItem(selectedItem) && (
             <FlatTextureRow item={selectedItem} onUpload={(file) => handleFlatTextureUpload(selectedItem.id, file)} />
           )}
@@ -241,6 +270,7 @@ export function ImportPanel({
 
       {stage.kind === "confirm-dims" && (
         <DimsConfirmForm
+          glbBlob={stage.glbBlob}
           initialDims={stage.dims}
           initialRotation={stage.modelRotationDeg}
           onConfirm={(dims, modelRotationDeg) => void handleConfirmDims(dims, modelRotationDeg)}
@@ -268,14 +298,63 @@ export function ImportPanel({
   );
 }
 
-// Code-review finding: the `min={1}` on the number inputs below is only an
-// HTML hint — it doesn't stop a cleared/negative value from reaching
-// onConfirm (Number("") is 0, not NaN, so isNaN alone wouldn't catch it
-// either). A 0/negative/non-finite dim would fitModelToDims to a
-// zero/mirrored/degenerate scale and, since the schema's Dims has no
-// positivity constraint, persist that way with no in-app fix in v1.
-function isValidDim(n: number): boolean {
-  return Number.isFinite(n) && n > 0;
+// The picker's own "no color chosen" value — shown when an item has no
+// tintColor, and what "Clear tint" resets the live picker display to (the
+// actual persisted field goes to `undefined`, not this string; see
+// handleTintChange's comment for why those two are kept distinct).
+const NO_TINT = "#ffffff";
+
+// improvements-v2.2 §5: per-item color tint control, extending the shell
+// surface tint pattern (ShellPanel.tsx's SurfaceRow) to furniture. Shown for
+// both box and compound-sofa items (unlike FlatTextureRow below, which is
+// box-only), so it's its own conditional block at the call site rather than
+// nested inside an isBoxFurnitureItem check.
+function TintRow({
+  item,
+  onChange,
+}: {
+  item: FurnitureItem;
+  onChange: (tintColor: string | undefined) => void;
+}) {
+  // Local mirror of the picker's color for instant feedback while dragging —
+  // same reasoning as ShellPanel.tsx's SurfaceRow liveCalib: onChange is
+  // debounced below (it drives a full structural scene rebuild), so the
+  // input itself needs its own unthrottled state to feel live.
+  const [liveColor, setLiveColor] = useState(item.tintColor ?? NO_TINT);
+  useEffect(() => setLiveColor(item.tintColor ?? NO_TINT), [item.tintColor]);
+  const debouncedOnChange = useDebouncedCallback(onChange, TINT_DEBOUNCE_MS);
+
+  function handlePick(next: string) {
+    setLiveColor(next);
+    debouncedOnChange(next);
+  }
+
+  function handleClear() {
+    setLiveColor(NO_TINT);
+    onChange(undefined); // a discrete click, not a drag — commit immediately, no debounce
+  }
+
+  return (
+    <section className="import-panel-tint">
+      <header className="import-panel-tint-header">
+        <span className="import-panel-tint-title">Tint</span>
+        <span
+          className={`import-panel-tint-status import-panel-tint-status--${item.tintColor ? "set" : "none"}`}
+        >
+          {item.tintColor ? "tinted" : "natural color"}
+        </span>
+      </header>
+      <label className="import-field">
+        <span>Color</span>
+        <input type="color" value={liveColor} onChange={(e) => handlePick(e.target.value)} />
+      </label>
+      {item.tintColor && (
+        <button type="button" className="import-panel-button-secondary" onClick={handleClear}>
+          Clear tint
+        </button>
+      )}
+    </section>
+  );
 }
 
 // Phase 6 (PRD §7.6): per-item "use flat photo texture" control, mirroring
@@ -350,72 +429,48 @@ function FlatTextureRow({
   );
 }
 
-const ROTATION_STEPS = [0, 90, 180, 270] as const;
-
+// improvements-v2.2 §6, high priority: was plain number inputs/dropdowns
+// applied blind, no rendering at all before the item got placed in the real
+// room — real money is spent per fal.ai generation and there was previously
+// no way to fix a bad import after confirming. Now renders a live, orbit-
+// able 3D preview (ObjectPreview3D) alongside the fields (ObjectEditFields,
+// shared with Viewport.tsx's post-import docked editor — see
+// ObjectInspector.tsx) so editing W/D/H/rotation shows the actual result
+// before it's ever placed.
 function DimsConfirmForm({
+  glbBlob,
   initialDims,
   initialRotation,
   onConfirm,
 }: {
+  glbBlob: Blob;
   initialDims: Dims;
   initialRotation: ModelRotation;
   onConfirm: (dims: Dims, modelRotationDeg: ModelRotation) => void;
 }) {
   const [dims, setDims] = useState(initialDims);
   const [rotation, setRotation] = useState(initialRotation);
-  const invalid = (["w", "d", "h"] as const).filter((axis) => !isValidDim(dims[axis]));
   return (
     <div className="import-panel-dims">
       <p>Model generated — confirm its real-world size (cm) before placing it.</p>
-      <div className="import-panel-dims-row">
-        {(["w", "d", "h"] as const).map((axis) => (
-          <label key={axis} className="import-field">
-            <span>{axis.toUpperCase()}</span>
-            <input
-              type="number"
-              min={0.1}
-              step={0.1}
-              value={dims[axis]}
-              onChange={(e) => setDims({ ...dims, [axis]: Number(e.target.value) })}
-            />
-          </label>
-        ))}
-      </div>
-      {invalid.length > 0 && (
-        <p className="import-panel-dims-error">
-          {invalid.map((a) => a.toUpperCase()).join(", ")} must be a positive number.
-        </p>
-      )}
 
-      <p className="import-panel-dims-hint">
-        If the model is lying on its side or facing the wrong way, correct it here before
+      <ObjectPreview3D glbBlob={glbBlob} dims={dims} modelRotationDeg={rotation} />
+
+      <p className="object-edit-hint">
+        If the model is lying on its side or facing the wrong way, correct it below before
         placing — the generator doesn't always output the model upright/forward-facing. Corrections are
         applied in X, then Y, then Z order; if only one axis is off, set just that one. If the
         model needs two axes corrected at once, order matters and there's no way to change it
-        here — try each axis alone first to see which one it actually needs.
+        here — try each axis alone first to see which one it actually needs. The preview above
+        updates live as you edit either.
       </p>
-      <div className="import-panel-dims-row">
-        {(["x", "y", "z"] as const).map((axis) => (
-          <label key={axis} className="import-field">
-            <span>Rotate {axis.toUpperCase()}</span>
-            <select
-              value={rotation[axis]}
-              onChange={(e) => setRotation({ ...rotation, [axis]: Number(e.target.value) })}
-            >
-              {ROTATION_STEPS.map((deg) => (
-                <option key={deg} value={deg}>
-                  {deg}°
-                </option>
-              ))}
-            </select>
-          </label>
-        ))}
-      </div>
+
+      <ObjectEditFields dims={dims} onDimsChange={setDims} rotation={rotation} onRotationChange={setRotation} />
 
       <button
         type="button"
         className="import-panel-button"
-        disabled={invalid.length > 0}
+        disabled={!dimsAreValid(dims)}
         onClick={() => onConfirm(dims, rotation)}
       >
         Confirm and place
