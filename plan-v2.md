@@ -59,10 +59,16 @@ has not been repeated for Hunyuan. Expected to pass (same fal platform and
 client library) but expected ≠ verified, per the project's own discipline —
 and it blocks Phase 4's provider swap, so it runs first and alone.
 
-- [ ] Minimal throwaway HTML page (scratch, not committed) exercising the full
+- [x] Minimal throwaway HTML page (scratch, not committed) exercising the full
       round trip browser-side against `fal-ai/hunyuan-3d/v3.1/pro/image-to-3d`:
       photo upload, job submission, result-GLB download. *Agent: Haiku for
       setup, then a hands-on run needs Shyam's fal.ai key — human-in-the-loop.*
+      **Result (2026-07-22): PASS, all three legs.** Upload via
+      `fal.storage.upload` returned a `v3b.fal.media` URL; `fal.subscribe`
+      against the endpoint returned `model_glb.url` (plus `obj`/`mtl`/
+      `texture` alternates, unused); GLB downloaded directly, 51,897,344
+      bytes, no CORS errors on any leg. Run by Shyam via a throwaway page at
+      repo root (`scratch-phase0-hunyuan-cors.html`, deleted after this run).
 
 **Exit:** pass/fail recorded (a pass needs no ADR update — ADR-0002 already
 adopted Hunyuan; a fail would need one). Phase 4 can start.
@@ -210,16 +216,30 @@ restores the prior state and persists correctly; `/code-review` clean.
 
 Mirrors v1 Phase 5. Depends on all of Phases 1–7 merged.
 
-- [ ] Shyam sets up arrangement on his actual room: move, rotate (including
+- [x] Shyam sets up arrangement on his actual room: move, rotate (including
       the three known orientation bugs, absorbed by in-app rotate per the
       spike's resolution — §3 of `v2-spike-plan.md`), elevation, undo, layout
       save/switch/rename, and an item replace/import via Hunyuan3D — judged
       against PRD-v2 §10's success criteria.
-- [ ] Confirm the shell tiles no longer make his issue list at the two
+      **Result (2026-07-22): pass.** Import/arrangement/undo/layouts all
+      confirmed working directly against his real project. One nit noted,
+      not a blocker: Hunyuan3D's color reproduction is slightly behind
+      Meshy's on vividly colored items (e.g. a table lamp), though object
+      shape is significantly better — the tradeoff ADR-0002 already accepted.
+- [x] Confirm the shell tiles no longer make his issue list at the two
       standard views (retiring acceptance feedback #5, the last open item
       from v1's acceptance run).
-- [ ] Fix-forward on whatever surfaces, same discipline as v1 Phase 5.
-      *Human-in-the-loop.*
+      **Result (2026-07-22): pass.** Shyam uploaded the Phase 5 lever-1
+      source textures (`src/assets/shell-source-textures/`) through
+      `ShellPanel.tsx`'s existing upload+calibration UI on his real project
+      (not auto-wired — by design, see `defaultShellTextures.ts`) and
+      confirmed the tiling issue is resolved.
+- [x] Fix-forward on whatever surfaces, same discipline as v1 Phase 5.
+      *Human-in-the-loop.* Nothing surfaced that needed a fix — only the
+      Meshy-vs-Hunyuan color nit above, which is an accepted tradeoff, not a
+      defect.
+
+**v2 is done, per Shyam's own judgment against PRD-v2 §10.**
 
 **Exit:** PRD-v2 §10 satisfied by Shyam's own judgment. **v2 is done.**
 Closing journal entry next; v3 (measurement) scoping becomes the next
