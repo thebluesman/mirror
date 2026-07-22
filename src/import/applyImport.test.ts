@@ -1,9 +1,43 @@
 import { describe, expect, it } from "vitest";
 import seedRaw from "../../seed/living-room.json";
-import { parseScene, type SceneFile } from "../schema/scene";
+import { parseScene, type FurnitureItem, type PlaceCommand, type SceneFile } from "../schema/scene";
 import { applyFurnitureImport } from "./applyImport";
+import { checkCollisions, itemFootprintAABB, wallFootprintAABBs } from "../scene/collision";
+import { largestFloorRect } from "../scene/defaultPlacement";
 
 const seedScene = parseScene(seedRaw);
+
+// Asserts a genuinely-new item's default placement satisfies PRD-v2 §7.4:
+// inside "the room" (the largest floor rect) and free of item/wall collisions.
+// Deliberately checks those properties, not an exact coordinate — the nudge's
+// search strategy is an implementation detail, only "visible and clear" is the
+// contract (contrast v1's fixed, buggy [0,0,0]).
+function expectVisibleAndClear(scene: SceneFile, itemId: string) {
+  const layout = scene.layouts.find((l) => l.id === scene.current)!;
+  const cmd = layout.commands.find((c) => c.itemId === itemId) as PlaceCommand;
+  const item = scene.items.find((i) => i.id === itemId) as FurnitureItem;
+  expect(cmd).toBeDefined();
+  expect(cmd.rotationDeg).toBe(0);
+  expect(cmd.position[1]).toBe(0); // rests on the floor — never at an elevation
+
+  const room = largestFloorRect(scene.room.floor)!;
+  const [x, , z] = cmd.position;
+  expect(x).toBeGreaterThanOrEqual(room.x);
+  expect(x).toBeLessThanOrEqual(room.x + room.w);
+  expect(z).toBeGreaterThanOrEqual(room.z);
+  expect(z).toBeLessThanOrEqual(room.z + room.d);
+
+  const others = layout.commands
+    .filter((c) => c.itemId !== itemId)
+    .map((c) => {
+      const other = scene.items.find((i) => i.id === c.itemId)!;
+      return { itemId: c.itemId, aabb: itemFootprintAABB(other, c.position, c.rotationDeg) };
+    });
+  const aabb = itemFootprintAABB(item, cmd.position, cmd.rotationDeg);
+  const { itemIds, wall } = checkCollisions(aabb, others, wallFootprintAABBs(scene.room));
+  expect(itemIds).toEqual([]);
+  expect(wall).toBe(false);
+}
 
 // A scene with a second, non-default layout snapshot made active — the case
 // applyFurnitureImport's default-placement path was previously untested
@@ -47,7 +81,7 @@ describe("applyFurnitureImport", () => {
     );
   });
 
-  it("creates a new item at a default position when it has no Figma footprint", () => {
+  it("creates a new item at a visible, collision-free default when it has no Figma footprint", () => {
     const next = applyFurnitureImport(seedScene, {
       itemId: "reading-chair",
       newItemName: "Reading chair",
@@ -66,9 +100,54 @@ describe("applyFurnitureImport", () => {
       glbHash: "glb-hash-2",
     });
 
-    const layout = next.layouts.find((l) => l.id === next.current)!;
-    const command = layout.commands.find((c) => c.itemId === "reading-chair");
-    expect(command).toEqual({ type: "place", itemId: "reading-chair", position: [0, 0, 0], rotationDeg: 0 });
+    // Not the v1 origin-corner bug — placed somewhere inside the room, clear of
+    // every already-placed item and the walls (PRD-v2 §7.4).
+    expectVisibleAndClear(next, "reading-chair");
+    const command = next.layouts
+      .find((l) => l.id === next.current)!
+      .commands.find((c) => c.itemId === "reading-chair")!;
+    expect(command.position).not.toEqual([0, 0, 0]);
+  });
+
+  it("nudges a new item off a spot already taken by another item, into a clear one", () => {
+    // Force a collision at the room center: drop a big item exactly there so the
+    // naive center default would overlap it, and assert the import nudges away.
+    const room = largestFloorRect(seedScene.room.floor)!;
+    const centerX = room.x + room.w / 2;
+    const centerZ = room.z + room.d / 2;
+    const blocker: FurnitureItem = {
+      id: "blocker",
+      name: "Blocker",
+      shape: "box",
+      dimsCm: { w: 200, d: 200, h: 100 },
+    };
+    const layout = seedScene.layouts[0];
+    const scene: SceneFile = {
+      ...seedScene,
+      items: [...seedScene.items, blocker],
+      layouts: [
+        {
+          ...layout,
+          commands: [
+            ...layout.commands,
+            { type: "place", itemId: "blocker", position: [centerX, 0, centerZ], rotationDeg: 0 },
+          ],
+        },
+      ],
+    };
+
+    const next = applyFurnitureImport(scene, {
+      itemId: "reading-chair",
+      newItemName: "Reading chair",
+      dimsCm: { w: 70, d: 70, h: 90 },
+      sourcePhotoHash: "p",
+      glbHash: "g",
+    });
+
+    // Landed off the exact center (which is blocked) and clear of everything.
+    const cmd = next.layouts.find((l) => l.id === next.current)!.commands.find((c) => c.itemId === "reading-chair")!;
+    expect(cmd.position).not.toEqual([centerX, 0, centerZ]);
+    expectVisibleAndClear(next, "reading-chair");
   });
 
   it("re-importing an existing item replaces its modelRotationDeg (full replace, not merge)", () => {
@@ -106,10 +185,11 @@ describe("applyFurnitureImport", () => {
       glbHash: "glb-hash-2",
     });
 
-    // the command lands in the active layout (layout-b), NOT the default one
+    // the command lands in the active layout (layout-b), NOT the default one —
+    // and at a visible, collision-free default there (not the origin corner)
     const active = next.layouts.find((l) => l.id === "layout-b")!;
-    const activeCmd = active.commands.find((c) => c.itemId === "reading-chair");
-    expect(activeCmd).toEqual({ type: "place", itemId: "reading-chair", position: [0, 0, 0], rotationDeg: 0 });
+    expect(active.commands.some((c) => c.itemId === "reading-chair")).toBe(true);
+    expectVisibleAndClear(next, "reading-chair");
 
     const other = next.layouts.find((l) => l.id === seedScene.layouts[0].id)!;
     expect(other.commands.some((c) => c.itemId === "reading-chair")).toBe(false);
