@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { CameraPosition, FurnitureItem, SceneFile, WallDef } from "./types";
 import { flatTextureBoxDims } from "./flatItemTexture";
+import { DEFAULT_LIGHTING, SUN_DISTANCE_CM, type Lighting } from "../schema/scene";
 
 // Exported for src/scene/collision.ts (v2 spike D2 code-review finding):
 // collision/snap wall AABBs need the exact same thickness the renderer
@@ -406,10 +407,41 @@ export interface PendingFlatTexture {
   material: THREE.MeshStandardMaterial;
 }
 
+/** improvements-v2.2 §4a: live-updatable lighting handles, kept separate from
+ *  the returned THREE.Scene the same way ShellMeshes is — so Viewport's
+ *  lighting-update effect can mutate `.intensity`/`.position` directly
+ *  without re-traversing the scene graph or rebuilding the renderer. */
+export interface LightingHandles {
+  sun: THREE.DirectionalLight;
+  hemisphere: THREE.HemisphereLight;
+}
+
+/** Sun position (world-space) for a given azimuth/elevation (degrees) at the
+ *  fixed SUN_DISTANCE_CM radius, orbiting `target` — schema/scene.ts's
+ *  DEFAULT_LIGHTING derivation comment shows this is the exact inverse of how
+ *  those defaults were computed from the original hardcoded position. Shared
+ *  by buildScene's initial construction and Viewport's live lighting-update
+ *  effect so the two never compute this differently. */
+export function sunPositionFromAngles(
+  azimuthDeg: number,
+  elevationDeg: number,
+  target: THREE.Vector3,
+): THREE.Vector3 {
+  const az = THREE.MathUtils.degToRad(azimuthDeg);
+  const el = THREE.MathUtils.degToRad(elevationDeg);
+  const horizontal = SUN_DISTANCE_CM * Math.cos(el);
+  return new THREE.Vector3(
+    target.x + horizontal * Math.sin(az),
+    target.y + SUN_DISTANCE_CM * Math.sin(el),
+    target.z + horizontal * Math.cos(az),
+  );
+}
+
 export interface BuiltScene {
   scene: THREE.Scene;
   cameras: CameraPosition[];
   shell: ShellMeshes;
+  lighting: LightingHandles;
   pendingModels: PendingFurnitureModel[];
   pendingFlatTextures: PendingFlatTexture[];
   /** v2 spike (W-A): every placed item's live THREE.Group, keyed by itemId —
@@ -424,9 +456,14 @@ export function buildScene(sceneFile: SceneFile): BuiltScene {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0xbfccd6);
 
-  const sun = new THREE.DirectionalLight(0xffdcae, 2.6);
-  sun.position.set(60, 330, 420);
-  sun.target.position.set(820, 0, 560);
+  // improvements-v2.2 §4a: was hardcoded (intensity 2.6, fixed position);
+  // now reads room.lighting (falling back to DEFAULT_LIGHTING, which
+  // reproduces the old hardcoded look exactly — see schema/scene.ts).
+  const lighting: Lighting = sceneFile.room.lighting ?? DEFAULT_LIGHTING;
+
+  const sun = new THREE.DirectionalLight(0xffdcae, lighting.sunIntensity);
+  sun.target.position.set(820, 0, 560); // fixed target — only angle/intensity are in scope, not distance
+  sun.position.copy(sunPositionFromAngles(lighting.sunAzimuthDeg, lighting.sunElevationDeg, sun.target.position));
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   sun.shadow.camera.near = 10;
@@ -439,7 +476,7 @@ export function buildScene(sceneFile: SceneFile): BuiltScene {
   sun.shadow.normalBias = 2.5;
   scene.add(sun, sun.target);
 
-  const bounce = new THREE.HemisphereLight(0xcfd8e0, 0xece6da, 1.05);
+  const bounce = new THREE.HemisphereLight(0xcfd8e0, 0xece6da, lighting.hemisphereIntensity);
   scene.add(bounce);
 
   const floorMeshes: THREE.Mesh[] = [];
@@ -475,5 +512,13 @@ export function buildScene(sceneFile: SceneFile): BuiltScene {
     floorMeshes,
   };
 
-  return { scene, cameras: sceneFile.cameras, shell, pendingModels, pendingFlatTextures, furnitureGroups };
+  return {
+    scene,
+    cameras: sceneFile.cameras,
+    shell,
+    lighting: { sun, hemisphere: bounce },
+    pendingModels,
+    pendingFlatTextures,
+    furnitureGroups,
+  };
 }

@@ -6,9 +6,16 @@ import type { ObjectEditPatch } from "./components/ObjectInspector";
 import { ViewportChrome } from "./components/ViewportChrome";
 import { LayoutChrome } from "./components/LayoutChrome";
 import { ShellPanel } from "./components/ShellPanel";
+import { LightingPanel } from "./components/LightingPanel";
 import { ImportPanel } from "./components/ImportPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
-import { parseScene, type CameraPosition, type SceneFile, type SurfaceCalibration } from "./schema/scene";
+import {
+  parseScene,
+  type CameraPosition,
+  type Lighting,
+  type SceneFile,
+  type SurfaceCalibration,
+} from "./schema/scene";
 import { makeCameraPosition, renameCameraPosition } from "./scene/cameraViewpoints";
 import { makeLayout, renameLayout } from "./scene/layouts";
 import { commitToActiveLayout, setPlaceCommand } from "./scene/commit";
@@ -16,7 +23,7 @@ import { applyUndo, recordUndo, type UndoSlot } from "./scene/undo";
 import { loadProject, saveProjectDebounced, saveProjectNow } from "./storage/autosave";
 import "./App.css";
 
-const TABS = ["Shell", "Import", "Settings"] as const;
+const TABS = ["Shell", "Lighting", "Import", "Settings"] as const;
 type Tab = (typeof TABS)[number];
 
 // Load order (Phase 2 exit criterion — persists across a browser restart):
@@ -78,6 +85,19 @@ function App() {
         ...prev,
         room: { ...prev.room, shell: { ...prev.room.shell, [surface]: calib } },
       };
+      saveProjectDebounced(next);
+      return next;
+    });
+  }
+
+  // improvements-v2.2 §4a: sun/hemisphere sliders come from LightingPanel.
+  // Same debounced-autosave, kept-out-of-the-structural-Viewport-prop shape
+  // as updateShellSurface above — Viewport reads `lighting` as a separate
+  // prop and applies it live without rebuilding the WebGL scene.
+  function updateLighting(lighting: Lighting) {
+    setSceneFile((prev) => {
+      if (!prev) return prev;
+      const next: SceneFile = { ...prev, room: { ...prev.room, lighting } };
       saveProjectDebounced(next);
       return next;
     });
@@ -314,6 +334,7 @@ function App() {
                 ref={viewportRef}
                 sceneFile={sceneFile}
                 shellCalibration={sceneFile.room.shell}
+                lighting={sceneFile.room.lighting}
                 onCommitPlacement={commitPlacement}
                 onToggleLock={handleToggleLock}
                 globalLock={globalLock}
@@ -357,6 +378,9 @@ function App() {
           <div className="app-panel-body">
             {sceneFile && tab === "Shell" && (
               <ShellPanel shell={sceneFile.room.shell} onUpdateSurface={updateShellSurface} />
+            )}
+            {sceneFile && tab === "Lighting" && (
+              <LightingPanel lighting={sceneFile.room.lighting} onChange={updateLighting} />
             )}
             {sceneFile && tab === "Import" && <ImportPanel sceneFile={sceneFile} onImported={handleImported} />}
             {tab === "Settings" && (

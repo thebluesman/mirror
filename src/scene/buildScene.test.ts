@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as THREE from "three";
 import { buildScene, addFurnitureBoxMeshes } from "./buildScene";
 import type { SceneFile } from "./types";
+import type { Lighting } from "../schema/scene";
 
 // v2 spike D4 (W-B, rug fix ladder lever 2 — see spike-v2/OUTCOME.md):
 // covers buildScene's new flat-textured-plane path for a box item carrying
@@ -10,13 +11,14 @@ import type { SceneFile } from "./types";
 // construct THREE objects), same "exercise the real builder function"
 // approach collision.test.ts/loadFurnitureModel.test.ts already use.
 
-function sceneFileWithItem(item: SceneFile["items"][number]): SceneFile {
+function sceneFileWithItem(item: SceneFile["items"][number], lighting?: Lighting): SceneFile {
   return {
     meta: { source: "test", units: "cm", schemaVersion: "v1" },
     room: {
       ceilingHeightCm: 260,
       floor: [{ name: "main", x: 0, z: 0, w: 500, d: 500 }],
       walls: [],
+      lighting,
     },
     items: [item],
     cameras: [],
@@ -184,5 +186,47 @@ describe("buildScene — furniture tint (improvements-v2.2 §5)", () => {
     expect(group.children).toHaveLength(2);
     const [main, chaise] = group.children as THREE.Mesh[];
     expect(main.material).toBe(chaise.material);
+  });
+});
+
+// improvements-v2.2 §4a: real-time lighting controls. buildScene previously
+// hardcoded the sun/hemisphere; these confirm the schema-driven path
+// reproduces that exact old look by default, and applies custom values when
+// `room.lighting` is set.
+describe("buildScene — lighting (improvements-v2.2 §4a)", () => {
+  const plainItem = { id: "plain-box", name: "Plain", shape: "box" as const, dimsCm: { w: 50, d: 50, h: 50 } };
+
+  it("with no room.lighting, reproduces the old hardcoded sun position/intensity and hemisphere intensity", () => {
+    const built = buildScene(sceneFileWithItem(plainItem));
+    const { sun, hemisphere } = built.lighting;
+
+    expect(sun.intensity).toBeCloseTo(2.6, 10);
+    expect(hemisphere.intensity).toBeCloseTo(1.05, 10);
+    // Target is unconditionally fixed at (820, 0, 560) (distance/target are
+    // out of scope for this feature — see schema/scene.ts).
+    expect(sun.target.position.toArray()).toEqual([820, 0, 560]);
+    // Position reconstructed from the derived default azimuth/elevation/
+    // radius must round-trip back to the original hardcoded (60, 330, 420)
+    // to floating-point precision.
+    expect(sun.position.x).toBeCloseTo(60, 6);
+    expect(sun.position.y).toBeCloseTo(330, 6);
+    expect(sun.position.z).toBeCloseTo(420, 6);
+  });
+
+  it("applies custom room.lighting values instead of the hardcoded defaults", () => {
+    const lighting: Lighting = {
+      sunIntensity: 4,
+      sunAzimuthDeg: 90,
+      sunElevationDeg: 45,
+      hemisphereIntensity: 0.2,
+    };
+    const built = buildScene(sceneFileWithItem(plainItem, lighting));
+    const { sun, hemisphere } = built.lighting;
+
+    expect(sun.intensity).toBe(4);
+    expect(hemisphere.intensity).toBe(0.2);
+    expect(sun.target.position.toArray()).toEqual([820, 0, 560]); // target still fixed
+    // A different azimuth/elevation must move the sun off its default spot.
+    expect(sun.position.toArray()).not.toEqual([60, 330, 420]);
   });
 });
