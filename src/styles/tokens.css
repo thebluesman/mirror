@@ -66,4 +66,10 @@
   --radius-lg: 22px;
   --radius-xl: 30px;
   --radius-pill: 32px;
+
+  /* Icon sizing (DESIGN.md §6) — Lucide's `size` prop takes a number, not a
+     CSS var, so call sites pass the matching literal (16/20) by hand; these
+     tokens exist so non-JSX icon sizing (if any) has the same source of truth. */
+  --icon-size-inline: 16px;
+  --icon-size-standalone: 20px;
 }
