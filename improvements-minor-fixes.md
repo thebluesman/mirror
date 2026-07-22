@@ -533,10 +533,12 @@ diagnose next round.
 
 ### 15. SONDEROD rug bug — repro obtained, ready to diagnose
 
-Photo confirmed: `spike-v2/assets/sonderod-rug-photo.png` (already in-repo
-from the spike work) — Shyam confirms this is the exact file he's been
-uploading. Item: `sonderod-rug` in `seed/living-room.json`
-(`category: "rug"` per the schema field shipped this PR).
+Photo confirmed: `spike-v2/assets/Soenderoed Rug High Pile Blue.jpeg` — Shyam
+replaced the earlier `sonderod-rug-photo.png` asset in-repo with this file
+(white borders cropped) after finding the old one wasn't actually the same
+photo he's been uploading; use this file, not the deleted one, for repro.
+Item: `sonderod-rug` in `seed/living-room.json` (`category: "rug"` per the
+schema field shipped this PR).
 
 **Symptom, precisely:** upload completes with no thrown error and no
 console message — but the rug's rendered appearance shows **no change
