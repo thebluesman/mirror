@@ -220,23 +220,44 @@ const ROTATE_STEP_DEG = 15;
 // until now had only PageUp/PageDown and no drag gesture at all.
 
 // --- Rotation ring + knob (replaces the sphere) ---
-// Gap between the footprint's outer radius and the ring, the ring's line
-// thickness, and the grip-knob radius — all cm, same unit as the scene graph.
+// Gap between the footprint's outer radius and the ring, and the ring's line
+// thickness — cm, same unit as the scene graph.
 const ROTATE_RING_MARGIN_CM = 12;
-const ROTATE_RING_TUBE_CM = 2.5;
-const ROTATE_KNOB_RADIUS_CM = 6;
-// Lift the ring a hair above the base plane so its flat torus doesn't z-fight
-// the floor/rug it sits on.
+// handle-reskin.md (§5 Option B): the ring's "line thickness" is now
+// `outerRadius - innerRadius` of a flat RingGeometry annulus, not a torus
+// tube radius — ~3cm, echoing a bordered stroke.
+const ROTATE_RING_THICKNESS_CM = 3;
+// handle-reskin.md: the sphere grip is now a pill (rounded-rect, extruded
+// shallow) — length is the tangential (long) axis, width the radial (short)
+// axis fully rounded into pill caps, depth the shallow vertical thickness.
+// Length matches the old sphere's diameter (2 * the old 6cm radius) so the
+// grab target reads about the same size as before.
+const ROTATE_KNOB_LENGTH_CM = 12;
+const ROTATE_KNOB_WIDTH_CM = 7;
+const ROTATE_KNOB_DEPTH_CM = 3;
+// Lift the ring a hair above the base plane so its flat geometry doesn't
+// z-fight the floor/rug it sits on.
 const ROTATE_HANDLE_LIFT_CM = 1;
 
 // --- Elevation (vertical) drag handle (net-new affordance) ---
 // A vertical double-arrow floating above the item's top face. Gap above the
-// top, stem (shaft) length, arrowhead length, and the two radii — cm.
+// top, stem (shaft) length, head length, and the shaft radius — cm.
 const ELEVATION_HANDLE_GAP_CM = 18;
 const ELEVATION_HANDLE_STEM_CM = 24;
-const ELEVATION_HANDLE_CONE_CM = 9;
+// handle-reskin.md: same head length the old ConeGeometry used (kept
+// identical so positionElevationHandle's capOffset/halfArrow math — which
+// reads this constant — doesn't need updating), now the vertical span of a
+// chevron instead of a cone height.
+const ELEVATION_HANDLE_HEAD_CM = 9;
 const ELEVATION_HANDLE_SHAFT_R_CM = 1.6;
-const ELEVATION_HANDLE_CONE_R_CM = 4;
+// Full base width of a chevron head (was the old cone's radius; doubled here
+// since a chevron's width, not a radius, is what its shape constructor takes).
+const ELEVATION_HANDLE_HEAD_WIDTH_CM = 8;
+// Stroke thickness of each chevron arm, and the shallow depth it's extruded
+// to (mirrors the rotate knob's shallow-pill treatment) — both new to the
+// chevron construction, no old-cone equivalent.
+const ELEVATION_HANDLE_CHEVRON_ARM_CM = 2.5;
+const ELEVATION_HANDLE_CHEVRON_DEPTH_CM = 3;
 
 // Camera-relative grab-target sizing (PRD-v2 §7.1 polish): a fixed world-space
 // size reads as a tiny dot when the camera is zoomed out and a boulder when
@@ -262,19 +283,28 @@ const HANDLE_MAX_SCALE = 4;
 const INSPECTOR_ANCHOR_MARGIN_PX = 24; // var(--space-24)
 const INSPECTOR_ANCHOR_GAP_PX = 16; // var(--space-16)
 
-const SELECTION_COLOR = 0x4fd1ff;
+// docs/proposals/handle-reskin.md (§5 Option B, built 2026-07-22): idle/
+// selection is DESIGN.md's Action Blue — the system's link/accent color,
+// distinct from both the collision red and the locked amber below. See
+// DESIGN.md's new "Manipulation-handle colors" section for the full mapping.
+const SELECTION_COLOR = 0x1863dc;
 // A handle brightens to this while hovered, so it reads as a grabbable
 // affordance (paired with a `cursor: grab` on the canvas — see updateHover).
 // Name kept from the C1 sphere era; it's now the shared handle-hover color.
-const ROTATE_HANDLE_HOVER_COLOR = 0xd6f5ff;
+// handle-reskin.md: DESIGN.md's Coral — hover is treated as "you're about to
+// grab this," the same active-marker role Coral plays elsewhere in the app.
+const ROTATE_HANDLE_HOVER_COLOR = 0xff7759;
 // D2: the selection outline recolors to this when the selected item's
 // footprint currently overlaps another item or a wall — the plan's
 // "decision support, not physics" bar means we flag, we don't block.
+// handle-reskin.md: deliberately kept brighter than DESIGN.md's documented
+// Error `#b30000` — legibility as an always-on-top overlay against furniture
+// wins over palette purity here (open question 4, "keep the brighter red").
 const COLLISION_COLOR = 0xff5c5c;
 // improvements-v2.1 §4: the selection outline (and rotate handle) recolor to
 // this when the selected item is locked — its own `locked` flag or the
 // global "lock all" toggle, either counts (see isPlacementLocked) — and NOT
-// currently flagged as colliding. Amber, distinct from both the cyan
+// currently flagged as colliding. Amber, distinct from both the Action-Blue
 // selection default and the red collision flag, so "locked" reads as its own
 // state rather than a shade of either. Collision still wins when both are
 // true (see updateCollisionHighlight's color composition): a physical
@@ -292,8 +322,8 @@ function cameraRelativeScale(camera: THREE.PerspectiveCamera, worldPos: THREE.Ve
 }
 
 /** Recolors every mesh under a handle (ring+knob, or the elevation double-
- *  arrow's stem+cones) — a handle is a THREE.Group of a few basic meshes, so
- *  hover/idle color swaps traverse it rather than poking one material. */
+ *  arrow's stem+chevrons) — a handle is a THREE.Group of a few basic meshes,
+ *  so hover/idle color swaps traverse it rather than poking one material. */
 function setHandleColor(handle: THREE.Object3D, color: number) {
   handle.traverse((obj) => {
     const mesh = obj as THREE.Mesh;
@@ -315,13 +345,97 @@ function disposeHandle(handle: THREE.Object3D) {
   });
 }
 
+/** A rounded-rectangle (pill, when `radius` is half of `height`) outline in
+ *  the local XY plane, centered on the origin — handle-reskin.md's "pill
+ *  grip" quote of the button-pill silhouette used throughout this app's 2D
+ *  chrome. `radius` is clamped so it can't exceed the shape's own half-width/
+ *  half-height (degenerate otherwise). Feeds `ExtrudeGeometry` for the rotate
+ *  knob. */
+function roundedRectShape(width: number, height: number, radius: number): THREE.Shape {
+  const w = width / 2;
+  const h = height / 2;
+  const r = Math.min(radius, w, h);
+  const shape = new THREE.Shape();
+  shape.moveTo(-w + r, -h);
+  shape.lineTo(w - r, -h);
+  shape.quadraticCurveTo(w, -h, w, -h + r);
+  shape.lineTo(w, h - r);
+  shape.quadraticCurveTo(w, h, w - r, h);
+  shape.lineTo(-w + r, h);
+  shape.quadraticCurveTo(-w, h, -w, h - r);
+  shape.lineTo(-w, -h + r);
+  shape.quadraticCurveTo(-w, -h, -w + r, -h);
+  return shape;
+}
+
+/** A thick "^" chevron outline (two constant-width arms meeting at a centered
+ *  apex) in the local XY plane — handle-reskin.md's "UI stepper, not
+ *  physics-lab vector arrow" replacement for `ConeGeometry`. Apex sits at
+ *  local `+height/2`, base corners at local `-height/2`, so the shape is
+ *  vertically centered on the origin exactly like the cone it replaces —
+ *  callers don't need to re-derive `positionElevationHandle`'s cap-offset
+ *  math. Each arm is offset `thickness/2` to either side of its centerline
+ *  along the arm's own perpendicular, so the two arms meet the apex as a
+ *  (very slightly blunt, unmitered) point rather than a sharp corner — at
+ *  this scale imperceptible, and in keeping with the softened, no-sharp-tips
+ *  brief for the elevation handle. */
+function chevronShape(width: number, height: number, thickness: number): THREE.Shape {
+  const half = thickness / 2;
+  const apex = new THREE.Vector2(0, height / 2);
+  const left = new THREE.Vector2(-width / 2, -height / 2);
+  const right = new THREE.Vector2(width / 2, -height / 2);
+
+  const leftDir = apex.clone().sub(left).normalize();
+  const leftOut = new THREE.Vector2(-leftDir.y, leftDir.x);
+  const rightDir = right.clone().sub(apex).normalize();
+  const rightOut = new THREE.Vector2(-rightDir.y, rightDir.x);
+
+  const shape = new THREE.Shape();
+  const outerLeft = left.clone().addScaledVector(leftOut, half);
+  shape.moveTo(outerLeft.x, outerLeft.y);
+  const pts = [
+    apex.clone().addScaledVector(leftOut, half),
+    apex.clone().addScaledVector(rightOut, half),
+    right.clone().addScaledVector(rightOut, half),
+    right.clone().addScaledVector(rightOut, -half),
+    apex.clone().addScaledVector(rightOut, -half),
+    apex.clone().addScaledVector(leftOut, -half),
+    left.clone().addScaledVector(leftOut, -half),
+  ];
+  for (const pt of pts) shape.lineTo(pt.x, pt.y);
+  shape.closePath();
+  return shape;
+}
+
+/** Builds one chevron head (a shallow-extruded `chevronShape`, centered on
+ *  all three axes) for the elevation handle. A fresh geometry per call — the
+ *  up/down heads each own an independent `BufferGeometry` instance, matching
+ *  the old up/down `ConeGeometry` pair, so `disposeHandle`'s per-mesh
+ *  traversal disposes them cleanly with no shared-resource double-free
+ *  concerns. */
+function chevronHeadGeometry(): THREE.ExtrudeGeometry {
+  const shape = chevronShape(ELEVATION_HANDLE_HEAD_WIDTH_CM, ELEVATION_HANDLE_HEAD_CM, ELEVATION_HANDLE_CHEVRON_ARM_CM);
+  const geometry = new THREE.ExtrudeGeometry(shape, { depth: ELEVATION_HANDLE_CHEVRON_DEPTH_CM, bevelEnabled: false });
+  geometry.center();
+  return geometry;
+}
+
 /** Builds the rotation handle: a flat ring encircling the item's footprint
  *  plus a grip knob riding the ring at the item's front (+Z). The whole group
  *  is the rotate-drag's raycast target (grab the ring *or* the knob). The ring
  *  radius — world-locked to the footprint — is stashed on the group so
  *  positionRotateHandle can place the knob on it every frame. Both meshes use
  *  the standard depthTest-off / late-renderOrder overlay treatment so the
- *  affordance is never occluded by the furniture it points at. */
+ *  affordance is never occluded by the furniture it points at.
+ *
+ *  handle-reskin.md (§5 Option B, built 2026-07-22): the ring is now a flat
+ *  `RingGeometry` annulus (was a round-tube `TorusGeometry`) — the direct 3D
+ *  read of DESIGN.md's "flat, no-shadow, depth-via-field" elevation rule, a
+ *  washer that looks drawn on rather than a lit donut. The knob is now a
+ *  shallow-extruded rounded-rect pill (was a `SphereGeometry`) — this app's
+ *  button-pill silhouette turned into a 3D grip — oriented tangent to the
+ *  ring by `positionRotateHandle` (a plain sphere needed no orientation; a
+ *  pill does). */
 function createRotateHandle(item: FurnitureItem): THREE.Group {
   const dims = furnitureOverallDims(item);
   // Half the footprint's diagonal (not max(w,d)/2 — a 45deg-rotated rectangle
@@ -332,18 +446,28 @@ function createRotateHandle(item: FurnitureItem): THREE.Group {
   group.userData.ringRadius = ringRadius;
 
   const ring = new THREE.Mesh(
-    new THREE.TorusGeometry(ringRadius, ROTATE_RING_TUBE_CM, 12, 64),
+    new THREE.RingGeometry(ringRadius - ROTATE_RING_THICKNESS_CM / 2, ringRadius + ROTATE_RING_THICKNESS_CM / 2, 64),
     new THREE.MeshBasicMaterial({ color: SELECTION_COLOR, depthTest: false }),
   );
-  ring.rotation.x = Math.PI / 2; // lay the torus flat on the floor plane
+  ring.rotation.x = Math.PI / 2; // lay the ring flat on the floor plane
   ring.position.y = ROTATE_HANDLE_LIFT_CM;
   ring.renderOrder = 999;
   group.add(ring);
 
-  const knob = new THREE.Mesh(
-    new THREE.SphereGeometry(ROTATE_KNOB_RADIUS_CM, 16, 16),
-    new THREE.MeshBasicMaterial({ color: SELECTION_COLOR, depthTest: false }),
+  const knobGeometry = new THREE.ExtrudeGeometry(
+    roundedRectShape(ROTATE_KNOB_LENGTH_CM, ROTATE_KNOB_WIDTH_CM, ROTATE_KNOB_WIDTH_CM / 2),
+    { depth: ROTATE_KNOB_DEPTH_CM, bevelEnabled: false },
   );
+  knobGeometry.center();
+  const knob = new THREE.Mesh(knobGeometry, new THREE.MeshBasicMaterial({ color: SELECTION_COLOR, depthTest: false }));
+  // Lay the pill flat first (extrude depth -> vertical thickness, same as the
+  // ring), then yaw it to track the item's front — positionRotateHandle sets
+  // rotation.y every frame. Order 'YXZ' composes as Ry * Rx (yaw applied
+  // about the still-vertical world Y axis, *after* the flattening tilt),
+  // which is the order that keeps the pill's long axis tangent to the ring
+  // instead of tipping it out of the floor plane.
+  knob.rotation.order = 'YXZ';
+  knob.rotation.x = Math.PI / 2;
   knob.renderOrder = 999;
   group.add(knob);
   group.userData.knob = knob;
@@ -351,14 +475,23 @@ function createRotateHandle(item: FurnitureItem): THREE.Group {
 }
 
 /** Builds the elevation handle: a vertical double-arrow (stem capped by an
- *  up-cone and a down-cone) that floats above the item's top face. The
+ *  up-head and a down-head) that floats above the item's top face. The
  *  double-arrow reads unambiguously as "drag me up/down" — distinct from the
  *  floor-hugging rotation ring — and is the raycast target that starts a
- *  vertical drag. Same overlay treatment (depthTest off, late renderOrder). */
+ *  vertical drag. Same overlay treatment (depthTest off, late renderOrder).
+ *
+ *  handle-reskin.md (§5 Option B, built 2026-07-22): the stem stays the same
+ *  `CylinderGeometry` (Option B's (a) — the simpler of its two sanctioned
+ *  constructions), but the sharp `ConeGeometry` caps are now rounded-arm
+ *  chevrons (`chevronHeadGeometry`) — "UI stepper," not "physics-lab vector
+ *  arrow." `capOffset` is unchanged: each chevron is centered on the origin
+ *  exactly like the cone it replaces (same `ELEVATION_HANDLE_HEAD_CM`
+ *  length), so this and positionElevationHandle's halfArrow math don't need
+ *  updating. */
 function createElevationHandle(): THREE.Group {
   const group = new THREE.Group();
   const mat = new THREE.MeshBasicMaterial({ color: SELECTION_COLOR, depthTest: false });
-  const capOffset = ELEVATION_HANDLE_STEM_CM / 2 + ELEVATION_HANDLE_CONE_CM / 2;
+  const capOffset = ELEVATION_HANDLE_STEM_CM / 2 + ELEVATION_HANDLE_HEAD_CM / 2;
 
   const stem = new THREE.Mesh(
     new THREE.CylinderGeometry(ELEVATION_HANDLE_SHAFT_R_CM, ELEVATION_HANDLE_SHAFT_R_CM, ELEVATION_HANDLE_STEM_CM, 12),
@@ -367,12 +500,12 @@ function createElevationHandle(): THREE.Group {
   stem.renderOrder = 999;
   group.add(stem);
 
-  const up = new THREE.Mesh(new THREE.ConeGeometry(ELEVATION_HANDLE_CONE_R_CM, ELEVATION_HANDLE_CONE_CM, 16), mat);
+  const up = new THREE.Mesh(chevronHeadGeometry(), mat);
   up.position.y = capOffset;
   up.renderOrder = 999;
   group.add(up);
 
-  const down = new THREE.Mesh(new THREE.ConeGeometry(ELEVATION_HANDLE_CONE_R_CM, ELEVATION_HANDLE_CONE_CM, 16), mat);
+  const down = new THREE.Mesh(chevronHeadGeometry(), mat);
   down.rotation.x = Math.PI; // flip to point down
   down.position.y = -capOffset;
   down.renderOrder = 999;
@@ -402,6 +535,12 @@ function positionRotateHandle(
   // from center (0,0) gives the knob's local offset on the ring.
   const [kx, kz] = rotateHandleWorldXZ(0, 0, yawDeg, ringRadius);
   knob.position.set(kx, ROTATE_HANDLE_LIFT_CM, kz);
+  // handle-reskin.md: unlike the old sphere, the pill knob isn't rotationally
+  // symmetric, so it also needs to yaw to stay tangent to the ring at its new
+  // position — same yawDeg already computed above, just applied to the mesh
+  // (see the 'YXZ' rotation.order comment in createRotateHandle for why this
+  // composes correctly with the knob's fixed flattening tilt).
+  knob.rotation.y = THREE.MathUtils.degToRad(yawDeg);
   // Camera-relative sizing applies to the knob only — the ring's radius is
   // world-locked to the footprint (scaling it would break that), while the
   // knob keeps the old sphere's constant-on-screen grab-target sizing. The
@@ -426,7 +565,7 @@ function positionElevationHandle(
   // Sit the double-arrow's lower tip a scaled gap above the top face (half the
   // arrow's own extent clears the surface). Scaling the gap too keeps the
   // on-screen standoff constant, matching the gizmo's own constant size.
-  const halfArrow = (ELEVATION_HANDLE_STEM_CM / 2 + ELEVATION_HANDLE_CONE_CM) * scale;
+  const halfArrow = (ELEVATION_HANDLE_STEM_CM / 2 + ELEVATION_HANDLE_HEAD_CM) * scale;
   handle.position.set(
     group.position.x,
     topY + ELEVATION_HANDLE_GAP_CM * scale + halfArrow,
@@ -1256,7 +1395,7 @@ export const Viewport = forwardRef<
     }
 
     // True if the ray currently hits any mesh under `handle` — recursive,
-    // since a handle is a multi-mesh group (ring+knob, stem+two cones) now.
+    // since a handle is a multi-mesh group (ring+knob, stem+two chevrons) now.
     function rayHitsHandle(handle: THREE.Object3D | null): boolean {
       return handle ? raycaster.intersectObject(handle, true).length > 0 : false;
     }
@@ -2511,7 +2650,7 @@ export const Viewport = forwardRef<
     const group = built.furnitureGroups.get(selId);
     if (group) updateCollisionHighlight(selId, group); // refreshes selectedCollidingRef too
     // §3: both handles are multi-mesh THREE.Group instances (ring+knob,
-    // stem+cones) now, not a single Mesh with a top-level `.material` —
+    // stem+chevrons) now, not a single Mesh with a top-level `.material` —
     // setHandleColor traverses and recolors every mesh underneath.
     // Code-review fix: collision- and lock-aware (gestureAffordanceColor),
     // not lock-only — a locked-and-colliding item's handles should stay red,

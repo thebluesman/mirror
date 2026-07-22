@@ -119,7 +119,42 @@ number:
   `--icon-size-standalone` — same by-hand sync convention `tokens.css`'s header already
   documents for the rest of this file.
 
-## 7. Responsive
+## 7. Manipulation-handle colors
+
+Not part of the original Cohere extraction — the 3D viewport's rotate/elevate
+handles (`Viewport.tsx`) are new ground, codified here per Shyam's 2026-07-22
+review of `docs/proposals/handle-reskin.md` §5, the same "new ground, agent-
+codified" precedent as §6's icon-sizing rule above.
+
+The handles carry a four-state color language layered on top of §1's palette.
+Idle and hover map onto the two accents already reserved for links/CTAs and
+active-state markers; collision and locked stay purpose-built hexes chosen for
+legibility as an always-on-top 3D overlay rather than snapped to the nearest
+documented token — see the per-state notes below for why.
+
+| State | Hex | Token | Used when |
+|---|---|---|---|
+| Idle / selection | `#1863dc` | Action Blue (§1) | A handle's resting color while its item is selected, not hovered, not colliding, not locked. |
+| Hover / active | `#ff7759` | Coral (§1) | A handle brightens to this on pointer-hover — matches the app's existing hover-brighten idiom, and reuses Coral's documented "active-state marker" role (§1) for "you're about to grab this." |
+| Collision | `#ff5c5c` | handle-only, not §1's Error | The selected item's footprint currently overlaps another item or a wall. Deliberately brighter than §1's documented Error `#b30000` — a dark Error red reads poorly as a `depthTest:false` overlay drawn on top of furniture; legibility wins over palette purity here. |
+| Locked | `#ffc94f` | handle-only | The selected item (or "lock all") is locked. A warm amber distinct from both Action Blue and both reds, so "locked" reads as its own state, not a shade of collision or selection. |
+
+Precedence when more than one state is true at once: **collision overrides
+locked** (a physical overlap is worth surfacing even on a locked item, since
+locking only guards against accidental drags, not against something already
+placed on top of it) — enforced by `Viewport.tsx`'s `gestureAffordanceColor`.
+Coral-hover and collision-red are never shown on the same handle at the same
+instant in practice, since a hover is momentary and collision is checked on
+every relevant mutation — but Coral is deliberately kept out of the
+idle/selection role specifically so it never sits adjacent to the collision
+red and reads as a near-miss of it.
+
+All four states render with the same flat, unlit `MeshBasicMaterial` and
+`depthTest:false`/late-`renderOrder` overlay treatment — no shadows, no lit
+shading — the direct 3D read of §5's "elevation: no shadows; depth communicated
+via flat fields" rule.
+
+## 8. Responsive
 
 | Breakpoint | Width | Behavior |
 |---|---|---|
@@ -129,7 +164,7 @@ number:
 | Desktop | 1024–1440px | full nav, 3-column grids |
 | Large desktop | 1440–2560px | wide containers, large vertical rhythm |
 
-## 8. Quick-reference palette (agent prompt guide)
+## 9. Quick-reference palette (agent prompt guide)
 
 `#17171c` primary · `#003c33` dark band · `#ffffff` canvas · `#eeece7` stone card ·
 `#ff7759` editorial/active · `#1863dc` link
