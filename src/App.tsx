@@ -217,6 +217,19 @@ function App() {
     return true;
   }
 
+  // improvements-v2.2 §8: same download pattern as SettingsPanel's
+  // handleExport (create an <a>, set href/download, click, discard) — except
+  // captureSnapshot already returns a data URL rather than a Blob, so there's
+  // no object URL to create or revoke here.
+  function handleSnapshot() {
+    const dataUrl = viewportRef.current?.captureSnapshot();
+    if (!dataUrl) return;
+    const a = document.createElement("a");
+    a.href = dataUrl;
+    a.download = `mirror-snapshot-${Date.now()}.png`;
+    a.click();
+  }
+
   function handleDeleteView(id: string) {
     if (!sceneFile) return;
     commit({ ...sceneFile, cameras: sceneFile.cameras.filter((c) => c.id !== id) });
@@ -356,6 +369,7 @@ function App() {
                 onRename={handleRenameView}
                 globalLock={globalLock}
                 onToggleGlobalLock={() => setGlobalLock((v) => !v)}
+                onSnapshot={handleSnapshot}
               />
             </>
           ) : (

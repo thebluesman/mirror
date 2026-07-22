@@ -57,6 +57,9 @@ export interface ViewportHandle {
   /** Snaps the live camera/controls to a saved viewpoint. No-op before the
    *  first structural build. */
   flyTo(preset: CameraPosition): void;
+  /** improvements-v2.2 §8: current frame as a PNG data URL, or null before
+   *  the first structural build (mirrors getCurrentView's null-guard). */
+  captureSnapshot(): string | null;
 }
 
 const HUMAN_FOV = 38; // ~35mm-equivalent, per spike 2's C2 feedback
@@ -649,7 +652,15 @@ export const Viewport = forwardRef<
     const container = containerRef.current;
     if (!container) return;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    // preserveDrawingBuffer: true — improvements-v2.2 §8's snapshot feature
+    // reads renderer.domElement via toDataURL(), which by default can return
+    // a blank image once the browser clears the drawing buffer after
+    // present. animate() below renders continuously via rAF rather than
+    // on-demand, so there's no single "render, then immediately capture"
+    // tick to hook synchronously; keeping the buffer around is the robust
+    // fix at a small (typically negligible) perf cost, vs. a timing-fragile
+    // alternative tied to the render loop's internals.
+    const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.shadowMap.enabled = true;
@@ -1696,6 +1707,14 @@ export const Viewport = forwardRef<
         if (!camera || !controls) return;
         applyModeRef.current?.("orbit");
         applyCameraPreset(camera, controls, preset);
+      },
+      // preserveDrawingBuffer (see the renderer construction above) means
+      // whatever animate() last rendered is still sitting in the buffer, so
+      // this needs no on-demand render of its own before reading it.
+      captureSnapshot() {
+        const renderer = rendererRef.current;
+        if (!renderer) return null;
+        return renderer.domElement.toDataURL("image/png");
       },
     }),
     [],

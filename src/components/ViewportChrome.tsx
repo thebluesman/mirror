@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Lock, LockOpen, Pencil, X } from "lucide-react";
+import { Camera, Lock, LockOpen, Pencil, X } from "lucide-react";
 import type { CameraPosition } from "../schema/scene";
 import "./ViewportChrome.css";
 
@@ -15,6 +15,7 @@ export function ViewportChrome({
   onRename,
   globalLock,
   onToggleGlobalLock,
+  onSnapshot,
 }: {
   cameras: CameraPosition[];
   onRecall: (preset: CameraPosition) => void;
@@ -34,6 +35,10 @@ export function ViewportChrome({
    *  scene data. */
   globalLock: boolean;
   onToggleGlobalLock: () => void;
+  /** improvements-v2.2 §8: downloads the current camera POV as a PNG.
+   *  Fire-and-forget like onDelete/onRename — App.tsx no-ops silently if the
+   *  viewport isn't ready yet (mirrors captureSnapshot's null-guard). */
+  onSnapshot: () => void;
 }) {
   const [naming, setNaming] = useState(false);
   const [name, setName] = useState("");
@@ -86,6 +91,18 @@ export function ViewportChrome({
         >
           {globalLock ? <Lock size={13} aria-hidden="true" /> : <LockOpen size={13} aria-hidden="true" />}
           {globalLock ? "All locked" : "Lock all"}
+        </button>
+        {/* improvements-v2.2 §8: one-click download of the current camera
+         *  POV as a PNG — sits beside the lock pill for the same reason
+         *  (a standalone viewport action, not a saved-view list item). */}
+        <button
+          type="button"
+          className="viewport-chrome-pill"
+          onClick={onSnapshot}
+          title="Download a PNG of the current view"
+        >
+          <Camera size={13} aria-hidden="true" />
+          Snapshot
         </button>
         {cameras.map((cam) =>
           renamingId === cam.id ? (
