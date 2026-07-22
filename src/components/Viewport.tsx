@@ -22,6 +22,21 @@ import { snapPosition } from "../scene/snapping";
 import { relativeYawDeg, rotateHandleWorldXZ, snapYawDeg, yawDegFromPointer } from "../scene/rotateHandle";
 import { clampElevationCm, ELEVATION_STEP_CM, stepElevationCm } from "../scene/elevation";
 import { normalizeXZ } from "../scene/minimapProjection";
+import { HUMAN_FOV } from "../scene/cameraLens";
+import {
+  KEYS_CANCEL_GESTURE,
+  KEYS_CROUCH,
+  KEYS_ELEVATE_DOWN,
+  KEYS_ELEVATE_UP,
+  KEYS_LOCK,
+  KEYS_MODE_TOGGLE,
+  KEYS_ROTATE_CCW,
+  KEYS_ROTATE_CW,
+  KEYS_WALK_BACK,
+  KEYS_WALK_FORWARD,
+  KEYS_WALK_LEFT,
+  KEYS_WALK_RIGHT,
+} from "../scene/shortcuts";
 import {
   computeWalkStep,
   isWalkCollidableItem,
@@ -70,7 +85,10 @@ export interface ViewportHandle {
   captureSnapshot(): string | null;
 }
 
-const HUMAN_FOV = 38; // ~35mm-equivalent, per spike 2's C2 feedback
+// HUMAN_FOV now lives in ../scene/cameraLens (imported above) — single
+// source of truth for the app's default vertical FOV, shared with the
+// improvements-minor-fixes.md §17 lens-picker's "Normal" preset (which is
+// pinned to this exact constant, not a re-derived close value).
 const SHELL_SURFACES: ShellSurface[] = ["wall", "floor", "ceiling"];
 
 // improvements-v2.1 §5: walk-around camera mode, additive to orbit (default
@@ -176,9 +194,10 @@ const ROTATE_STEP_DEG = 15;
 // browser chrome shortcut worth worrying about in an already-focused canvas.
 // ELEVATION_STEP_CM (5) is the vertical analog of ROTATE_STEP_DEG (15) —
 // factored into src/scene/elevation.ts alongside the floor clamp so it's
-// unit-testable the same way rotateHandle.ts's snapYawDeg is.
-const ELEVATION_KEY_UP = "PageUp";
-const ELEVATION_KEY_DOWN = "PageDown";
+// unit-testable the same way rotateHandle.ts's snapYawDeg is. The actual key
+// literals ("PageUp"/"PageDown", q/Q/[, e/E/]) now live in ../scene/shortcuts
+// as KEYS_ELEVATE_UP/KEYS_ELEVATE_DOWN/KEYS_ROTATE_CCW/KEYS_ROTATE_CW
+// (improvements-minor-fixes.md §3) — imported above, not redeclared here.
 
 // §3 (improvements-v2.1) manipulation-handle redesign — supersedes the C1
 // follow-up's bare rotate sphere. Research pass (see this file's git commit
@@ -433,9 +452,37 @@ export const Viewport = forwardRef<
      *  action shape as onCommitPlacement/onToggleLock, App.tsx maps it onto
      *  the matching item in `sceneFile.items` and runs it through `commit()`. */
     onEditItem?: (itemId: string, patch: ObjectEditPatch) => void;
+    /** improvements-minor-fixes.md §17: live lens-picker FOV — ephemeral
+     *  App.tsx state (mirrors globalLock), applied without a structural
+     *  rebuild by the live-update effect below. `undefined` until this
+     *  component's first-mount report-back (see onFovRecalled) tells
+     *  App.tsx what the initial camera/saved-preset framing actually set —
+     *  deliberately NOT defaulted to HUMAN_FOV here, since that would
+     *  clobber a saved viewpoint's own fovDeg on the very first render (see
+     *  the live-update effect's comment for why). */
+    fovDeg?: number;
+    /** Reports the actually-applied live fov back up to App.tsx: once on
+     *  this component's first mount (syncing the HUD picker to whatever the
+     *  initial camera/saved-preset framing set) and on every flyTo recall
+     *  (so recalling a saved viewpoint's own fovDeg doesn't leave the
+     *  picker's active-pill highlight stale — proposal §3,
+     *  docs/proposals/camera-lens-picker.md). */
+    onFovRecalled?: (fovDeg: number) => void;
   }
 >(function Viewport(
-  { sceneFile, shellCalibration, lighting, lightingMode, location, onCommitPlacement, onToggleLock, globalLock, onEditItem },
+  {
+    sceneFile,
+    shellCalibration,
+    lighting,
+    lightingMode,
+    location,
+    onCommitPlacement,
+    onToggleLock,
+    globalLock,
+    onEditItem,
+    fovDeg,
+    onFovRecalled,
+  },
   handleRef,
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -481,6 +528,21 @@ export const Viewport = forwardRef<
   onToggleLockRef.current = onToggleLock;
   const globalLockRef = useRef(globalLock ?? false);
   globalLockRef.current = globalLock ?? false;
+  // improvements-minor-fixes.md §17: same "ref so an imperative callback
+  // (flyTo, or the structural effect's mount-time report-back) always sees
+  // the latest closure" treatment as onCommitPlacementRef/onToggleLockRef —
+  // flyTo is created once inside useImperativeHandle's deps-[] callback (see
+  // below), so it can't close over a fresh onFovRecalled prop directly.
+  const onFovRecalledRef = useRef(onFovRecalled);
+  onFovRecalledRef.current = onFovRecalled;
+  // Set true after the structural effect's first-ever mount reports its
+  // initial fov back — later rebuilds must NOT re-report (that would
+  // overwrite whatever lens the user picked live with the fresh camera's
+  // own preset/default fov, fighting the "rebuild persists the picker's
+  // choice" behavior the live-update effect below provides via its
+  // buildVersion dependency). See that effect's comment for the full
+  // ordering reasoning.
+  const hasReportedInitialFovRef = useRef(false);
 
   // W-A selection: which placed item (by itemId) is currently selected, plus
   // a BoxHelper wireframe outline (cheapest indicator per the plan — a plain
@@ -869,6 +931,23 @@ export const Viewport = forwardRef<
     }
     cameraRef.current = camera;
     controlsRef.current = controls;
+
+    // improvements-minor-fixes.md §17: report the initial live fov (whatever
+    // the block above just set — a saved preset's own fovDeg, or the
+    // HUMAN_FOV construction default) back to App.tsx exactly once, on this
+    // component's first-ever mount, so the HUD lens picker's active-pill
+    // highlight starts in sync with the real camera instead of defaulting
+    // to "Normal" regardless of what the initial framing actually is.
+    // Deliberately NOT done on later rebuilds (see hasReportedInitialFovRef's
+    // declaration) — a later rebuild's fresh camera should pick up whatever
+    // fovDeg the user's live lens choice already set (the fovDeg live-update
+    // effect's buildVersion dependency handles that), not have this line
+    // report the rebuild's own transient preset/default value back and
+    // clobber that choice.
+    if (!hasReportedInitialFovRef.current) {
+      hasReportedInitialFovRef.current = true;
+      onFovRecalledRef.current?.(camera.fov);
+    }
 
     // improvements-v2.1 §5: walk-around camera mode. PointerLockControls is
     // constructed alongside OrbitControls (both live for this structural
@@ -1466,7 +1545,7 @@ export const Viewport = forwardRef<
       // Escape cancels an in-progress gesture (explicit revert), matching
       // pointercancel — handled before the selection/rotate logic so it works
       // whether or not an item is "still" selected mid-drag.
-      if (evt.key === "Escape") {
+      if (KEYS_CANCEL_GESTURE.includes(evt.key)) {
         if (drag || rotateDrag || elevationDrag) {
           evt.preventDefault();
           revertGesture();
@@ -1477,6 +1556,21 @@ export const Viewport = forwardRef<
         // ("orbit") on its own. drag/rotateDrag are always null in walk mode
         // (onPointerDown's walk-mode bail — see above), so the revert branch
         // above is a guaranteed no-op here too, not a conflict.
+        return;
+      }
+      // improvements-minor-fixes.md §3 (docs/proposals/keyboard-cheatsheet.md
+      // §2, product review picked `V` over the proposal's own `M`
+      // recommendation): mode toggle has to work from BOTH orbit and walk
+      // mode to be a real toggle, so it's checked before the walk-mode
+      // branch below (which would otherwise swallow every keydown while
+      // walking) and before the `!itemId` gate further down (it isn't
+      // item-scoped at all). Calls the exact same `applyModeRef` the HUD
+      // toggle pill already calls (see the return statement's mode-toggle
+      // button), so there's no second implementation of the mode-switch
+      // logic to keep in sync — this is just a second trigger for it.
+      if (KEYS_MODE_TOGGLE.includes(evt.key)) {
+        evt.preventDefault();
+        applyModeRef.current?.(cameraModeRef.current === "orbit" ? "walk" : "orbit");
         return;
       }
       // improvements-v2.1 §5: walk-mode WASD — held-key state, not a discrete
@@ -1490,12 +1584,16 @@ export const Viewport = forwardRef<
       // shape PointerLockControls' own mousemove listener already has via
       // its isLocked check.
       if (cameraModeRef.current === "walk") {
-        const key = evt.key.toLowerCase();
-        if (key === "w" || key === "a" || key === "s" || key === "d") {
+        if (
+          KEYS_WALK_FORWARD.includes(evt.key) ||
+          KEYS_WALK_BACK.includes(evt.key) ||
+          KEYS_WALK_LEFT.includes(evt.key) ||
+          KEYS_WALK_RIGHT.includes(evt.key)
+        ) {
           evt.preventDefault();
-          if (key === "w") walkKeys.forward = true;
-          else if (key === "s") walkKeys.back = true;
-          else if (key === "a") walkKeys.left = true;
+          if (KEYS_WALK_FORWARD.includes(evt.key)) walkKeys.forward = true;
+          else if (KEYS_WALK_BACK.includes(evt.key)) walkKeys.back = true;
+          else if (KEYS_WALK_LEFT.includes(evt.key)) walkKeys.left = true;
           else walkKeys.right = true;
           return;
         }
@@ -1506,7 +1604,7 @@ export const Viewport = forwardRef<
         // space (w/a/s/d claimed above; q/e/[/]/PageUp/PageDown/L are item-
         // manipulation keys that are inert in walk mode per the comment
         // below anyway) and is the common FPS convention for crouch.
-        if (key === "c") {
+        if (KEYS_CROUCH.includes(evt.key)) {
           evt.preventDefault();
           crouching = !crouching;
           camera.position.y = crouching ? WALK_CROUCH_EYE_HEIGHT_CM : WALK_EYE_HEIGHT_CM;
@@ -1531,7 +1629,7 @@ export const Viewport = forwardRef<
       // PageDown below (own key, no existing binding — see the constants'
       // comments), just editing scene data (through App.tsx's commit) rather
       // than mutating a live THREE.Group.
-      if (evt.key === "l" || evt.key === "L") {
+      if (KEYS_LOCK.includes(evt.key)) {
         evt.preventDefault();
         onToggleLockRef.current?.(itemId);
         return;
@@ -1541,10 +1639,10 @@ export const Viewport = forwardRef<
       if (!group) return;
       let stepDeg = 0;
       let elevationDir: 1 | -1 | null = null;
-      if (evt.key === "q" || evt.key === "Q" || evt.key === "[") stepDeg = -ROTATE_STEP_DEG;
-      else if (evt.key === "e" || evt.key === "E" || evt.key === "]") stepDeg = ROTATE_STEP_DEG;
-      else if (evt.key === ELEVATION_KEY_UP) elevationDir = 1;
-      else if (evt.key === ELEVATION_KEY_DOWN) elevationDir = -1;
+      if (KEYS_ROTATE_CCW.includes(evt.key)) stepDeg = -ROTATE_STEP_DEG;
+      else if (KEYS_ROTATE_CW.includes(evt.key)) stepDeg = ROTATE_STEP_DEG;
+      else if (KEYS_ELEVATE_UP.includes(evt.key)) elevationDir = 1;
+      else if (KEYS_ELEVATE_DOWN.includes(evt.key)) elevationDir = -1;
       else return;
       evt.preventDefault();
       // improvements-v2.1 §4: swallow the keypress either way (consistent
@@ -1570,11 +1668,10 @@ export const Viewport = forwardRef<
     // walkKeys (applyCameraMode also clears all four on any mode switch —
     // this is the ongoing steady-state complement to that one-time reset).
     function onKeyUp(evt: KeyboardEvent) {
-      const key = evt.key.toLowerCase();
-      if (key === "w") walkKeys.forward = false;
-      else if (key === "s") walkKeys.back = false;
-      else if (key === "a") walkKeys.left = false;
-      else if (key === "d") walkKeys.right = false;
+      if (KEYS_WALK_FORWARD.includes(evt.key)) walkKeys.forward = false;
+      else if (KEYS_WALK_BACK.includes(evt.key)) walkKeys.back = false;
+      else if (KEYS_WALK_LEFT.includes(evt.key)) walkKeys.left = false;
+      else if (KEYS_WALK_RIGHT.includes(evt.key)) walkKeys.right = false;
     }
 
     // Keyboard-focus ownership (see onKeyDown): make the canvas focusable and
@@ -1878,6 +1975,14 @@ export const Viewport = forwardRef<
         if (!camera || !controls) return;
         applyModeRef.current?.("orbit");
         applyCameraPreset(camera, controls, preset);
+        // improvements-minor-fixes.md §17 (proposal §3): recalling a saved
+        // viewpoint sets camera.fov directly, bypassing App.tsx's lifted
+        // lens-picker state entirely — report the fov this recall actually
+        // landed on back up so the HUD picker's active-pill highlight
+        // doesn't go stale (snaps to the nearest preset, or shows no
+        // highlight/"Custom" if the saved viewpoint's fovDeg doesn't match
+        // any of the three named presets — see nearestLensPresetId).
+        onFovRecalledRef.current?.(camera.fov);
       },
       // preserveDrawingBuffer (see the renderer construction above) means
       // whatever animate() last rendered is still sitting in the buffer, so
@@ -2006,6 +2111,38 @@ export const Viewport = forwardRef<
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps -- buildVersion is a signal (rebuild happened), not a value read in the effect
   }, [lightingSettings, buildVersion]);
+
+  // improvements-minor-fixes.md §17: live lens-picker FOV, modeled directly
+  // on the lighting live-update effect above — "plain numbers... no diffing
+  // against a previously-applied value is needed; recomputing is trivial and
+  // idempotent" applies here too. ViewportChrome's Wide/Normal/Tele picker
+  // lives in App.tsx as ephemeral state (mirroring globalLock) and is
+  // threaded down as the `fovDeg` prop; this is the only place that actually
+  // mutates `camera.fov` in response to it.
+  //
+  // Deliberately no-ops while `fovDeg` is undefined (App.tsx's initial
+  // state, before the structural effect's first-mount report-back above has
+  // told it what fov the initial camera/preset actually landed on) rather
+  // than falling back to HUMAN_FOV here. Falling back would run on the very
+  // first commit with App's not-yet-synced default and clobber a saved
+  // viewpoint's own fovDeg the structural effect had *just* applied moments
+  // earlier in the very same commit — effects run in declaration order
+  // within one commit, on every mount, regardless of whether their own
+  // dependencies "changed," so this one would otherwise always win on
+  // mount. `buildVersion` IS a dependency (unlike the plain `[fovDeg]` in
+  // the docs/proposals/camera-lens-picker.md sketch) so that a *later*
+  // structural rebuild (e.g. an import) reapplies the picker's current
+  // choice onto the fresh camera object the rebuild just constructed — safe
+  // specifically because the structural effect above only reports its own
+  // preset/default fov back to App.tsx on the very first mount, never on a
+  // later rebuild, so the two effects don't fight over which value wins.
+  useEffect(() => {
+    const camera = cameraRef.current;
+    if (!camera || fovDeg === undefined) return;
+    camera.fov = fovDeg;
+    camera.updateProjectionMatrix();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- buildVersion is a signal (rebuild happened), not a value read in the effect
+  }, [fovDeg, buildVersion]);
 
   // v2 spike (W-A) — placement reconciliation: the other half of the
   // mutate-during-gesture/commit-on-drop seam (the drag/rotate handlers in
@@ -2224,12 +2361,20 @@ export const Viewport = forwardRef<
     <>
       <div ref={containerRef} className="viewport" />
       {selectedItem && (
-        <ObjectInspector
-          key={selectedItem.id}
-          item={selectedItem}
-          onEdit={(patch) => onEditItem?.(selectedItem.id, patch)}
-          onClose={() => setSelectedItemId(null)}
-        />
+        <div className="object-inspector-wrap">
+          <ObjectInspector
+            key={selectedItem.id}
+            item={selectedItem}
+            onEdit={(patch) => onEditItem?.(selectedItem.id, patch)}
+            onClose={() => setSelectedItemId(null)}
+          />
+          {/* docs/proposals/keyboard-cheatsheet.md §3 (item 2): "L" has zero
+           *  in-app discoverability today — this is the cheap, always-on
+           *  complement to the `?` cheatsheet overlay (ViewportChrome),
+           *  putting the shortcuts relevant to *what's currently selected*
+           *  right next to it, mirroring walk mode's own hint pill below. */}
+          <p className="viewport-mode-hint">L lock · Q/E rotate · PgUp/PgDn elevate · Esc cancel</p>
+        </div>
       )}
       <Minimap ref={minimapRef} room={sceneFile.room} items={sceneFile.items} commands={currentLayoutCommands} />
       <div className="viewport-mode-toggle">

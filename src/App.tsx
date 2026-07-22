@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Undo2 } from "lucide-react";
 import seedRaw from "../seed/living-room.json";
 import { Viewport, type ViewportHandle } from "./components/Viewport";
@@ -9,6 +9,7 @@ import { ShellPanel } from "./components/ShellPanel";
 import { LightingPanel } from "./components/LightingPanel";
 import { ImportPanel } from "./components/ImportPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { ShortcutCheatsheet } from "./components/ShortcutCheatsheet";
 import {
   parseScene,
   type CameraPosition,
@@ -22,6 +23,8 @@ import { makeCameraPosition, renameCameraPosition } from "./scene/cameraViewpoin
 import { makeLayout, renameLayout } from "./scene/layouts";
 import { commitToActiveLayout, setPlaceCommand } from "./scene/commit";
 import { applyUndo, recordUndo, type UndoSlot } from "./scene/undo";
+import { allItemsLocked } from "./scene/lockState";
+import { LENS_PRESETS, nearestLensPresetId, type LensPresetId } from "./scene/cameraLens";
 import { loadProject, saveProjectDebounced, saveProjectNow } from "./storage/autosave";
 import "./App.css";
 
@@ -57,8 +60,54 @@ function App() {
   // safety ("can't be accidentally dragged while orbiting"), not a scene
   // fact — deliberately ephemeral component state, same treatment as
   // undoSlot above, NOT folded into `sceneFile`/autosave/undo. A reload
-  // starts unlocked, same as undo starts empty.
+  // starts unlocked, same as undo starts empty. This flag alone is threaded
+  // to Viewport unchanged (it's the actual override gate isPlacementLocked
+  // reads) — but NOT to ViewportChrome's button display anymore; see
+  // `lockAllActive` below for why.
   const [globalLock, setGlobalLock] = useState(false);
+
+  // improvements-minor-fixes.md §3 (review round, new scope added at
+  // review): the HUD "Lock all" button's label/pressed state used to be
+  // just `globalLock` above, which goes stale the moment an item is
+  // individually locked via the per-item "L" key — the flag stays false
+  // even though every item is genuinely locked. Derived here from the real
+  // per-item `locked` flags (allItemsLocked, src/scene/lockState.ts) OR'd
+  // with the override flag itself, so the button reflects reality
+  // regardless of which path got every item locked. `sceneFile?.items ?? []`
+  // rather than gating this whole memo on `sceneFile` being loaded, since
+  // ViewportChrome doesn't render before sceneFile exists anyway.
+  const lockAllActive = globalLock || (sceneFile ? allItemsLocked(sceneFile.items) : false);
+
+  // improvements-minor-fixes.md §17: live lens-picker FOV — ephemeral view
+  // state, NOT part of sceneFile, mirroring globalLock's shape exactly
+  // (state + setter in App.tsx, threaded to ViewportChrome for the picker UI
+  // and to Viewport as a prop that drives the actual camera.fov mutation).
+  // Starts `undefined` (not HUMAN_FOV) — see Viewport.tsx's live-update
+  // effect for why defaulting here would clobber a saved viewpoint's own
+  // fovDeg on the very first render; Viewport reports the real starting
+  // value back via onFovRecalled once it knows it.
+  const [liveFovDeg, setLiveFovDeg] = useState<number | undefined>(undefined);
+  // Recall-sync (proposal §3, docs/proposals/camera-lens-picker.md): derives
+  // which preset (if any) the picker should highlight from the live fov,
+  // rather than tracking "which preset was last clicked" as separate state
+  // — so a saved-viewpoint recall (which sets camera.fov directly and
+  // reports back through onFovRecalled) re-syncs the highlight for free,
+  // snapping to the nearest preset within tolerance or showing no
+  // highlight ("Custom") if it's meaningfully off from all three.
+  const activeLensPreset = useMemo(
+    () => (liveFovDeg === undefined ? null : nearestLensPresetId(liveFovDeg)),
+    [liveFovDeg],
+  );
+
+  function handleSetLensPreset(id: LensPresetId) {
+    const preset = LENS_PRESETS.find((p) => p.id === id);
+    if (preset) setLiveFovDeg(preset.fovDeg);
+  }
+
+  // improvements-minor-fixes.md §3: the `?` cheatsheet overlay's open state.
+  // Ephemeral UI state, same shape as `naming`/`renamingId` in
+  // ViewportChrome — not worth threading through sceneFile.
+  const [showShortcuts, setShowShortcuts] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -394,6 +443,8 @@ function App() {
                 onToggleLock={handleToggleLock}
                 globalLock={globalLock}
                 onEditItem={handleEditItem}
+                fovDeg={liveFovDeg}
+                onFovRecalled={setLiveFovDeg}
               />
               <LayoutChrome
                 layouts={sceneFile.layouts}
@@ -409,9 +460,12 @@ function App() {
                 onSave={handleSaveView}
                 onDelete={handleDeleteView}
                 onRename={handleRenameView}
-                globalLock={globalLock}
+                lockAllActive={lockAllActive}
                 onToggleGlobalLock={() => setGlobalLock((v) => !v)}
                 onSnapshot={handleSnapshot}
+                onOpenShortcuts={() => setShowShortcuts(true)}
+                lensPreset={activeLensPreset}
+                onSetLensPreset={handleSetLensPreset}
               />
             </>
           ) : (
@@ -452,6 +506,11 @@ function App() {
           </div>
         </aside>
       </div>
+      {/* improvements-minor-fixes.md §3: full-viewport modal, so it renders
+       *  at the whole-app level (fixed positioning, `.shortcut-cheatsheet-
+       *  scrim`) rather than nested inside `.app-viewport` — it isn't
+       *  scoped to the 3D view the way ViewportChrome/LayoutChrome are. */}
+      <ShortcutCheatsheet open={showShortcuts} onClose={() => setShowShortcuts(false)} />
     </div>
   );
 }

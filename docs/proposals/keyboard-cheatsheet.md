@@ -1,5 +1,23 @@
 # Proposal: keyboard shortcuts + a discoverable cheatsheet — improvements-minor-fixes.md §3
 
+**Built (2026-07-22).** All of it: `src/scene/shortcuts.ts` (the
+`ShortcutDef`/`KEYS_*`/`SHORTCUTS` shape below, with `V`/`v` in place of the
+proposal's `M`/`m`, plus a `KEYS_CROUCH` entry this proposal's own survey
+missed — the "C" crouch key was built the round before this survey was
+written); `Viewport.tsx`'s `onKeyDown`/`onKeyUp` now match against the
+exported `KEYS_*` arrays instead of inline literals, with the new
+mode-toggle branch placed exactly where §2 specifies; `ShortcutCheatsheet.tsx`
+(+ `.css`) is the new `?` overlay, rendered by `App.tsx` at the whole-app
+level; the `?` pill lives in `ViewportChrome.tsx`'s existing bottom-center
+bar per §4.1; the selection hint pill (§3, item 2) is built too — a
+`.viewport-mode-hint` row stacked above `ObjectInspector` via a new
+`.object-inspector-wrap` flex wrapper (`Viewport.css`/`ObjectInspector.css`).
+The "Lock all" staleness fix (new scope added at review) is built as
+`src/scene/lockState.ts`'s `allItemsLocked`, combined with the existing
+`globalLock` override flag in `App.tsx` (`lockAllActive = globalLock ||
+allItemsLocked(sceneFile.items)`) and threaded to `ViewportChrome` as a
+renamed `lockAllActive` prop. See the commit for the exact diffs.
+
 **Status:** approved for build (2026-07-22 review). Decisions: mode-toggle
 key is **`V`** (not `M` — overrides this doc's recommendation); build
 **both** the cheatsheet overlay and the revived `L`-lock hint pill (open

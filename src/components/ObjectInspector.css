@@ -3,13 +3,17 @@
  * but its own card shape rather than a pill bar — this one holds form
  * fields, not buttons. Bottom-left is the one corner none of those three
  * already claims (top-center: LayoutChrome; bottom-center: ViewportChrome;
- * top-right: the mode-toggle pill). */
+ * top-right: the mode-toggle pill).
+ *
+ * improvements-minor-fixes.md §3 (selection hint, review round): the
+ * bottom-left absolute positioning that used to live directly on this class
+ * moved to the wrapping `.object-inspector-wrap` (Viewport.css) so a
+ * selection-hint pill (mirroring walk mode's own `.viewport-mode-hint`) can
+ * stack above this panel at that same anchor without a second, independently
+ * computed position. This class is now a plain flex child of that wrapper. */
 .object-inspector {
-  position: absolute;
-  left: var(--space-24);
-  bottom: var(--space-24);
   width: 220px;
-  max-width: calc(100% - var(--space-32) * 2);
+  max-width: 100%;
   background: var(--color-canvas);
   border-radius: var(--radius-md);
   padding: var(--space-16);

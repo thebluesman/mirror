@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Pencil, X } from "lucide-react";
+import { Pencil, Plus, X } from "lucide-react";
 import type { Layout } from "../schema/scene";
 import "./ViewportChrome.css";
 import "./LayoutChrome.css";
@@ -101,7 +101,7 @@ export function LayoutChrome({
             <div key={layout.id} className="viewport-chrome-view">
               <button
                 type="button"
-                className={`viewport-chrome-pill${layout.id === currentId ? " viewport-chrome-pill--active" : ""}`}
+                className={`viewport-chrome-pill viewport-chrome-pill--nested${layout.id === currentId ? " viewport-chrome-pill--active" : ""}`}
                 onClick={() => onSwitch(layout.id)}
               >
                 {layout.name}
@@ -166,7 +166,8 @@ export function LayoutChrome({
             className="viewport-chrome-pill viewport-chrome-pill--outline"
             onClick={() => setNaming(true)}
           >
-            + Save layout
+            <Plus size={16} aria-hidden="true" />
+            Save layout
           </button>
         )}
       </div>

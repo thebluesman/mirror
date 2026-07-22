@@ -58,3 +58,26 @@
   margin: 0;
   white-space: nowrap;
 }
+
+/* improvements-minor-fixes.md §3 (docs/proposals/keyboard-cheatsheet.md §3,
+ * item 2 — "revive the walk-mode hint pattern, scoped to selection"): owns
+ * the bottom-left anchor ObjectInspector.css used to own directly, so a
+ * selection-hint pill (reusing `.viewport-mode-hint` above — the same
+ * pattern walk mode's own hint already uses) can stack above the docked
+ * editor at that one anchor point without two independently-computed
+ * positions drifting apart. `column-reverse` + DOM order [ObjectInspector,
+ * hint] puts the panel at the anchor (like today) and the hint directly
+ * above it, growing upward as the panel's own height varies with its
+ * content (compound-sofa items show fewer fields) — no dynamic height
+ * measurement needed for this simpler "hint pill, not a full anchor system"
+ * scope (contrast the still-unbuilt object-inspector-anchor.md proposal). */
+.object-inspector-wrap {
+  position: absolute;
+  left: var(--space-24);
+  bottom: var(--space-24);
+  max-width: calc(100% - var(--space-32) * 2);
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: flex-start;
+  gap: var(--space-8);
+}

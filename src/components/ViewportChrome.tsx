@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { Camera, Lock, LockOpen, Pencil, X } from "lucide-react";
+import { Camera, Lock, LockOpen, Pencil, Plus, X } from "lucide-react";
 import type { CameraPosition } from "../schema/scene";
+import { LENS_PRESETS, type LensPresetId } from "../scene/cameraLens";
 import "./ViewportChrome.css";
 
 // Floating viewport chrome (PRD §9: "built from DESIGN.md's existing tokens
@@ -17,9 +18,12 @@ export function ViewportChrome({
   onSave,
   onDelete,
   onRename,
-  globalLock,
+  lockAllActive,
   onToggleGlobalLock,
   onSnapshot,
+  onOpenShortcuts,
+  lensPreset,
+  onSetLensPreset,
 }: {
   cameras: CameraPosition[];
   onRecall: (preset: CameraPosition) => void;
@@ -32,17 +36,31 @@ export function ViewportChrome({
    *  the display name changes. Unlike onSave, there's no failure mode worth
    *  surfacing here, so this is fire-and-forget like onDelete. */
   onRename: (id: string, name: string) => void;
-  /** improvements-v2.1 §4: "lock all" safety toggle — when on, no item can
-   *  be dragged/rotated/elevated regardless of its own `locked` flag.
-   *  Ephemeral (App.tsx state, not sceneFile), so this pill reflects it the
-   *  same way the rest of this bar reflects live view state, not persisted
-   *  scene data. */
-  globalLock: boolean;
+  /** improvements-v2.1 §4 / improvements-minor-fixes.md §3 (review round):
+   *  "lock all" safety toggle's PRESSED/label state. Deliberately NOT just
+   *  App.tsx's raw `globalLock` flag anymore — that flag alone can go stale
+   *  if items end up individually locked via the per-item `L` key,
+   *  independent of this button (the flag stays false, but every item is
+   *  genuinely locked). App.tsx now derives this as
+   *  `globalLock || everyItemIsLocked`, so the button reflects the real
+   *  aggregate lock state regardless of how items got there. */
+  lockAllActive: boolean;
   onToggleGlobalLock: () => void;
   /** improvements-v2.2 §8: downloads the current camera POV as a PNG.
    *  Fire-and-forget like onDelete/onRename — App.tsx no-ops silently if the
    *  viewport isn't ready yet (mirrors captureSnapshot's null-guard). */
   onSnapshot: () => void;
+  /** improvements-minor-fixes.md §3: opens the `?` keyboard-shortcuts
+   *  overlay (ShortcutCheatsheet, rendered by App.tsx — this pill only
+   *  triggers it, same "fire a callback, don't own the modal" shape as
+   *  every other action in this bar). */
+  onOpenShortcuts: () => void;
+  /** improvements-minor-fixes.md §17: live lens picker's active preset —
+   *  `null` means "Custom" (no pill highlighted), e.g. right after recalling
+   *  a saved viewpoint whose own `fovDeg` doesn't match any of the three
+   *  named presets. See docs/proposals/camera-lens-picker.md §3. */
+  lensPreset: LensPresetId | null;
+  onSetLensPreset: (id: LensPresetId) => void;
 }) {
   const [naming, setNaming] = useState(false);
   const [name, setName] = useState("");
@@ -88,13 +106,13 @@ export function ViewportChrome({
          *  share a pill-button visual language with. */}
         <button
           type="button"
-          className={`viewport-chrome-pill viewport-chrome-lock${globalLock ? " viewport-chrome-lock--active" : ""}`}
+          className={`viewport-chrome-pill viewport-chrome-lock${lockAllActive ? " viewport-chrome-lock--active" : ""}`}
           onClick={onToggleGlobalLock}
-          aria-pressed={globalLock}
-          title={globalLock ? "Unlock all items (drag/rotate/elevate re-enabled)" : "Lock all items (prevent accidental drag/rotate/elevate)"}
+          aria-pressed={lockAllActive}
+          title={lockAllActive ? "Unlock all items (drag/rotate/elevate re-enabled)" : "Lock all items (prevent accidental drag/rotate/elevate)"}
         >
-          {globalLock ? <Lock size={16} aria-hidden="true" /> : <LockOpen size={16} aria-hidden="true" />}
-          {globalLock ? "All locked" : "Lock all"}
+          {lockAllActive ? <Lock size={16} aria-hidden="true" /> : <LockOpen size={16} aria-hidden="true" />}
+          {lockAllActive ? "All locked" : "Lock all"}
         </button>
         {/* improvements-v2.2 §8: one-click download of the current camera
          *  POV as a PNG — sits beside the lock pill for the same reason
@@ -107,6 +125,41 @@ export function ViewportChrome({
         >
           <Camera size={16} aria-hidden="true" />
           Snapshot
+        </button>
+        {/* improvements-minor-fixes.md §17: live lens picker — Wide/Normal/
+         *  Tele 35mm-equivalent focal-length presets for the *live*
+         *  orbit/walk camera, independent of any saved viewpoint. Labels are
+         *  focal length ONLY — never a degree value (Shyam's correction to
+         *  the original proposal's FOV-degree table, see
+         *  docs/proposals/camera-lens-picker.md). One grouped pill (three
+         *  mutually exclusive states of one control), not three standalone
+         *  action pills like Snapshot. */}
+        <div className="viewport-chrome-lens" role="group" aria-label="Camera lens">
+          {LENS_PRESETS.map((preset) => (
+            <button
+              key={preset.id}
+              type="button"
+              className={`viewport-chrome-lens-option${lensPreset === preset.id ? " viewport-chrome-lens-option--active" : ""}`}
+              onClick={() => onSetLensPreset(preset.id)}
+              aria-pressed={lensPreset === preset.id}
+              title={`${preset.label} — ${preset.focalLengthLabel}`}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+        {/* improvements-minor-fixes.md §3: one-click keyboard-shortcuts
+         *  cheatsheet — a `?` pill matching the existing pill visual
+         *  language, per docs/proposals/keyboard-cheatsheet.md §4.1. Stays
+         *  in this bottom-center bar, no new HUD position. */}
+        <button
+          type="button"
+          className="viewport-chrome-pill"
+          onClick={onOpenShortcuts}
+          title="Keyboard shortcuts"
+          aria-label="Show keyboard shortcuts"
+        >
+          ?
         </button>
         {cameras.map((cam) =>
           renamingId === cam.id ? (
@@ -135,7 +188,7 @@ export function ViewportChrome({
             </form>
           ) : (
             <div key={cam.id} className="viewport-chrome-view">
-              <button type="button" className="viewport-chrome-pill" onClick={() => onRecall(cam)}>
+              <button type="button" className="viewport-chrome-pill viewport-chrome-pill--nested" onClick={() => onRecall(cam)}>
                 {cam.name}
               </button>
               <button
@@ -192,7 +245,8 @@ export function ViewportChrome({
             className="viewport-chrome-pill viewport-chrome-pill--outline"
             onClick={() => setNaming(true)}
           >
-            + Save view
+            <Plus size={16} aria-hidden="true" />
+            Save view
           </button>
         )}
       </div>
