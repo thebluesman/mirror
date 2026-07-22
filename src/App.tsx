@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Undo2 } from "lucide-react";
 import seedRaw from "../seed/living-room.json";
 import { Viewport, type ViewportHandle } from "./components/Viewport";
+import type { ObjectEditPatch } from "./components/ObjectInspector";
 import { ViewportChrome } from "./components/ViewportChrome";
 import { LayoutChrome } from "./components/LayoutChrome";
 import { ShellPanel } from "./components/ShellPanel";
@@ -266,6 +267,25 @@ function App() {
     });
   }
 
+  // improvements-v2.2 §6: post-import docked editor (ObjectInspector, via
+  // Viewport.tsx). Same discrete-commit shape as handleToggleLock — map over
+  // items, replace the one field set that changed — except this patch always
+  // carries all three fields together (ObjectInspector debounces and bundles
+  // them), so a rapid multi-field edit lands as one commit, not three.
+  // `dimsCm` is written unconditionally, matching applyImport.ts's existing
+  // treatment of a compound-sofa's dimsCm as an explicit override (not just a
+  // box-only field) — see furnitureOverallDims's read side for why that's
+  // already the right thing to write.
+  function handleEditItem(itemId: string, patch: ObjectEditPatch) {
+    if (!sceneFile) return;
+    commit({
+      ...sceneFile,
+      items: sceneFile.items.map((i) =>
+        i.id === itemId ? { ...i, name: patch.name, dimsCm: patch.dimsCm, modelRotationDeg: patch.modelRotationDeg } : i,
+      ),
+    });
+  }
+
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -297,6 +317,7 @@ function App() {
                 onCommitPlacement={commitPlacement}
                 onToggleLock={handleToggleLock}
                 globalLock={globalLock}
+                onEditItem={handleEditItem}
               />
               <LayoutChrome
                 layouts={sceneFile.layouts}

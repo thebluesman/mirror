@@ -130,15 +130,6 @@
   color: var(--color-error);
 }
 
-.import-panel-dims-row {
-  display: flex;
-  gap: var(--space-8);
-}
-
-.import-panel-dims-row .import-field {
-  flex: 1;
-}
-
 .import-panel-dims-error {
   font: var(--text-body);
   font-size: 12px;

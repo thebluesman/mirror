@@ -5,6 +5,7 @@ import { PointerLockControls } from "three/addons/controls/PointerLockControls.j
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { Footprints, Orbit as OrbitIcon } from "lucide-react";
 import { addFurnitureBoxMeshes, buildScene, furnitureOverallDims, type BuiltScene } from "../scene/buildScene";
+import { computeRoomBoundsCm, softClampCameraPosition, type RoomBoundsCm } from "../scene/cameraBounds";
 import { applyShellSurface, updateSurfaceCalibrationInPlace, type ShellSurface } from "../scene/shellMaterials";
 import { loadShellTexture } from "../scene/loadShellTexture";
 import { fitModelToDims, loadFurnitureModel } from "../scene/loadFurnitureModel";
@@ -28,6 +29,7 @@ import {
   type SurfaceCalibration,
 } from "../schema/scene";
 import type { FurnitureItem, SceneFile } from "../scene/types";
+import { ObjectInspector, type ObjectEditPatch } from "./ObjectInspector";
 import "./Viewport.css";
 
 // v2 spike (W-A, `v2/spike-arrange` — see spike-v2/OUTCOME.md): move + rotate
@@ -398,8 +400,16 @@ export const Viewport = forwardRef<
      *  flag. Defaults to false so existing callers/tests that don't pass it
      *  see today's unlocked behavior. */
     globalLock?: boolean;
+    /** improvements-v2.2 §6: post-import docked editor (ObjectInspector)
+     *  commits a name/dims/orientation-correction patch here — same discrete-
+     *  action shape as onCommitPlacement/onToggleLock, App.tsx maps it onto
+     *  the matching item in `sceneFile.items` and runs it through `commit()`. */
+    onEditItem?: (itemId: string, patch: ObjectEditPatch) => void;
   }
->(function Viewport({ sceneFile, shellCalibration, onCommitPlacement, onToggleLock, globalLock }, handleRef) {
+>(function Viewport(
+  { sceneFile, shellCalibration, onCommitPlacement, onToggleLock, globalLock, onEditItem },
+  handleRef,
+) {
   const containerRef = useRef<HTMLDivElement>(null);
   const builtRef = useRef<BuiltScene | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -485,6 +495,12 @@ export const Viewport = forwardRef<
   // collision check rather than recomputed per pointer event.
   const wallAABBsRef = useRef<AABB[]>([]);
   const itemsByIdRef = useRef<Map<string, FurnitureItem>>(new Map());
+  // improvements-v2.2 §2: the orbit camera's soft containment volume,
+  // derived from the room's own floor/ceiling extent — recomputed alongside
+  // wallAABBsRef on each structural rebuild (a room dimension is structural,
+  // same as the walls those AABBs are built from) and read every frame by
+  // animate()'s clamp, not recomputed per-frame.
+  const roomBoundsRef = useRef<RoomBoundsCm>({ minX: 0, maxX: 0, minZ: 0, maxZ: 0, minY: 0, maxY: 0 });
 
   // improvements-v2.1 §4: whether a gesture/keystep targeting `itemId`
   // should be blocked — either the item's own persisted `locked` flag or the
@@ -641,6 +657,7 @@ export const Viewport = forwardRef<
     // lifetime never reads stale walls/items from a previous room.
     wallAABBsRef.current = wallFootprintAABBs(structuralSceneFile.room);
     itemsByIdRef.current = new Map(structuralSceneFile.items.map((item) => [item.id, item]));
+    roomBoundsRef.current = computeRoomBoundsCm(structuralSceneFile.room);
 
     // improvements-v2.1 §4: restore the selection the previous run's cleanup
     // stashed (see pendingReselectRef's comment) if that item is still
@@ -1498,6 +1515,20 @@ export const Viewport = forwardRef<
         }
       } else {
         controls.update();
+        // improvements-v2.2 §2: soft containment — walk mode has its own
+        // fixed eye height/free WASD roaming and isn't in this feature's
+        // scope, so this only ever runs for the orbit camera. Runs after
+        // controls.update() (which is what actually moved the camera this
+        // frame) and writes straight back to camera.position; OrbitControls
+        // reads that position back at the start of its *next* update() call
+        // to derive its internal offset-from-target, so a clamp here feeds
+        // back into subsequent zoom/pan/orbit math instead of being undone
+        // next frame.
+        const clamped = softClampCameraPosition(
+          [camera.position.x, camera.position.y, camera.position.z],
+          roomBoundsRef.current,
+        );
+        camera.position.set(clamped[0], clamped[1], clamped[2]);
       }
       // v2 spike (W-A): the selection outline's bounding box has to track
       // whatever the drag/rotate handlers above just mutated the group to —
@@ -1944,9 +1975,22 @@ export const Viewport = forwardRef<
   // or ViewportChrome (bottom-center) for screen real estate. Rendered as a
   // sibling of the canvas div (both direct children of App.tsx's
   // position:relative `.app-viewport`), same pattern those two chromes use.
+  // improvements-v2.2 §6: derived straight from props/state (not the
+  // imperative refs the drag/rotate/elevation code reads) since this only
+  // feeds the docked editor's render, not a per-frame/per-gesture hot path.
+  const selectedItem = selectedItemId ? sceneFile.items.find((i) => i.id === selectedItemId) : undefined;
+
   return (
     <>
       <div ref={containerRef} className="viewport" />
+      {selectedItem && (
+        <ObjectInspector
+          key={selectedItem.id}
+          item={selectedItem}
+          onEdit={(patch) => onEditItem?.(selectedItem.id, patch)}
+          onClose={() => setSelectedItemId(null)}
+        />
+      )}
       <div className="viewport-mode-toggle">
         <button
           type="button"
