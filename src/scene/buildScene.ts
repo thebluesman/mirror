@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { CameraPosition, FurnitureItem, SceneFile, WallDef } from "./types";
 import { flatTextureBoxDims } from "./flatItemTexture";
+import { applyTintBlend } from "./tintBlend";
 import { DEFAULT_LIGHTING, SUN_DISTANCE_CM, type Lighting } from "../schema/scene";
 
 // Exported for src/scene/collision.ts (v2 spike D2 code-review finding):
@@ -252,10 +253,15 @@ export function furnitureOverallDims(item: FurnitureItem): { w: number; d: numbe
 // on every buildScene() call, so there's no stale prior tint on it to undo
 // before multiplying the new one in (unlike the shell's long-lived,
 // repeatedly-recalibrated materials).
+// improvements-minor-fixes §10: dispatches on `item.tintBlendMode` (falling
+// back to "multiply" when unset, per TintBlendMode's schema comment) via the
+// shared src/scene/tintBlend.ts helper — MAT.furniture never carries a `.map`,
+// so this always takes applyTintBlend's cheap flat-scalar shortcut, same cost
+// as the plain `.color.multiply()` call this replaced.
 function furnitureMaterialFor(item: FurnitureItem): THREE.MeshStandardMaterial {
   if (!item.tintColor) return MAT.furniture;
   const mat = MAT.furniture.clone();
-  mat.color.multiply(new THREE.Color(item.tintColor));
+  applyTintBlend(mat, item.tintColor, item.tintBlendMode ?? "multiply");
   return mat;
 }
 

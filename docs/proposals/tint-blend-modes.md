@@ -1,5 +1,18 @@
 # Proposal: additional tint blend modes (`tintBlendMode` field) — improvements-minor-fixes §10
 
+**Built (2026-07-22), multiply+screen only.** Schema declares all five
+`TintBlendMode` values per §2; render code implements multiply (unchanged)
+and screen, and falls back to multiply for overlay/soft-light/darken. UI
+(`TintRow` in `src/components/ImportPanel.tsx`) exposes only Multiply/Screen.
+One deviation from §4's plan: the rug's `flatTextureHash` top-face material
+was **not** given a blend-mode patch point — `buildScene.ts`'s
+`addFlatTexturedFurnitureMesh` already deliberately excludes that material
+from tinting entirely, multiply included ("a tint over a rug's actual
+pattern photo wouldn't read as a 'color adjustment,' it'd just discolor the
+photo" — see that function's existing comment), so there was no live
+multiply-tint path there to extend to screen. See
+`src/scene/tintBlend.ts` for the shared `blendTint`/`applyTintBlend` helpers.
+
 **Status:** approved for build, reduced scope (2026-07-22 review) — ship
 **multiply + screen only** this round (open question 1: "start smaller"),
 both free on the flat/placeholder-box path with no `onBeforeCompile` shader

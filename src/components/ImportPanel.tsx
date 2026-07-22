@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { Dims, FurnitureItem, ModelRotation, SceneFile } from "../schema/scene";
+import type { Dims, FurnitureItem, ModelRotation, SceneFile, TintBlendMode } from "../schema/scene";
 import { loadFalKey } from "../storage/settings";
 import { putAsset } from "../storage/assets";
 import { generateFurnitureGlb, FalKeyMissingError, type GenerationPhase } from "../import/falClient";
@@ -161,6 +161,18 @@ export function ImportPanel({
     onImported({ ...sceneFile, items });
   }
 
+  // improvements-minor-fixes §10: blend-mode commit, same shape as
+  // handleTintChange above. A `<select>` change is a discrete pick, not a
+  // drag, so this commits immediately — no debounce, same reasoning
+  // handleClear (below, in TintRow) already uses for its own immediate
+  // commit.
+  function handleBlendModeChange(itemId: string, tintBlendMode: TintBlendMode) {
+    const items: FurnitureItem[] = sceneFile.items.map((item) =>
+      item.id === itemId ? { ...item, tintBlendMode } : item,
+    );
+    onImported({ ...sceneFile, items });
+  }
+
   const canPickPhoto =
     hasFalKey === true && (selection !== "__new__" || newName.trim().length > 0) && stage.kind === "pick";
 
@@ -229,6 +241,7 @@ export function ImportPanel({
             <TintRow
               item={selectedItem}
               onChange={(tintColor) => handleTintChange(selectedItem.id, tintColor)}
+              onBlendModeChange={(mode) => handleBlendModeChange(selectedItem.id, mode)}
             />
           )}
 
@@ -312,9 +325,11 @@ const NO_TINT = "#ffffff";
 function TintRow({
   item,
   onChange,
+  onBlendModeChange,
 }: {
   item: FurnitureItem;
   onChange: (tintColor: string | undefined) => void;
+  onBlendModeChange: (mode: TintBlendMode) => void;
 }) {
   // Local mirror of the picker's color for instant feedback while dragging —
   // same reasoning as ShellPanel.tsx's SurfaceRow liveCalib: onChange is
@@ -349,9 +364,27 @@ function TintRow({
         <input type="color" value={liveColor} onChange={(e) => handlePick(e.target.value)} />
       </label>
       {item.tintColor && (
-        <button type="button" className="import-panel-button-secondary" onClick={handleClear}>
-          Clear tint
-        </button>
+        <>
+          {/* improvements-minor-fixes §10: only Multiply/Screen are
+              implemented this round — overlay/soft-light/darken exist in the
+              schema (TintBlendMode) for a later round but aren't rendered
+              here as dead options. Rendered only inside this same
+              `item.tintColor` check as "Clear tint" — the mode has no effect
+              without a tint set. */}
+          <label className="import-field">
+            <span>Blend mode</span>
+            <select
+              value={item.tintBlendMode ?? "multiply"}
+              onChange={(e) => onBlendModeChange(e.target.value as TintBlendMode)}
+            >
+              <option value="multiply">Multiply</option>
+              <option value="screen">Screen</option>
+            </select>
+          </label>
+          <button type="button" className="import-panel-button-secondary" onClick={handleClear}>
+            Clear tint
+          </button>
+        </>
       )}
     </section>
   );

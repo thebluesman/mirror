@@ -56,6 +56,27 @@ export const FurnitureCategory = z.enum([
 ]);
 export type FurnitureCategory = z.infer<typeof FurnitureCategory>;
 
+// improvements-minor-fixes §10 (docs/proposals/tint-blend-modes.md): which
+// blend formula combines tintColor with the material's base color. Multiply
+// is the enum's own implicit default — undefined means "multiply," not "no
+// blend," so every existing item with a tintColor and no tintBlendMode keeps
+// rendering exactly as it does today. No schema .default("multiply") for the
+// same reason category avoids .default("other"): .default() fires at parse
+// time and would rewrite every legacy item to *explicitly* carry "multiply,"
+// destroying the "never set" vs. "deliberately chose multiply" distinction
+// for no benefit — the fallback belongs in the render code
+// (furnitureMaterialFor / applyModelTint via src/scene/tintBlend.ts), not the
+// schema. Meaningless without tintColor also set; the schema doesn't enforce
+// that pairing, same posture as category/shape independence.
+//
+// All five values are declared here even though the 2026-07-22 build only
+// implements "multiply" and "screen" (see docs/proposals/tint-blend-modes.md's
+// status note) — overlay/soft-light/darken are deferred to a later round, not
+// dropped, and this way that round doesn't need a schema change. Render code
+// falls back to "multiply" for any of the three unimplemented values.
+export const TintBlendMode = z.enum(["multiply", "screen", "overlay", "soft-light", "darken"]);
+export type TintBlendMode = z.infer<typeof TintBlendMode>;
+
 // Minimum gap enforced between an opening's sill and head when both are
 // given. Without this, buildScene.ts's leafTop = max(sill, head - 2) can
 // collapse to exactly `sill`, silently dropping the door leaf (code review
@@ -243,6 +264,8 @@ const BoxFurniture = z
     // `locked` just above: so z.infer types it directly instead of leaving
     // it reachable only through `.loose()`'s any-typed passthrough.
     tintColor: z.string().optional(),
+    // See TintBlendMode's comment above — same field, same rationale.
+    tintBlendMode: TintBlendMode.optional(),
     // improvements-v2.2 §7 (docs/proposals/object-categories.md): a semantic
     // category tag. Optional + no default so every existing seed/saved file
     // validates unchanged (field absent → undefined → "uncategorized"), same
@@ -277,6 +300,8 @@ const CompoundSofaFurniture = z
     locked: z.boolean().optional(),
     // See BoxFurniture's `tintColor` comment — same field, same rationale.
     tintColor: z.string().optional(),
+    // See TintBlendMode's comment above — same field, same rationale.
+    tintBlendMode: TintBlendMode.optional(),
     // See BoxFurniture's `category` comment — same field, same rationale.
     category: FurnitureCategory.optional(),
   })

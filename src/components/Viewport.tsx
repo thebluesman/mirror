@@ -745,7 +745,10 @@ export const Viewport = forwardRef<
           // improvements-v2.2 §5: a real imported GLB is the common case for
           // a placed item, not just the box placeholder — don't skip tinting
           // it just because it has its own imported materials.
-          if (item.tintColor) applyModelTint(model, item.tintColor);
+          // improvements-minor-fixes §10: passes the item's chosen blend mode
+          // through, falling back to "multiply" (applyModelTint's own
+          // default) when unset.
+          if (item.tintColor) applyModelTint(model, item.tintColor, item.tintBlendMode);
           group.add(model);
         })
         .catch((err) => {

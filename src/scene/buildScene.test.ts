@@ -172,6 +172,50 @@ describe("buildScene — furniture tint (improvements-v2.2 §5)", () => {
     expect(tintedMat.color.getHexString()).not.toBe(plainMat.color.getHexString());
   });
 
+  // improvements-minor-fixes §10: furnitureMaterialFor dispatches on
+  // item.tintBlendMode (via the shared applyTintBlend/blendTint helpers in
+  // tintBlend.ts), defaulting to "multiply" when unset — pinned here against
+  // the actual buildScene() entrypoint, not just the blend-math unit tests
+  // in tintBlend.test.ts.
+  it("tintBlendMode 'screen' produces a different (lighter) color than the default multiply", () => {
+    const screenTinted = { ...plainA, id: "screen-tinted", tintColor: "#ff0000", tintBlendMode: "screen" as const };
+    const built = buildScene(sceneFileWithItems([tinted, screenTinted]));
+    const multiplyMat = (built.furnitureGroups.get("tinted")!.children[0] as THREE.Mesh)
+      .material as THREE.MeshStandardMaterial;
+    const screenMat = (built.furnitureGroups.get("screen-tinted")!.children[0] as THREE.Mesh)
+      .material as THREE.MeshStandardMaterial;
+    expect(screenMat.color.getHexString()).not.toBe(multiplyMat.color.getHexString());
+    // Screen only ever lightens or holds a channel steady relative to the
+    // untinted base (base <= result, since (1-base)*(1-tint) <= (1-base));
+    // multiply only ever darkens or holds steady. With a non-white,
+    // non-black tint on a non-white, non-black base, they diverge, and
+    // screen's result must be >= the base furniture color on every channel.
+    const baseColor = new THREE.Color(0xb9ac8f);
+    expect(screenMat.color.r).toBeGreaterThanOrEqual(baseColor.r - 1e-6);
+    expect(screenMat.color.g).toBeGreaterThanOrEqual(baseColor.g - 1e-6);
+    expect(screenMat.color.b).toBeGreaterThanOrEqual(baseColor.b - 1e-6);
+  });
+
+  it("an explicit tintBlendMode: 'multiply' matches the default (unset) behavior exactly", () => {
+    const explicitMultiply = { ...plainA, id: "explicit-multiply", tintColor: "#ff0000", tintBlendMode: "multiply" as const };
+    const built = buildScene(sceneFileWithItems([tinted, explicitMultiply]));
+    const defaultMat = (built.furnitureGroups.get("tinted")!.children[0] as THREE.Mesh)
+      .material as THREE.MeshStandardMaterial;
+    const explicitMat = (built.furnitureGroups.get("explicit-multiply")!.children[0] as THREE.Mesh)
+      .material as THREE.MeshStandardMaterial;
+    expect(explicitMat.color.getHexString()).toBe(defaultMat.color.getHexString());
+  });
+
+  it("an unimplemented tintBlendMode (e.g. 'darken') falls back to multiply rather than throwing", () => {
+    const darkenTinted = { ...plainA, id: "darken-tinted", tintColor: "#ff0000", tintBlendMode: "darken" as const };
+    const built = buildScene(sceneFileWithItems([tinted, darkenTinted]));
+    const multiplyMat = (built.furnitureGroups.get("tinted")!.children[0] as THREE.Mesh)
+      .material as THREE.MeshStandardMaterial;
+    const darkenMat = (built.furnitureGroups.get("darken-tinted")!.children[0] as THREE.Mesh)
+      .material as THREE.MeshStandardMaterial;
+    expect(darkenMat.color.getHexString()).toBe(multiplyMat.color.getHexString());
+  });
+
   it("a compound-sofa's main+chaise sub-meshes share one per-item tinted material, not two", () => {
     const sofa = {
       id: "sofa",
