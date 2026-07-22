@@ -74,7 +74,7 @@ export function SettingsPanel({
           </span>
         </header>
         <p className="settings-row-hint">
-          Used only to call fal.ai's Meshy image-to-3D model directly from this browser — stored
+          Used only to call fal.ai's Hunyuan3D image-to-3D model directly from this browser — stored
           locally in IndexedDB, never bundled into the app, never sent anywhere else. Get a key at{" "}
           <span className="settings-row-hint-url">fal.ai/dashboard/keys</span>.
         </p>

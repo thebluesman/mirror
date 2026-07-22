@@ -1,38 +1,43 @@
-// fal.ai Meshy client wrapper (Phase 4, PRD §7.3/§8). ADR-0001 verified all
-// three legs — upload, submit/poll, GLB download — work browser-direct with
-// `fal.config({ credentials })`, no proxy. This module owns that
-// configuration plus the async job flow's progress reporting; ImportPanel
-// only sees `generateFurnitureGlb`.
+// fal.ai Hunyuan3D client wrapper (v2 Phase 4, PRD-v2 §7.3; provider switch
+// per ADR-0002 — Hunyuan3D replaces Meshy as the app's only image-to-3D
+// provider, no fallback). ADR-0001 verified all three legs — upload,
+// submit/poll, GLB download — work browser-direct with
+// `fal.config({ credentials })`, no proxy; ADR-0002 amends only *which* fal-
+// hosted model is called, so that architecture carries over unchanged (its
+// one open item, a fresh browser-tab CORS re-check for Hunyuan, is PRD-v2
+// §7.3's Phase 0 gate, run separately before this code ships). This module
+// owns that configuration plus the async job flow's progress reporting;
+// ImportPanel only sees `generateFurnitureGlb`.
 
 import { fal } from "@fal-ai/client";
 import type { QueueStatus } from "@fal-ai/client";
 
-const ENDPOINT = "fal-ai/meshy/v6/image-to-3d";
+const ENDPOINT = "fal-ai/hunyuan-3d/v3.1/pro/image-to-3d";
 
-// Request arguments per spike/import/generate-item.py's best-effort defaults
-// (poc3-plan.md: "smart topology ~15k, PBR on, auto_size: true,
-// origin_at: bottom"); unverified against the live schema at v1 build time
-// there since no FAL_KEY was available in that spike session, but this is
-// the same request this app now sends for real. fal's queue API echoes back
-// unknown-field errors on a mismatch, so a schema drift fails loud during
-// the confirm step rather than silently generating with wrong settings.
+// Input arguments for Hunyuan3D's image-to-3D schema, confirmed live in the
+// v2 spike's D5 call (ADR-0002): a single `input_image_url` (added per-call in
+// generateFurnitureGlb below) plus `enable_pbr` for textured PBR output. The
+// endpoint also exposes multi-view input fields, but v2 is single-photo only
+// (PRD-v2 §11.5, decided) — they stay unset here, not scaffolded. fal's queue
+// API echoes back unknown-field errors on a mismatch, so a schema drift fails
+// loud during the confirm step rather than silently generating wrong output.
 const REQUEST_DEFAULTS = {
-  should_texture: true,
   enable_pbr: true,
-  topology: "triangle" as const,
-  target_polycount: 15000,
-  auto_size: true,
-  origin_at: "bottom" as const,
 };
 
-// Candidate key-paths (dot-separated) fal's image-to-3D response might carry
-// the output GLB URL under — mirrors generate-item.py's GLB_URL_KEY_CANDIDATES,
-// since the exact shape wasn't confirmed against a live call at write time.
+// Candidate key-paths (dot-separated) the image-to-3D response might carry the
+// output GLB URL under. `model_glb.url` is Hunyuan3D's confirmed output path
+// (D5 live call, ADR-0002) and so leads the list; the rest are kept as
+// defensive fallbacks — the tolerant extractor exists precisely because fal's
+// hosted-model schema "can change without notice" (ADR-0002 §Consequences), and
+// a stale-but-harmless candidate costs nothing since `model_glb.url` wins
+// whenever it's present. (`model_mesh.url` etc. were Meshy's shapes — left in
+// as fallbacks, not because Meshy is still reachable; ADR-0002 removed that.)
 const GLB_URL_KEY_CANDIDATES = [
-  "model_mesh.url",
   "model_glb.url",
+  "model_mesh.url",
   "glb.url",
-  "output.model_mesh.url",
+  "output.model_glb.url",
   "model_urls.glb",
   "mesh.url",
 ];
@@ -108,7 +113,7 @@ function summarizeQueueStatus(status: QueueStatus): string | undefined {
 }
 
 /**
- * Runs one photo through Meshy image-to-3D end to end: configure the client
+ * Runs one photo through Hunyuan3D image-to-3D end to end: configure the client
  * with the caller-supplied key, upload the photo, submit + poll the job, and
  * download the resulting GLB. Reuses `photoUrl` instead of re-uploading when
  * given, so a failed generation's retry doesn't re-upload the same photo
@@ -138,7 +143,7 @@ export async function generateFurnitureGlb(
 
   onProgress({ phase: "queued" });
   const { data } = await fal.subscribe(ENDPOINT, {
-    input: { ...REQUEST_DEFAULTS, image_url: photoUrl },
+    input: { ...REQUEST_DEFAULTS, input_image_url: photoUrl },
     logs: true,
     onQueueUpdate: (status) => {
       onProgress({
