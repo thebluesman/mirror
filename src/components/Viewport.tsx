@@ -1,7 +1,9 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+import { Footprints, Orbit as OrbitIcon } from "lucide-react";
 import { addFurnitureBoxMeshes, buildScene, furnitureOverallDims, type BuiltScene } from "../scene/buildScene";
 import { applyShellSurface, updateSurfaceCalibrationInPlace, type ShellSurface } from "../scene/shellMaterials";
 import { loadShellTexture } from "../scene/loadShellTexture";
@@ -11,6 +13,14 @@ import { checkCollisions, itemFootprintAABB, wallFootprintAABBs, type AABB } fro
 import { snapPosition } from "../scene/snapping";
 import { rotateHandleWorldXZ, snapYawDeg, yawDegFromPointer } from "../scene/rotateHandle";
 import { ELEVATION_STEP_CM, stepElevationCm } from "../scene/elevation";
+import {
+  computeWalkStep,
+  deriveSyntheticLookAt,
+  SYNTHETIC_LOOKAT_DISTANCE_CM,
+  WALK_EYE_HEIGHT_CM,
+  WALK_SPEED_CM_PER_SEC,
+  type WalkInput,
+} from "../scene/walkCamera";
 import {
   DEFAULT_SURFACE_CALIBRATION,
   type CameraPosition,
@@ -41,6 +51,14 @@ export interface ViewportHandle {
 
 const HUMAN_FOV = 38; // ~35mm-equivalent, per spike 2's C2 feedback
 const SHELL_SURFACES: ShellSurface[] = ["wall", "floor", "ceiling"];
+
+// improvements-v2.1 §5: walk-around camera mode, additive to orbit (default
+// stays "orbit" — nothing about existing behavior changes unless the user
+// opts in via the HUD toggle). "orbit"/"walk" name the two mutually-exclusive
+// control schemes below, not just a label — exactly one of OrbitControls/
+// PointerLockControls is ever the thing actually moving the camera at a time
+// (see applyCameraMode).
+type CameraMode = "orbit" | "walk";
 
 /** Applies a saved/seed CameraPosition to a live camera+controls pair —
  *  shared by the structural effect's initial-mount framing and
@@ -220,6 +238,23 @@ export const Viewport = forwardRef<
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
+  // improvements-v2.1 §5: the walk-mode counterpart to controlsRef, plus the
+  // mode flag and a way to flip it from outside the structural effect (the
+  // HUD toggle button and ViewportHandle.flyTo both live outside it — see
+  // applyModeRef below). Mirrors the selectedItemId state/ref split already
+  // used for selection: `cameraMode` drives the toggle button's label/icon
+  // (needs a re-render), `cameraModeRef` is what every imperative pointer/
+  // keyboard/animate() closure actually reads (never wants to wait for a
+  // render).
+  const walkControlsRef = useRef<PointerLockControls | null>(null);
+  const [cameraMode, setCameraModeState] = useState<CameraMode>("orbit");
+  const cameraModeRef = useRef<CameraMode>("orbit");
+  cameraModeRef.current = cameraMode;
+  // Set inside the structural effect to the real mode-switch function (which
+  // needs the effect's local camera/controls/walkControls closures) — the
+  // toggle button and ViewportHandle.flyTo call through this ref rather than
+  // duplicating that logic or forcing it to live outside the effect.
+  const applyModeRef = useRef<((mode: CameraMode) => void) | null>(null);
   // Latest onCommitPlacement in a ref so the pointer/keyboard effect (which
   // only wants to run once per structural build) doesn't have to re-bind its
   // DOM listeners every time App.tsx passes a new closure.
@@ -470,13 +505,87 @@ export const Viewport = forwardRef<
     }
     cameraRef.current = camera;
     controlsRef.current = controls;
+
+    // improvements-v2.1 §5: walk-around camera mode. PointerLockControls is
+    // constructed alongside OrbitControls (both live for this structural
+    // build's whole lifetime) rather than lazily on first mode-switch — it's
+    // cheap (an EventDispatcher plus a few listeners, see the library source)
+    // and creating it once means switching modes back and forth never
+    // reattaches/detaches its mousemove/pointerlockchange listeners, only
+    // toggles which one is doing anything (see applyCameraMode below).
+    const walkControls = new PointerLockControls(camera, renderer.domElement);
+    walkControlsRef.current = walkControls;
+    // Held-WASD state for animate()'s per-frame integration — a plain mutable
+    // object (not React state) for the same reason `drag`/`rotateDrag` above
+    // are: read every frame, written every keydown/keyup, no render involved.
+    const walkKeys: WalkInput = { forward: false, back: false, left: false, right: false };
+    let lastFrameTime = performance.now();
+
+    // Single source of truth for "which control scheme is live right now" —
+    // both the HUD toggle button (via applyModeRef, since the button lives
+    // outside this effect) and ViewportHandle.flyTo call through this, and it
+    // also runs from the walkControls "unlock" listener below when the
+    // browser exits pointer lock on its own (Escape, losing focus, etc.), so
+    // the mode flag can never drift out of sync with which controls object is
+    // actually driving the camera.
+    function applyCameraMode(mode: CameraMode) {
+      if (cameraModeRef.current === mode) return;
+      cameraModeRef.current = mode;
+      setCameraModeState(mode);
+      if (mode === "walk") {
+        controls.enabled = false;
+        // Keep the camera's current XZ position/facing (don't teleport
+        // across the room on mode-switch) but snap to the fixed walking eye
+        // height — PointerLockControls has no notion of "orbit target" to
+        // carry over, and WASD never touches Y once in walk mode (see
+        // walkCamera.ts's computeWalkStep), so this is the one place height
+        // gets set.
+        camera.position.y = WALK_EYE_HEIGHT_CM;
+      } else {
+        // Reverse of the above: hand the pointer back (browser no-ops if
+        // it's already unlocked, e.g. when this runs because the browser
+        // itself just exited lock) and drop any held-WASD state so a mode
+        // switch mid-keypress can't leave a phantom "still walking"
+        // direction the next time walk mode is entered.
+        walkControls.unlock();
+        walkKeys.forward = walkKeys.back = walkKeys.left = walkKeys.right = false;
+        controls.enabled = true;
+        // OrbitControls.target is wherever it was left before walk mode —
+        // possibly now behind the camera after mouselook turned it around.
+        // Recenter it in front of the camera's current facing so the next
+        // controls.update() doesn't snap/orbit around a stale point.
+        const forward = walkControls.getDirection(new THREE.Vector3());
+        controls.target.copy(camera.position).addScaledVector(forward, SYNTHETIC_LOOKAT_DISTANCE_CM);
+        controls.update();
+      }
+    }
+    applyModeRef.current = applyCameraMode;
+
+    // Browser-driven pointer-lock exit (Escape, alt-tab, etc.) fires this the
+    // same as our own walkControls.unlock() call above — the isLocked-vs-
+    // cameraModeRef guard inside applyCameraMode (early-return when already
+    // in the target mode) is what stops that self-triggered case from
+    // recursing, since applyCameraMode's own orbit branch already set
+    // cameraModeRef to "orbit" *before* calling unlock().
+    function onWalkControlsUnlock() {
+      if (cameraModeRef.current === "walk") applyCameraMode("orbit");
+    }
+    walkControls.addEventListener("unlock", onWalkControlsUnlock);
+
+    // Click-to-lock: standard Pointer Lock UX, only armed in walk mode so an
+    // orbit-mode click doesn't unexpectedly capture the pointer.
+    function onCanvasClickForWalkLock() {
+      if (cameraModeRef.current === "walk" && !walkControls.isLocked) walkControls.lock();
+    }
+    renderer.domElement.addEventListener("click", onCanvasClickForWalkLock);
+
     // Dev-only console diagnostic (never ships to a production build): lets
     // Shyam dump live scene-graph info (positions/materials/geometry) from
     // devtools without a rebuild, for one-off "why does this look wrong"
     // investigations. See scratch console snippets in troubleshooting notes.
     if (import.meta.env.DEV) {
       // @ts-expect-error dev-only debug global, intentionally untyped
-      window.__mirrorDebug = { camera, controls, scene: built.scene, THREE };
+      window.__mirrorDebug = { camera, controls, walkControls, scene: built.scene, THREE };
     }
 
     // v2 spike (W-A) — selection + floor-plane drag + keyboard rotate.
@@ -626,9 +735,22 @@ export const Viewport = forwardRef<
     function onPointerDown(evt: PointerEvent) {
       if (evt.button !== 0) return;
       // Give the viewport keyboard focus so its shortcuts (q/e, PageUp/
-      // PageDown, Escape) are focus-scoped to it — see onKeyDown's
-      // focus-ownership note.
+      // PageDown, Escape, and walk mode's WASD) are focus-scoped to it — see
+      // onKeyDown's focus-ownership note. Always focus first, even in walk
+      // mode (where the rest of this handler is inert below) — the WASD
+      // keydown/keyup listeners live on this same element and need it
+      // focused to fire at all.
       renderer.domElement.focus();
+      // improvements-v2.1 §5: item selection/drag is orbit-only. Walk mode's
+      // click instead starts a pointer-lock request (onCanvasClickForWalkLock,
+      // a separate 'click' listener) — raycasting mouse coordinates that
+      // freeze the instant the pointer locks wouldn't select anything
+      // meaningful anyway. Bailing here also guarantees drag/rotateDrag can
+      // never be set while walking, which is what keeps onKeyDown's existing
+      // Escape-cancels-a-gesture branch correctly inert during walk mode
+      // (nothing to cancel) rather than racing the browser's own
+      // Escape-exits-pointer-lock behavior.
+      if (cameraModeRef.current === "walk") return;
       setPointerNdcFromEvent(evt);
       raycaster.setFromCamera(pointerNdc, camera);
 
@@ -680,6 +802,14 @@ export const Viewport = forwardRef<
     }
 
     function onPointerMove(evt: PointerEvent) {
+      // improvements-v2.1 §5: mouselook is PointerLockControls' own mousemove
+      // listener (added in its constructor, active whenever it's locked,
+      // independent of this handler) — nothing below is reachable in walk
+      // mode anyway since onPointerDown can't set drag/rotateDrag while
+      // walking, but bailing early also skips the hover raycast for free
+      // (pointless once the pointer is locked: clientX/Y freeze at the lock
+      // point instead of tracking the actual look direction).
+      if (cameraModeRef.current === "walk") return;
       // C1 follow-up: rotate-drag branch — angle between the item's center
       // and the pointer's current floor-plane hit, same raycast-against-
       // dragPlane technique translate-drag uses below, feeding the pure
@@ -747,6 +877,11 @@ export const Viewport = forwardRef<
     }
 
     function onPointerUp(evt: PointerEvent) {
+      // improvements-v2.1 §5: no explicit walk-mode gate needed here — unlike
+      // onPointerDown/onPointerMove, this one's already inert while walking:
+      // onPointerDown's own walk-mode bail (above) means drag/rotateDrag can
+      // never be non-null to begin with, so both branches below fall through
+      // to a no-op.
       if (rotateDrag) {
         if (renderer.domElement.hasPointerCapture(evt.pointerId)) {
           renderer.domElement.releasePointerCapture(evt.pointerId);
@@ -797,7 +932,34 @@ export const Viewport = forwardRef<
           evt.preventDefault();
           revertGesture();
         }
+        // No explicit pointer-lock-unlock call needed here: Escape is one of
+        // the browser's own built-in pointer-lock-exit gestures, so walk mode
+        // is already headed for onWalkControlsUnlock -> applyCameraMode
+        // ("orbit") on its own. drag/rotateDrag are always null in walk mode
+        // (onPointerDown's walk-mode bail — see above), so the revert branch
+        // above is a guaranteed no-op here too, not a conflict.
         return;
+      }
+      // improvements-v2.1 §5: walk-mode WASD — held-key state, not a discrete
+      // step like q/e/PageUp/PageDown below. animate() reads walkKeys every
+      // frame via computeWalkStep; this just flips the bit and consumes the
+      // keydown so it doesn't fall through to the item-shortcut logic below
+      // (harmless either way, since w/a/s/d don't collide with q/e/[/]/
+      // PageUp/PageDown, but explicit is clearer than relying on that).
+      // Gated on walk mode so w/a/s/d are inert — no preventDefault, no state
+      // — while orbiting, the same "only acts in the mode it applies to"
+      // shape PointerLockControls' own mousemove listener already has via
+      // its isLocked check.
+      if (cameraModeRef.current === "walk") {
+        const key = evt.key.toLowerCase();
+        if (key === "w" || key === "a" || key === "s" || key === "d") {
+          evt.preventDefault();
+          if (key === "w") walkKeys.forward = true;
+          else if (key === "s") walkKeys.back = true;
+          else if (key === "a") walkKeys.left = true;
+          else walkKeys.right = true;
+          return;
+        }
       }
       const itemId = selectedItemIdRef.current;
       if (!itemId) return;
@@ -821,6 +983,20 @@ export const Viewport = forwardRef<
       onCommitPlacementRef.current?.(itemId, [group.position.x, group.position.y, group.position.z], rotationDeg);
     }
 
+    // improvements-v2.1 §5: releases a held WASD key regardless of mode —
+    // unconditional (not gated on cameraModeRef like onKeyDown's press side)
+    // so a key released after a mode-switch-away-from-walk, or a keyup that
+    // arrives a tick after the mode flips, can never leave a stale `true` in
+    // walkKeys (applyCameraMode also clears all four on any mode switch —
+    // this is the ongoing steady-state complement to that one-time reset).
+    function onKeyUp(evt: KeyboardEvent) {
+      const key = evt.key.toLowerCase();
+      if (key === "w") walkKeys.forward = false;
+      else if (key === "s") walkKeys.back = false;
+      else if (key === "a") walkKeys.left = false;
+      else if (key === "d") walkKeys.right = false;
+    }
+
     // Keyboard-focus ownership (see onKeyDown): make the canvas focusable and
     // suppress the focus ring (it's a viewport, not a form control), so its
     // shortcuts are scoped to it rather than living on `window`.
@@ -830,6 +1006,7 @@ export const Viewport = forwardRef<
     renderer.domElement.addEventListener("pointermove", onPointerMove);
     renderer.domElement.addEventListener("pointerup", onPointerUp);
     renderer.domElement.addEventListener("pointercancel", onPointerCancel);
+    renderer.domElement.addEventListener("keyup", onKeyUp);
     renderer.domElement.addEventListener("keydown", onKeyDown);
 
     function resize() {
@@ -848,7 +1025,31 @@ export const Viewport = forwardRef<
     let frameId: number;
     function animate() {
       frameId = requestAnimationFrame(animate);
-      controls.update();
+      const now = performance.now();
+      // Frame-to-frame delta (seconds) for walk mode's constant-speed WASD
+      // integration below — OrbitControls.update() doesn't need this (it's
+      // not damped: no `controls.enableDamping` set anywhere in this file),
+      // so this clock only exists for walk mode's sake.
+      const deltaSec = (now - lastFrameTime) / 1000;
+      lastFrameTime = now;
+      // improvements-v2.1 §5: mutually exclusive per frame, matching
+      // applyCameraMode's enable/disable split. Critically, OrbitControls
+      // .update() recomputes camera.position from its own internal spherical
+      // coordinates *unconditionally* — `controls.enabled` only gates its
+      // input listeners, not update() — so calling it while walk mode is
+      // live would silently snap the camera back every single frame,
+      // undoing WASD/mouselook. Skipping it here (rather than trusting
+      // `enabled`) is what actually makes the two modes exclusive at the
+      // render level, not just at the input level.
+      if (cameraModeRef.current === "walk") {
+        if (walkControls.isLocked) {
+          const step = computeWalkStep(walkKeys, WALK_SPEED_CM_PER_SEC, deltaSec);
+          if (step.forward !== 0) walkControls.moveForward(step.forward);
+          if (step.right !== 0) walkControls.moveRight(step.right);
+        }
+      } else {
+        controls.update();
+      }
       // v2 spike (W-A): the selection outline's bounding box has to track
       // whatever the drag/rotate handlers above just mutated the group to —
       // recomputed every frame (selectionHelperRef is null when nothing is
@@ -891,7 +1092,18 @@ export const Viewport = forwardRef<
       renderer.domElement.removeEventListener("pointermove", onPointerMove);
       renderer.domElement.removeEventListener("pointerup", onPointerUp);
       renderer.domElement.removeEventListener("pointercancel", onPointerCancel);
+      renderer.domElement.removeEventListener("keyup", onKeyUp);
       renderer.domElement.removeEventListener("keydown", onKeyDown);
+      renderer.domElement.removeEventListener("click", onCanvasClickForWalkLock);
+      // improvements-v2.1 §5: walkControls.dispose() removes its own
+      // mousemove/pointerlockchange/pointerlockerror document-level listeners
+      // (see PointerLockControls.disconnect()) — without this they'd outlive
+      // this structural build and stack up across rebuilds. unlock() first so
+      // a rebuild mid-walk hands the pointer back rather than leaving the OS
+      // cursor captured to a canvas element that's about to be removed.
+      walkControls.removeEventListener("unlock", onWalkControlsUnlock);
+      walkControls.unlock();
+      walkControls.dispose();
       controls.dispose();
       renderer.dispose();
       container.removeChild(renderer.domElement);
@@ -899,6 +1111,15 @@ export const Viewport = forwardRef<
       rendererRef.current = null;
       cameraRef.current = null;
       controlsRef.current = null;
+      walkControlsRef.current = null;
+      applyModeRef.current = null;
+      // A structural rebuild tears down and recreates both controls objects
+      // above, so any "walk" mode from before this rebuild refers to nothing
+      // live anymore — reset to the default before the next build's fresh
+      // OrbitControls takes over, same "drop stale state on rebuild" reason
+      // selectItem(null) below exists for selection.
+      cameraModeRef.current = "orbit";
+      setCameraModeState("orbit");
       // A structural rebuild invalidates any selection helper's target group
       // (new BuiltScene, new groups) — the selection-outline effect further
       // down owns disposing the helper itself (keyed off buildVersion), but
@@ -915,20 +1136,57 @@ export const Viewport = forwardRef<
   useImperativeHandle(
     handleRef,
     (): ViewportHandle => ({
+      // improvements-v2.1 §5 (camera-viewpoint compatibility — the PRD
+      // explicitly flags this): OrbitControls.target IS the lookAt point by
+      // construction, but PointerLockControls has no equivalent concept — it
+      // only ever derives look direction from the camera's own quaternion
+      // (see its getDirection()/moveForward()). So in walk mode there's no
+      // "target" to read; one has to be synthesized by walking a fixed
+      // distance out from the eye along that quaternion-derived forward
+      // direction (deriveSyntheticLookAt, src/scene/walkCamera.ts). This
+      // keeps getCurrentView()'s contract — "eye/lookAt/fov, whatever mode's
+      // active" — identical for both callers (ViewportChrome's save-view
+      // button doesn't need to know or care which control scheme produced
+      // the reading).
       getCurrentView() {
         const camera = cameraRef.current;
         const controls = controlsRef.current;
         if (!camera || !controls) return null;
+        const eye: [number, number, number] = [camera.position.x, camera.position.y, camera.position.z];
+        if (cameraModeRef.current === "walk" && walkControlsRef.current) {
+          const forward = walkControlsRef.current.getDirection(new THREE.Vector3());
+          return {
+            eye,
+            lookAt: deriveSyntheticLookAt(eye, [forward.x, forward.y, forward.z], SYNTHETIC_LOOKAT_DISTANCE_CM),
+            fovDeg: camera.fov,
+          };
+        }
         return {
-          eye: [camera.position.x, camera.position.y, camera.position.z],
+          eye,
           lookAt: [controls.target.x, controls.target.y, controls.target.z],
           fovDeg: camera.fov,
         };
       },
+      // improvements-v2.1 §5 (camera-viewpoint compatibility, other half):
+      // every saved CameraPosition was captured as an orbit-style eye+target
+      // framing (either from orbit mode directly, or synthesized above from
+      // walk mode) — there's no meaningfully different "walk-mode preset" to
+      // recall, and applying a canned eye/lookAt/fov to a still-locked
+      // PointerLockControls wouldn't even work (it never reads camera
+      // .position/.quaternion from outside itself the way OrbitControls
+      // .update() reads .target). Simplest correct behavior: recalling a
+      // saved viewpoint always switches back to orbit mode first (unlocking
+      // the pointer if walk mode had it locked), then applies the preset
+      // exactly as before — so "Save view" / "Recall view" keep working
+      // unchanged regardless of which mode the user happened to be in when
+      // they clicked flyTo, and the recalled view is always a "camera on
+      // rails around a target" shot, matching what saved viewpoints have
+      // always meant in this app.
       flyTo(preset) {
         const camera = cameraRef.current;
         const controls = controlsRef.current;
         if (!camera || !controls) return;
+        applyModeRef.current?.("orbit");
         applyCameraPreset(camera, controls, preset);
       },
     }),
@@ -1168,5 +1426,37 @@ export const Viewport = forwardRef<
     }
   }, [selectedItemId, buildVersion]);
 
-  return <div ref={containerRef} className="viewport" />;
+  // improvements-v2.1 §5: mode-toggle pill, self-contained to this component
+  // (rather than threaded through ViewportChrome/App.tsx) since the camera
+  // mode it controls only exists as live state inside this component's own
+  // Three.js build — reusing ViewportChrome's `.viewport-chrome-pill` visual
+  // language (see Viewport.css) without adopting its file, so this stays a
+  // single localized diff and doesn't collide with LayoutChrome (top-center)
+  // or ViewportChrome (bottom-center) for screen real estate. Rendered as a
+  // sibling of the canvas div (both direct children of App.tsx's
+  // position:relative `.app-viewport`), same pattern those two chromes use.
+  return (
+    <>
+      <div ref={containerRef} className="viewport" />
+      <div className="viewport-mode-toggle">
+        <button
+          type="button"
+          className="viewport-mode-toggle-pill"
+          onClick={() => applyModeRef.current?.(cameraMode === "orbit" ? "walk" : "orbit")}
+          aria-label={cameraMode === "orbit" ? "Switch to walk-around camera" : "Switch to orbit camera"}
+          title={cameraMode === "orbit" ? "Switch to walk-around camera" : "Switch to orbit camera"}
+        >
+          {cameraMode === "orbit" ? (
+            <Footprints size={14} aria-hidden="true" />
+          ) : (
+            <OrbitIcon size={14} aria-hidden="true" />
+          )}
+          {cameraMode === "orbit" ? "Walk" : "Orbit"}
+        </button>
+        {cameraMode === "walk" && (
+          <p className="viewport-mode-hint">Click to look around · WASD to move · Esc to exit</p>
+        )}
+      </div>
+    </>
+  );
 });
