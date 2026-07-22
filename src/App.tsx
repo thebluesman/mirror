@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Undo2 } from "lucide-react";
 import seedRaw from "../seed/living-room.json";
 import { Viewport, type ViewportHandle } from "./components/Viewport";
 import { ViewportChrome } from "./components/ViewportChrome";
@@ -41,6 +42,13 @@ function App() {
   // slot's meaning ("the action you just took") doesn't carry across a session
   // boundary. A fresh load starts with an empty slot / disabled button.
   const [undoSlot, setUndoSlot] = useState<UndoSlot>(null);
+
+  // improvements-v2.1 §4: "lock all" HUD toggle. View-only interaction
+  // safety ("can't be accidentally dragged while orbiting"), not a scene
+  // fact — deliberately ephemeral component state, same treatment as
+  // undoSlot above, NOT folded into `sceneFile`/autosave/undo. A reload
+  // starts unlocked, same as undo starts empty.
+  const [globalLock, setGlobalLock] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -166,6 +174,15 @@ function App() {
     commit(next);
   }
 
+  // Whole-project import (SettingsPanel, improvements-v2.1 §6): `next`
+  // arrives already unzipped/validated/rehydrated-into-OPFS by
+  // importProjectZip — same one-liner tail as handleImported above, so a
+  // project import is persisted immediately and is one-step undoable like
+  // any other discrete commit.
+  function handleImportProject(next: SceneFile) {
+    commit(next);
+  }
+
   const viewportRef = useRef<ViewportHandle>(null);
 
   // ViewportChrome only renders once `sceneFile` is loaded, so it's never null
@@ -236,6 +253,19 @@ function App() {
     commit(commitToActiveLayout(sceneFile, (commands) => setPlaceCommand(commands, itemId, position, rotationDeg)));
   }
 
+  // improvements-v2.1 §4: per-item placement lock — a scene fact (persists,
+  // round-trips through save/export), so it goes through the same discrete
+  // commit() tail as rename/delete rather than the ephemeral globalLock
+  // state above. Same shape as handleRenameLayout/handleDeleteLayout: map
+  // over the relevant array, replace the one matching item.
+  function handleToggleLock(itemId: string) {
+    if (!sceneFile) return;
+    commit({
+      ...sceneFile,
+      items: sceneFile.items.map((i) => (i.id === itemId ? { ...i, locked: !i.locked } : i)),
+    });
+  }
+
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -253,7 +283,7 @@ function App() {
           title="Undo last action (Cmd/Ctrl+Z)"
           aria-label="Undo last action"
         >
-          ↶ Undo
+          <Undo2 size={14} aria-hidden="true" /> Undo
         </button>
       </header>
       <div className="app-body">
@@ -265,6 +295,8 @@ function App() {
                 sceneFile={sceneFile}
                 shellCalibration={sceneFile.room.shell}
                 onCommitPlacement={commitPlacement}
+                onToggleLock={handleToggleLock}
+                globalLock={globalLock}
               />
               <LayoutChrome
                 layouts={sceneFile.layouts}
@@ -280,6 +312,8 @@ function App() {
                 onSave={handleSaveView}
                 onDelete={handleDeleteView}
                 onRename={handleRenameView}
+                globalLock={globalLock}
+                onToggleGlobalLock={() => setGlobalLock((v) => !v)}
               />
             </>
           ) : (
@@ -304,7 +338,9 @@ function App() {
               <ShellPanel shell={sceneFile.room.shell} onUpdateSurface={updateShellSurface} />
             )}
             {sceneFile && tab === "Import" && <ImportPanel sceneFile={sceneFile} onImported={handleImported} />}
-            {tab === "Settings" && <SettingsPanel sceneFile={sceneFile} />}
+            {tab === "Settings" && (
+              <SettingsPanel sceneFile={sceneFile} onImportProject={handleImportProject} />
+            )}
           </div>
         </aside>
       </div>

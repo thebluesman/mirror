@@ -1,7 +1,9 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+import { Footprints, Orbit as OrbitIcon } from "lucide-react";
 import { addFurnitureBoxMeshes, buildScene, furnitureOverallDims, type BuiltScene } from "../scene/buildScene";
 import { applyShellSurface, updateSurfaceCalibrationInPlace, type ShellSurface } from "../scene/shellMaterials";
 import { loadShellTexture } from "../scene/loadShellTexture";
@@ -9,8 +11,16 @@ import { fitModelToDims, loadFurnitureModel } from "../scene/loadFurnitureModel"
 import { computeFlatTextureFit, FULL_CONTENT_BOX, type ContentBox } from "../scene/flatItemTexture";
 import { checkCollisions, itemFootprintAABB, wallFootprintAABBs, type AABB } from "../scene/collision";
 import { snapPosition } from "../scene/snapping";
-import { rotateHandleWorldXZ, snapYawDeg, yawDegFromPointer } from "../scene/rotateHandle";
-import { ELEVATION_STEP_CM, stepElevationCm } from "../scene/elevation";
+import { relativeYawDeg, rotateHandleWorldXZ, snapYawDeg, yawDegFromPointer } from "../scene/rotateHandle";
+import { clampElevationCm, ELEVATION_STEP_CM, stepElevationCm } from "../scene/elevation";
+import {
+  computeWalkStep,
+  deriveSyntheticLookAt,
+  SYNTHETIC_LOOKAT_DISTANCE_CM,
+  WALK_EYE_HEIGHT_CM,
+  WALK_SPEED_CM_PER_SEC,
+  type WalkInput,
+} from "../scene/walkCamera";
 import {
   DEFAULT_SURFACE_CALIBRATION,
   type CameraPosition,
@@ -41,6 +51,14 @@ export interface ViewportHandle {
 
 const HUMAN_FOV = 38; // ~35mm-equivalent, per spike 2's C2 feedback
 const SHELL_SURFACES: ShellSurface[] = ["wall", "floor", "ceiling"];
+
+// improvements-v2.1 §5: walk-around camera mode, additive to orbit (default
+// stays "orbit" — nothing about existing behavior changes unless the user
+// opts in via the HUD toggle). "orbit"/"walk" name the two mutually-exclusive
+// control schemes below, not just a label — exactly one of OrbitControls/
+// PointerLockControls is ever the thing actually moving the camera at a time
+// (see applyCameraMode).
+type CameraMode = "orbit" | "walk";
 
 /** Applies a saved/seed CameraPosition to a live camera+controls pair —
  *  shared by the structural effect's initial-mount framing and
@@ -141,64 +159,220 @@ const ROTATE_STEP_DEG = 15;
 const ELEVATION_KEY_UP = "PageUp";
 const ELEVATION_KEY_DOWN = "PageDown";
 
-// C1 follow-up (see spike-v2/OUTCOME.md's "C1 follow-up — rotate UI handle"
-// section): Shyam's hands-on C1 pass cleared the plan's "handle *or*
-// keyboard step" bar via the keyboard step alone, but asked for a visible
-// drag handle too, additive to (not a replacement for) the above. How far
-// out along the item's local +Z the handle sits, and how big its hit-target
-// sphere is — both in cm, same unit as the rest of the scene graph.
-const ROTATE_HANDLE_MARGIN_CM = 25;
-const ROTATE_HANDLE_RADIUS_CM = 6;
+// §3 (improvements-v2.1) manipulation-handle redesign — supersedes the C1
+// follow-up's bare rotate sphere. Research pass (see this file's git commit
+// body): browser room planners (IKEA Home Planner, Planner5D, RoomSketcher,
+// Modsy) converge on the same two-part idiom — floor-plane drag-to-move for
+// horizontal translation, plus a *ring around the footprint* for rotation —
+// while three.js's TransformControls / Blender's per-axis gizmos are a poorer
+// fit here (mode-switching, an unwanted scale gizmo, and their own raycast/
+// state that would fight this component's mutate-during-gesture seam). We keep
+// the existing body-drag as the horizontal gesture (it already snaps and
+// flags collisions — a redundant translate handle would earn nothing), swap
+// the sphere for a footprint rotation ring + grip knob, and add the one
+// genuinely-missing affordance: a vertical drag handle for elevation, which
+// until now had only PageUp/PageDown and no drag gesture at all.
+
+// --- Rotation ring + knob (replaces the sphere) ---
+// Gap between the footprint's outer radius and the ring, the ring's line
+// thickness, and the grip-knob radius — all cm, same unit as the scene graph.
+const ROTATE_RING_MARGIN_CM = 12;
+const ROTATE_RING_TUBE_CM = 2.5;
+const ROTATE_KNOB_RADIUS_CM = 6;
+// Lift the ring a hair above the base plane so its flat torus doesn't z-fight
+// the floor/rug it sits on.
+const ROTATE_HANDLE_LIFT_CM = 1;
+
+// --- Elevation (vertical) drag handle (net-new affordance) ---
+// A vertical double-arrow floating above the item's top face. Gap above the
+// top, stem (shaft) length, arrowhead length, and the two radii — cm.
+const ELEVATION_HANDLE_GAP_CM = 18;
+const ELEVATION_HANDLE_STEM_CM = 24;
+const ELEVATION_HANDLE_CONE_CM = 9;
+const ELEVATION_HANDLE_SHAFT_R_CM = 1.6;
+const ELEVATION_HANDLE_CONE_R_CM = 4;
 
 // Camera-relative grab-target sizing (PRD-v2 §7.1 polish): a fixed world-space
-// radius reads as a tiny dot when the camera is zoomed out and a boulder when
-// zoomed in. The handle mesh (and therefore its raycast hit target, which
-// scales with it) is instead sized by camera distance / this reference so it
-// holds a roughly constant on-screen size, clamped so it never vanishes or
-// dominates. ROTATE_HANDLE_RADIUS_CM is the authored size at the reference
-// distance.
-const ROTATE_HANDLE_REF_DISTANCE_CM = 500;
-const ROTATE_HANDLE_MIN_SCALE = 0.5;
-const ROTATE_HANDLE_MAX_SCALE = 4;
+// size reads as a tiny dot when the camera is zoomed out and a boulder when
+// zoomed in. Meshes sized this way hold a roughly constant on-screen size,
+// clamped so they never vanish or dominate. Shared by the rotate *knob* and
+// the whole elevation gizmo — the rotation *ring* is deliberately exempt (see
+// positionRotateHandle: a footprint ring's radius has to track the footprint,
+// not the camera, or it stops being a footprint ring).
+const HANDLE_REF_DISTANCE_CM = 500;
+const HANDLE_MIN_SCALE = 0.5;
+const HANDLE_MAX_SCALE = 4;
 
 const SELECTION_COLOR = 0x4fd1ff;
-// The rotate handle brightens to this while hovered, so it reads as a grabbable
+// A handle brightens to this while hovered, so it reads as a grabbable
 // affordance (paired with a `cursor: grab` on the canvas — see updateHover).
+// Name kept from the C1 sphere era; it's now the shared handle-hover color.
 const ROTATE_HANDLE_HOVER_COLOR = 0xd6f5ff;
 // D2: the selection outline recolors to this when the selected item's
 // footprint currently overlaps another item or a wall — the plan's
 // "decision support, not physics" bar means we flag, we don't block.
 const COLLISION_COLOR = 0xff5c5c;
+// improvements-v2.1 §4: the selection outline (and rotate handle) recolor to
+// this when the selected item is locked — its own `locked` flag or the
+// global "lock all" toggle, either counts (see isPlacementLocked) — and NOT
+// currently flagged as colliding. Amber, distinct from both the cyan
+// selection default and the red collision flag, so "locked" reads as its own
+// state rather than a shade of either. Collision still wins when both are
+// true (see updateCollisionHighlight's color composition): a physical
+// overlap is worth surfacing even on a locked item, since locking only
+// guards against accidental drags, not against another item having already
+// been placed on top of it before the lock was set.
+const LOCKED_COLOR = 0xffc94f;
 
-/** World-space position for the rotate handle, given the item's live group
- *  and its definition (for overall dims). Not parented under the group (see
- *  the selection-outline effect for why) — called from three call sites that
- *  all want the handle to track a group that may have just been mutated
- *  imperatively: the handle's own creation, the placement-reconciliation
- *  effect (a committed layout change can move/rotate the selected item from
- *  outside this component's own drag code), and every animate() frame (so a
- *  live drag — translate or rotate — keeps the handle glued to the item
- *  without waiting for a React re-render). */
+/** Clamped camera-distance scale factor for a handle at `worldPos` — the
+ *  shared "hold a constant on-screen size" math for the rotate knob and the
+ *  elevation gizmo. */
+function cameraRelativeScale(camera: THREE.PerspectiveCamera, worldPos: THREE.Vector3): number {
+  const dist = camera.position.distanceTo(worldPos);
+  return THREE.MathUtils.clamp(dist / HANDLE_REF_DISTANCE_CM, HANDLE_MIN_SCALE, HANDLE_MAX_SCALE);
+}
+
+/** Recolors every mesh under a handle (ring+knob, or the elevation double-
+ *  arrow's stem+cones) — a handle is a THREE.Group of a few basic meshes, so
+ *  hover/idle color swaps traverse it rather than poking one material. */
+function setHandleColor(handle: THREE.Object3D, color: number) {
+  handle.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    if (mesh.isMesh) (mesh.material as THREE.MeshBasicMaterial).color.set(color);
+  });
+}
+
+/** Disposes a handle's geometries/materials and detaches it — handles are
+ *  multi-mesh groups now, so this traverses rather than disposing a single
+ *  geometry/material pair the way the old sphere teardown did. */
+function disposeHandle(handle: THREE.Object3D) {
+  handle.parent?.remove(handle);
+  handle.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    if (mesh.isMesh) {
+      mesh.geometry.dispose();
+      (mesh.material as THREE.Material).dispose();
+    }
+  });
+}
+
+/** Builds the rotation handle: a flat ring encircling the item's footprint
+ *  plus a grip knob riding the ring at the item's front (+Z). The whole group
+ *  is the rotate-drag's raycast target (grab the ring *or* the knob). The ring
+ *  radius — world-locked to the footprint — is stashed on the group so
+ *  positionRotateHandle can place the knob on it every frame. Both meshes use
+ *  the standard depthTest-off / late-renderOrder overlay treatment so the
+ *  affordance is never occluded by the furniture it points at. */
+function createRotateHandle(item: FurnitureItem): THREE.Group {
+  const dims = furnitureOverallDims(item);
+  // Half the footprint's diagonal (not max(w,d)/2 — a 45deg-rotated rectangle
+  // would poke out of that) plus a margin, so the ring encloses the item at
+  // any yaw.
+  const ringRadius = Math.hypot(dims.w, dims.d) / 2 + ROTATE_RING_MARGIN_CM;
+  const group = new THREE.Group();
+  group.userData.ringRadius = ringRadius;
+
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(ringRadius, ROTATE_RING_TUBE_CM, 12, 64),
+    new THREE.MeshBasicMaterial({ color: SELECTION_COLOR, depthTest: false }),
+  );
+  ring.rotation.x = Math.PI / 2; // lay the torus flat on the floor plane
+  ring.position.y = ROTATE_HANDLE_LIFT_CM;
+  ring.renderOrder = 999;
+  group.add(ring);
+
+  const knob = new THREE.Mesh(
+    new THREE.SphereGeometry(ROTATE_KNOB_RADIUS_CM, 16, 16),
+    new THREE.MeshBasicMaterial({ color: SELECTION_COLOR, depthTest: false }),
+  );
+  knob.renderOrder = 999;
+  group.add(knob);
+  group.userData.knob = knob;
+  return group;
+}
+
+/** Builds the elevation handle: a vertical double-arrow (stem capped by an
+ *  up-cone and a down-cone) that floats above the item's top face. The
+ *  double-arrow reads unambiguously as "drag me up/down" — distinct from the
+ *  floor-hugging rotation ring — and is the raycast target that starts a
+ *  vertical drag. Same overlay treatment (depthTest off, late renderOrder). */
+function createElevationHandle(): THREE.Group {
+  const group = new THREE.Group();
+  const mat = new THREE.MeshBasicMaterial({ color: SELECTION_COLOR, depthTest: false });
+  const capOffset = ELEVATION_HANDLE_STEM_CM / 2 + ELEVATION_HANDLE_CONE_CM / 2;
+
+  const stem = new THREE.Mesh(
+    new THREE.CylinderGeometry(ELEVATION_HANDLE_SHAFT_R_CM, ELEVATION_HANDLE_SHAFT_R_CM, ELEVATION_HANDLE_STEM_CM, 12),
+    mat,
+  );
+  stem.renderOrder = 999;
+  group.add(stem);
+
+  const up = new THREE.Mesh(new THREE.ConeGeometry(ELEVATION_HANDLE_CONE_R_CM, ELEVATION_HANDLE_CONE_CM, 16), mat);
+  up.position.y = capOffset;
+  up.renderOrder = 999;
+  group.add(up);
+
+  const down = new THREE.Mesh(new THREE.ConeGeometry(ELEVATION_HANDLE_CONE_R_CM, ELEVATION_HANDLE_CONE_CM, 16), mat);
+  down.rotation.x = Math.PI; // flip to point down
+  down.position.y = -capOffset;
+  down.renderOrder = 999;
+  group.add(down);
+  return group;
+}
+
+/** World-space placement for the rotation handle — the ring tracks the item's
+ *  center; the knob rides the ring at the item's front. Not parented under the
+ *  item's group (see the selection-outline effect for why): called from the
+ *  handle's own creation, the placement-reconciliation effect (a committed
+ *  layout change can move/rotate the selected item from outside this
+ *  component's drag code), and every animate() frame (so a live translate/
+ *  rotate keeps the handle glued to the item without a React re-render). */
 function positionRotateHandle(
-  handle: THREE.Mesh,
+  handle: THREE.Group,
+  group: THREE.Group,
+  _item: FurnitureItem,
+  camera: THREE.PerspectiveCamera,
+) {
+  handle.position.set(group.position.x, group.position.y, group.position.z);
+  const ringRadius = handle.userData.ringRadius as number;
+  const knob = handle.userData.knob as THREE.Mesh;
+  const yawDeg = ((THREE.MathUtils.radToDeg(group.rotation.y) % 360) + 360) % 360;
+  // The ring is rotationally symmetric, so the parent group stays unrotated
+  // and the knob is placed at the front by yaw instead. rotateHandleWorldXZ
+  // from center (0,0) gives the knob's local offset on the ring.
+  const [kx, kz] = rotateHandleWorldXZ(0, 0, yawDeg, ringRadius);
+  knob.position.set(kx, ROTATE_HANDLE_LIFT_CM, kz);
+  // Camera-relative sizing applies to the knob only — the ring's radius is
+  // world-locked to the footprint (scaling it would break that), while the
+  // knob keeps the old sphere's constant-on-screen grab-target sizing. The
+  // parent group has no rotation/scale, so knob world pos = handle + knob.
+  const knobWorld = handle.position.clone().add(knob.position);
+  knob.scale.setScalar(cameraRelativeScale(camera, knobWorld));
+}
+
+/** World-space placement for the elevation handle — floats a camera-scaled gap
+ *  above the item's top face, centered over its footprint. Same three call
+ *  sites as positionRotateHandle. */
+function positionElevationHandle(
+  handle: THREE.Group,
   group: THREE.Group,
   item: FurnitureItem,
   camera: THREE.PerspectiveCamera,
 ) {
-  const yawDeg = ((THREE.MathUtils.radToDeg(group.rotation.y) % 360) + 360) % 360;
   const dims = furnitureOverallDims(item);
-  const offset = dims.d / 2 + ROTATE_HANDLE_MARGIN_CM;
-  const [hx, hz] = rotateHandleWorldXZ(group.position.x, group.position.z, yawDeg, offset);
-  handle.position.set(hx, group.position.y + dims.h / 2, hz);
-  // Camera-relative grab-target sizing — scale the handle so it holds a
-  // roughly constant on-screen size regardless of orbit distance/zoom.
-  const dist = camera.position.distanceTo(handle.position);
-  const scale = THREE.MathUtils.clamp(
-    dist / ROTATE_HANDLE_REF_DISTANCE_CM,
-    ROTATE_HANDLE_MIN_SCALE,
-    ROTATE_HANDLE_MAX_SCALE,
-  );
+  const topY = group.position.y + dims.h; // item's top face = base + height
+  const scale = cameraRelativeScale(camera, new THREE.Vector3(group.position.x, topY, group.position.z));
   handle.scale.setScalar(scale);
+  // Sit the double-arrow's lower tip a scaled gap above the top face (half the
+  // arrow's own extent clears the surface). Scaling the gap too keeps the
+  // on-screen standoff constant, matching the gizmo's own constant size.
+  const halfArrow = (ELEVATION_HANDLE_STEM_CM / 2 + ELEVATION_HANDLE_CONE_CM) * scale;
+  handle.position.set(
+    group.position.x,
+    topY + ELEVATION_HANDLE_GAP_CM * scale + halfArrow,
+    group.position.z,
+  );
 }
 
 export const Viewport = forwardRef<
@@ -213,18 +387,55 @@ export const Viewport = forwardRef<
      *  rotation. Never fired per-frame mid-drag; see the pointer-handler
      *  effect below for the mutate-during-gesture seam this reconciles. */
     onCommitPlacement?: (itemId: string, position: [number, number, number], rotationDeg: number) => void;
+    /** improvements-v2.1 §4: fired once per "L" keypress on the selected
+     *  item — a discrete metadata edit (App.tsx's handleToggleLock), same
+     *  "fire on the discrete moment, not per-frame" shape as
+     *  onCommitPlacement, just without a live gesture behind it. */
+    onToggleLock?: (itemId: string) => void;
+    /** improvements-v2.1 §4: "lock all" safety toggle — ephemeral view state
+     *  owned by App.tsx (like undoSlot), NOT part of sceneFile. When true, no
+     *  item can be dragged/rotated/elevated regardless of its own `locked`
+     *  flag. Defaults to false so existing callers/tests that don't pass it
+     *  see today's unlocked behavior. */
+    globalLock?: boolean;
   }
->(function Viewport({ sceneFile, shellCalibration, onCommitPlacement }, handleRef) {
+>(function Viewport({ sceneFile, shellCalibration, onCommitPlacement, onToggleLock, globalLock }, handleRef) {
   const containerRef = useRef<HTMLDivElement>(null);
   const builtRef = useRef<BuiltScene | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
+  // improvements-v2.1 §5: the walk-mode counterpart to controlsRef, plus the
+  // mode flag and a way to flip it from outside the structural effect (the
+  // HUD toggle button and ViewportHandle.flyTo both live outside it — see
+  // applyModeRef below). Mirrors the selectedItemId state/ref split already
+  // used for selection: `cameraMode` drives the toggle button's label/icon
+  // (needs a re-render), `cameraModeRef` is what every imperative pointer/
+  // keyboard/animate() closure actually reads (never wants to wait for a
+  // render).
+  const walkControlsRef = useRef<PointerLockControls | null>(null);
+  const [cameraMode, setCameraModeState] = useState<CameraMode>("orbit");
+  const cameraModeRef = useRef<CameraMode>("orbit");
+  cameraModeRef.current = cameraMode;
+  // Set inside the structural effect to the real mode-switch function (which
+  // needs the effect's local camera/controls/walkControls closures) — the
+  // toggle button and ViewportHandle.flyTo call through this ref rather than
+  // duplicating that logic or forcing it to live outside the effect.
+  const applyModeRef = useRef<((mode: CameraMode) => void) | null>(null);
   // Latest onCommitPlacement in a ref so the pointer/keyboard effect (which
   // only wants to run once per structural build) doesn't have to re-bind its
   // DOM listeners every time App.tsx passes a new closure.
   const onCommitPlacementRef = useRef(onCommitPlacement);
   onCommitPlacementRef.current = onCommitPlacement;
+  // improvements-v2.1 §4: same "ref so the once-bound pointer/keyboard
+  // effect always sees the latest closure/value" treatment as
+  // onCommitPlacementRef above — onToggleLock is a new callback prop,
+  // globalLock is a new plain value prop, but both are read from inside
+  // onPointerDown/onKeyDown, which only rebind on a structural rebuild.
+  const onToggleLockRef = useRef(onToggleLock);
+  onToggleLockRef.current = onToggleLock;
+  const globalLockRef = useRef(globalLock ?? false);
+  globalLockRef.current = globalLock ?? false;
 
   // W-A selection: which placed item (by itemId) is currently selected, plus
   // a BoxHelper wireframe outline (cheapest indicator per the plan — a plain
@@ -236,12 +447,37 @@ export const Viewport = forwardRef<
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const selectedItemIdRef = useRef<string | null>(null);
   selectedItemIdRef.current = selectedItemId;
+  // improvements-v2.1 §4: a structural rebuild (see structuralSceneFile's
+  // comment) unconditionally drops the current selection in its cleanup
+  // below — fine when the rebuild is triggered by something unrelated to
+  // the selected item (nothing was usually selected during an import), but
+  // toggling an item's own `locked` flag *is* an items-array mutation that
+  // targets the currently-selected item on purpose. Without this, pressing
+  // "L" would lock the item and simultaneously deselect it, defeating the
+  // "stays selectable so you can see it's locked / toggle it back off"
+  // requirement. Captured in cleanup (before it nulls the live selection)
+  // and consumed once by the next setup run, which re-selects the same item
+  // if it still exists post-rebuild — a no-op for any rebuild that isn't
+  // "the same item, mutated," e.g. one where the item was actually removed.
+  const pendingReselectRef = useRef<string | null>(null);
+  // improvements-v2.1 §4: paired with pendingReselectRef above — whether the
+  // canvas actually had keyboard focus right before a structural rebuild
+  // tore it down, so the next setup run knows whether to restore it (see
+  // that effect's focus-restore comment for why this matters now that "L"
+  // can trigger a rebuild from a keyboard shortcut).
+  const pendingRefocusRef = useRef(false);
   const selectionHelperRef = useRef<THREE.BoxHelper | null>(null);
-  // C1 follow-up: the rotate-drag handle mesh — a small sphere, lifecycle
-  // paired with selectionHelperRef (created/destroyed alongside it in the
-  // selection-outline effect below), but tracked separately since it needs
-  // its own raycast target and its own per-frame reposition math.
-  const rotateHandleRef = useRef<THREE.Mesh | null>(null);
+  // §3: the rotate-drag handle — now a THREE.Group (footprint ring + grip
+  // knob, was a bare sphere), lifecycle paired with selectionHelperRef
+  // (created/destroyed alongside it in the selection-outline effect below),
+  // but tracked separately since it needs its own raycast target and its own
+  // per-frame reposition math.
+  const rotateHandleRef = useRef<THREE.Group | null>(null);
+  // §3: the elevation-drag handle — a vertical double-arrow above the item,
+  // the net-new affordance for vertical translation (elevation previously had
+  // only the PageUp/PageDown keyboard step). Same lifecycle/reposition shape
+  // as the rotate handle, its own raycast target and vertical-drag gesture.
+  const elevationHandleRef = useRef<THREE.Group | null>(null);
 
   // D2: wall AABBs and the item-id -> definition lookup only change when a
   // structural rebuild happens (room/items are structuralSceneFile deps), so
@@ -249,6 +485,41 @@ export const Viewport = forwardRef<
   // collision check rather than recomputed per pointer event.
   const wallAABBsRef = useRef<AABB[]>([]);
   const itemsByIdRef = useRef<Map<string, FurnitureItem>>(new Map());
+
+  // improvements-v2.1 §4: whether a gesture/keystep targeting `itemId`
+  // should be blocked — either the item's own persisted `locked` flag or the
+  // ephemeral global "lock all" toggle. Centralized here (rather than
+  // inlined at each of onPointerDown's two gesture-start sites and
+  // onKeyDown's rotate/elevation branch) so the two ways an item can end up
+  // locked can't drift out of sync with each other.
+  function isPlacementLocked(itemId: string): boolean {
+    if (globalLockRef.current) return true;
+    return itemsByIdRef.current.get(itemId)?.locked === true;
+  }
+
+  // Code-review fix: whether the selected item's footprint is *currently*
+  // flagged as colliding — set by updateCollisionHighlight (the only place
+  // that actually runs the AABB check) and read by every handle-coloring
+  // site below so the rotate ring/knob and elevation handle agree with the
+  // selection outline instead of only ever branching on lock state. Handles
+  // only ever exist for the selected item, so one flag (not a per-item map)
+  // is enough — updateCollisionHighlight is in practice only ever called
+  // with the currently-selected item's id (a drag/rotate/elevate gesture can
+  // only target what's selected).
+  const selectedCollidingRef = useRef(false);
+
+  // improvements-v2.1 §4, code-review fix: the shared color composition —
+  // collision (a physical fact) outranks lock (a safety-toggle fact), which
+  // outranks plain selection. Used by both the selection outline
+  // (updateCollisionHighlight) and every handle-coloring site (hover,
+  // initial creation, global-lock resync) so they can't drift apart the way
+  // the handles did before this fix (locked-and-colliding read as amber
+  // instead of red on the handles, contradicting the outline).
+  function gestureAffordanceColor(itemId: string, colliding: boolean): number {
+    if (colliding) return COLLISION_COLOR;
+    if (isPlacementLocked(itemId)) return LOCKED_COLOR;
+    return SELECTION_COLOR;
+  }
 
   // D2: recolors the selection outline to flag footprint overlap — called
   // after any live mutation (drag move, rotate step, a committed layout
@@ -278,7 +549,8 @@ export const Viewport = forwardRef<
     });
     const { itemIds, wall } = checkCollisions(aabb, others, wallAABBsRef.current);
     const colliding = itemIds.length > 0 || wall;
-    (helper.material as THREE.LineBasicMaterial).color.set(colliding ? COLLISION_COLOR : SELECTION_COLOR);
+    selectedCollidingRef.current = colliding;
+    (helper.material as THREE.LineBasicMaterial).color.set(gestureAffordanceColor(itemId, colliding));
   }
 
   // Per-surface tracking for the calibration effect below: the last
@@ -369,6 +641,16 @@ export const Viewport = forwardRef<
     // lifetime never reads stale walls/items from a previous room.
     wallAABBsRef.current = wallFootprintAABBs(structuralSceneFile.room);
     itemsByIdRef.current = new Map(structuralSceneFile.items.map((item) => [item.id, item]));
+
+    // improvements-v2.1 §4: restore the selection the previous run's cleanup
+    // stashed (see pendingReselectRef's comment) if that item is still
+    // present post-rebuild — e.g. a lock toggle mutated it in place rather
+    // than removing it. `selectItem` is a hoisted function declaration
+    // (defined further down in this same effect body), safe to call here.
+    if (pendingReselectRef.current && itemsByIdRef.current.has(pendingReselectRef.current)) {
+      selectItem(pendingReselectRef.current);
+    }
+    pendingReselectRef.current = null;
 
     // Phase 4: items with a completed Meshy import get their real GLB loaded
     // and fit into the placeholder group buildScene already positioned —
@@ -470,13 +752,102 @@ export const Viewport = forwardRef<
     }
     cameraRef.current = camera;
     controlsRef.current = controls;
+
+    // improvements-v2.1 §5: walk-around camera mode. PointerLockControls is
+    // constructed alongside OrbitControls (both live for this structural
+    // build's whole lifetime) rather than lazily on first mode-switch — it's
+    // cheap (an EventDispatcher plus a few listeners, see the library source)
+    // and creating it once means switching modes back and forth never
+    // reattaches/detaches its mousemove/pointerlockchange listeners, only
+    // toggles which one is doing anything (see applyCameraMode below).
+    const walkControls = new PointerLockControls(camera, renderer.domElement);
+    walkControlsRef.current = walkControls;
+    // Held-WASD state for animate()'s per-frame integration — a plain mutable
+    // object (not React state) for the same reason `drag`/`rotateDrag` above
+    // are: read every frame, written every keydown/keyup, no render involved.
+    const walkKeys: WalkInput = { forward: false, back: false, left: false, right: false };
+    let lastFrameTime = performance.now();
+    // Code-review fix: the orbit camera's Y before entering walk mode,
+    // restored on the way back out. Without this, applyCameraMode's "walk"
+    // branch below permanently snaps the camera to WALK_EYE_HEIGHT_CM even
+    // after returning to orbit — PointerLockControls has no "restore" of its
+    // own, and nothing else remembered the pre-walk height.
+    let preWalkEyeY: number | null = null;
+
+    // Single source of truth for "which control scheme is live right now" —
+    // both the HUD toggle button (via applyModeRef, since the button lives
+    // outside this effect) and ViewportHandle.flyTo call through this, and it
+    // also runs from the walkControls "unlock" listener below when the
+    // browser exits pointer lock on its own (Escape, losing focus, etc.), so
+    // the mode flag can never drift out of sync with which controls object is
+    // actually driving the camera.
+    function applyCameraMode(mode: CameraMode) {
+      if (cameraModeRef.current === mode) return;
+      cameraModeRef.current = mode;
+      setCameraModeState(mode);
+      if (mode === "walk") {
+        controls.enabled = false;
+        // Keep the camera's current XZ position/facing (don't teleport
+        // across the room on mode-switch) but snap to the fixed walking eye
+        // height — PointerLockControls has no notion of "orbit target" to
+        // carry over, and WASD never touches Y once in walk mode (see
+        // walkCamera.ts's computeWalkStep), so this is the one place height
+        // gets set. Stash the pre-walk Y first so returning to orbit can put
+        // it back (code-review fix — see preWalkEyeY's declaration).
+        preWalkEyeY = camera.position.y;
+        camera.position.y = WALK_EYE_HEIGHT_CM;
+      } else {
+        // Reverse of the above: hand the pointer back (browser no-ops if
+        // it's already unlocked, e.g. when this runs because the browser
+        // itself just exited lock) and drop any held-WASD state so a mode
+        // switch mid-keypress can't leave a phantom "still walking"
+        // direction the next time walk mode is entered.
+        walkControls.unlock();
+        walkKeys.forward = walkKeys.back = walkKeys.left = walkKeys.right = false;
+        controls.enabled = true;
+        // Restore the pre-walk height before recentering the target below,
+        // so the target is computed around the restored eye position, not
+        // the walking height.
+        if (preWalkEyeY !== null) {
+          camera.position.y = preWalkEyeY;
+          preWalkEyeY = null;
+        }
+        // OrbitControls.target is wherever it was left before walk mode —
+        // possibly now behind the camera after mouselook turned it around.
+        // Recenter it in front of the camera's current facing so the next
+        // controls.update() doesn't snap/orbit around a stale point.
+        const forward = walkControls.getDirection(new THREE.Vector3());
+        controls.target.copy(camera.position).addScaledVector(forward, SYNTHETIC_LOOKAT_DISTANCE_CM);
+        controls.update();
+      }
+    }
+    applyModeRef.current = applyCameraMode;
+
+    // Browser-driven pointer-lock exit (Escape, alt-tab, etc.) fires this the
+    // same as our own walkControls.unlock() call above — the isLocked-vs-
+    // cameraModeRef guard inside applyCameraMode (early-return when already
+    // in the target mode) is what stops that self-triggered case from
+    // recursing, since applyCameraMode's own orbit branch already set
+    // cameraModeRef to "orbit" *before* calling unlock().
+    function onWalkControlsUnlock() {
+      if (cameraModeRef.current === "walk") applyCameraMode("orbit");
+    }
+    walkControls.addEventListener("unlock", onWalkControlsUnlock);
+
+    // Click-to-lock: standard Pointer Lock UX, only armed in walk mode so an
+    // orbit-mode click doesn't unexpectedly capture the pointer.
+    function onCanvasClickForWalkLock() {
+      if (cameraModeRef.current === "walk" && !walkControls.isLocked) walkControls.lock();
+    }
+    renderer.domElement.addEventListener("click", onCanvasClickForWalkLock);
+
     // Dev-only console diagnostic (never ships to a production build): lets
     // Shyam dump live scene-graph info (positions/materials/geometry) from
     // devtools without a rebuild, for one-off "why does this look wrong"
     // investigations. See scratch console snippets in troubleshooting notes.
     if (import.meta.env.DEV) {
       // @ts-expect-error dev-only debug global, intentionally untyped
-      window.__mirrorDebug = { camera, controls, scene: built.scene, THREE };
+      window.__mirrorDebug = { camera, controls, walkControls, scene: built.scene, THREE };
     }
 
     // v2 spike (W-A) — selection + floor-plane drag + keyboard rotate.
@@ -499,12 +870,21 @@ export const Viewport = forwardRef<
     const planeHit = new THREE.Vector3();
     const grabOffset = new THREE.Vector3();
     let drag: { itemId: string; group: THREE.Group } | null = null;
-    // C1 follow-up: a second, mutually-exclusive gesture — dragging the
-    // rotate handle sets group.rotation.y directly from the pointer's angle
-    // around the item's center, rather than moving group.position like
-    // `drag` above. Only one of `drag`/`rotateDrag` is ever set at a time
-    // (onPointerDown picks one based on what the ray hit first).
-    let rotateDrag: { itemId: string; group: THREE.Group } | null = null;
+    // §3: a second, mutually-exclusive gesture — dragging the rotate ring/knob
+    // turns group.rotation.y by the angle the pointer has swept around the
+    // item's center since grab, rather than moving group.position like `drag`
+    // above. `startYawDeg`/`grabAngleDeg` are the anchors captured on
+    // pointerdown that make the rotation *relative* (see relativeYawDeg's
+    // comment: the ring is grabbable anywhere, so an absolute angle-to-pointer
+    // mapping would jump the item on grab). Only one of the three gestures is
+    // ever set at a time (onPointerDown picks one based on what the ray hit).
+    let rotateDrag: { itemId: string; group: THREE.Group; startYawDeg: number; grabAngleDeg: number } | null = null;
+    // §3: the third gesture — dragging the elevation double-arrow moves
+    // group.position.y along a camera-facing vertical plane through the item.
+    // `grabOffsetY` is the gap between the item's Y and the plane-hit's Y at
+    // grab time, so the item tracks the pointer without snapping to it on the
+    // first move (the vertical analog of `grabOffset` for the horizontal drag).
+    let elevationDrag: { itemId: string; group: THREE.Group; grabOffsetY: number } | null = null;
     // Hot-loop cleanup (PRD-v2 §7.1): the canvas rect, cached once and reused
     // by every pointermove — drag, rotate-drag, and idle hover alike — instead
     // of forcing a layout read (getBoundingClientRect) on every single move.
@@ -527,6 +907,22 @@ export const Viewport = forwardRef<
       pointerNdc.y = -((evt.clientY - viewportRect.top) / viewportRect.height) * 2 + 1;
     }
 
+    // §3: orient `dragPlane` as a *vertical* plane through `at` whose normal is
+    // horizontal and points at the camera — the drag surface for the elevation
+    // handle, so screen-vertical pointer motion resolves cleanly to world Y
+    // (a horizontal floor plane, which translate/rotate use, can't: its ray
+    // intersection barely moves in Y as the pointer slides down the screen).
+    const verticalNormal = new THREE.Vector3();
+    function setVerticalDragPlane(at: THREE.Vector3) {
+      verticalNormal.subVectors(camera.position, at);
+      verticalNormal.y = 0; // horizontal facing direction only — the plane stays vertical
+      // Degenerate only if the camera is directly overhead; any vertical plane
+      // works there, so fall back to a fixed one rather than a zero normal.
+      if (verticalNormal.lengthSq() < 1e-6) verticalNormal.set(0, 0, 1);
+      verticalNormal.normalize();
+      dragPlane.setFromNormalAndCoplanarPoint(verticalNormal, at);
+    }
+
     // Shared teardown for the end of any gesture (commit or revert): drop the
     // pre-gesture snapshot, hand the pointer back to the orbit camera, and
     // reset the cursor. The next hover move recomputes the cursor.
@@ -540,7 +936,7 @@ export const Viewport = forwardRef<
     // and drops it WITHOUT committing — the explicit cancel path for a
     // browser-stolen gesture or an Escape press.
     function revertGesture() {
-      const active = drag ?? rotateDrag;
+      const active = drag ?? rotateDrag ?? elevationDrag;
       if (active && gestureStart) {
         active.group.position.copy(gestureStart.position);
         active.group.rotation.y = gestureStart.rotationY;
@@ -548,35 +944,63 @@ export const Viewport = forwardRef<
       }
       drag = null;
       rotateDrag = null;
+      elevationDrag = null;
       endGesture();
     }
 
-    // Rotate handle brightens while hovered — its own material, so this never
-    // touches the shared furniture material.
-    function setHandleHovered(hovered: boolean) {
-      const handleMesh = rotateHandleRef.current;
-      if (!handleMesh) return;
-      (handleMesh.material as THREE.MeshBasicMaterial).color.set(hovered ? ROTATE_HANDLE_HOVER_COLOR : SELECTION_COLOR);
+    // A handle (rotate ring/knob or elevation arrow) brightens while hovered —
+    // its own materials, so this never touches the shared furniture material.
+    // improvements-v2.1 §4 / code-review fix: the un-hovered base color is
+    // both collision- and lock-aware (gestureAffordanceColor) rather than a
+    // fixed SELECTION_COLOR, so a handle itself signals overlap/lock state
+    // even before a click swallows the gesture, and agrees with the
+    // selection outline instead of only ever reflecting lock.
+    function setHandleHovered(handle: THREE.Object3D | null, hovered: boolean) {
+      if (!handle) return;
+      const itemId = selectedItemIdRef.current;
+      const baseColor = itemId ? gestureAffordanceColor(itemId, selectedCollidingRef.current) : SELECTION_COLOR;
+      setHandleColor(handle, hovered ? ROTATE_HANDLE_HOVER_COLOR : baseColor);
     }
 
-    // Idle-hover affordances (not during a drag): `cursor: grab` over the
-    // rotate handle or a selectable item, and the handle's hover highlight.
+    // True if the ray currently hits any mesh under `handle` — recursive,
+    // since a handle is a multi-mesh group (ring+knob, stem+two cones) now.
+    function rayHitsHandle(handle: THREE.Object3D | null): boolean {
+      return handle ? raycaster.intersectObject(handle, true).length > 0 : false;
+    }
+
+    // Idle-hover affordances (not during a drag): `cursor: grab` over either
+    // handle or a selectable item, plus the hovered handle's highlight.
     // O(items) per move, same order as the drag-path collision recompute the
-    // plan accepts at ~13 items.
+    // plan accepts at ~13 items. improvements-v2.1 §4: the cursor now reads
+    // "not-allowed" instead of "grab" over anything gesture-locked (the
+    // handle or an item's body) — a locked item is still selectable, but a
+    // "grab" cursor over something that can't actually be grabbed is a worse
+    // affordance than none.
     function updateHover(evt: PointerEvent) {
       const dom = renderer.domElement;
       setPointerNdcFromEvent(evt);
       raycaster.setFromCamera(pointerNdc, camera);
-      const handleMesh = rotateHandleRef.current;
-      const overHandle = handleMesh ? raycaster.intersectObject(handleMesh, false).length > 0 : false;
-      setHandleHovered(overHandle);
-      if (overHandle) {
-        dom.style.cursor = "grab";
+      const rotateHandle = rotateHandleRef.current;
+      const elevationHandle = elevationHandleRef.current;
+      const overRotate = rayHitsHandle(rotateHandle);
+      // Only one handle reads as hovered at a time; the rotate ring wins a tie
+      // (checked first), matching onPointerDown's precedence.
+      const overElevation = !overRotate && rayHitsHandle(elevationHandle);
+      setHandleHovered(rotateHandle, overRotate);
+      setHandleHovered(elevationHandle, overElevation);
+      if (overRotate || overElevation) {
+        // improvements-v2.1 §4: a locked item's handles still hover/highlight
+        // (so lock state stays visible), but the cursor reads "not-allowed"
+        // rather than "grab" — a click on either handle is inert (see
+        // onPointerDown's lock guard on both handle branches).
+        const selId = selectedItemIdRef.current;
+        dom.style.cursor = selId && isPlacementLocked(selId) ? "not-allowed" : "grab";
         return;
       }
       const hit = raycaster.intersectObjects(scene.children, true)[0];
-      const overItem = hit ? findItemGroup(hit.object) !== null : false;
-      dom.style.cursor = overItem ? "grab" : "";
+      const hitGroup = hit ? findItemGroup(hit.object) : null;
+      const hitItemId = hitGroup ? (hitGroup.userData.itemId as string) : null;
+      dom.style.cursor = hitItemId ? (isPlacementLocked(hitItemId) ? "not-allowed" : "grab") : "";
     }
 
     // Walks up from a raycast hit to the placed item's THREE.Group — every
@@ -623,37 +1047,113 @@ export const Viewport = forwardRef<
       endGesture();
     }
 
+    // §3: same commit shape again — the elevation drag mutated group.position.y
+    // live; on release we fold the final position/rotation back through the
+    // identical onCommitPlacementRef path. A PlaceCommand's position[1] *is*
+    // the item's elevation (see elevation.ts / buildScene.ts), so this needs
+    // no new command type — it's the drag analog of the PageUp/PageDown step.
+    function commitElevationDrag() {
+      if (!elevationDrag) return;
+      const { itemId, group } = elevationDrag;
+      onCommitPlacementRef.current?.(
+        itemId,
+        [group.position.x, group.position.y, group.position.z],
+        normalizeDeg(THREE.MathUtils.radToDeg(group.rotation.y)),
+      );
+      elevationDrag = null;
+      endGesture();
+    }
+
     function onPointerDown(evt: PointerEvent) {
       if (evt.button !== 0) return;
       // Give the viewport keyboard focus so its shortcuts (q/e, PageUp/
-      // PageDown, Escape) are focus-scoped to it — see onKeyDown's
-      // focus-ownership note.
+      // PageDown, Escape, and walk mode's WASD) are focus-scoped to it — see
+      // onKeyDown's focus-ownership note. Always focus first, even in walk
+      // mode (where the rest of this handler is inert below) — the WASD
+      // keydown/keyup listeners live on this same element and need it
+      // focused to fire at all.
       renderer.domElement.focus();
+      // improvements-v2.1 §5: item selection/drag is orbit-only. Walk mode's
+      // click instead starts a pointer-lock request (onCanvasClickForWalkLock,
+      // a separate 'click' listener) — raycasting mouse coordinates that
+      // freeze the instant the pointer locks wouldn't select anything
+      // meaningful anyway. Bailing here also guarantees drag/rotateDrag can
+      // never be set while walking, which is what keeps onKeyDown's existing
+      // Escape-cancels-a-gesture branch correctly inert during walk mode
+      // (nothing to cancel) rather than racing the browser's own
+      // Escape-exits-pointer-lock behavior.
+      if (cameraModeRef.current === "walk") return;
       setPointerNdcFromEvent(evt);
       raycaster.setFromCamera(pointerNdc, camera);
 
-      // C1 follow-up: the rotate handle is its own raycast target, checked
-      // first and in isolation (not part of the scene.children walk below,
-      // and not parented under the item's group) — a hit here starts a
-      // rotate-drag and returns before the item-vs-empty-space logic below
-      // ever runs, so clicking the handle can never be mistaken for a
-      // translate-drag on the item it's attached to.
-      const handleMesh = rotateHandleRef.current;
-      if (handleMesh) {
-        const handleHit = raycaster.intersectObject(handleMesh, false)[0];
-        if (handleHit) {
-          const itemId = selectedItemIdRef.current;
-          const group = itemId ? built.furnitureGroups.get(itemId) : undefined;
-          if (itemId && group) {
-            dragPlane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 1, 0), group.position);
-            rotateDrag = { itemId, group };
-            gestureStart = { position: group.position.clone(), rotationY: group.rotation.y };
-            controls.enabled = false; // gesture owns the pointer, not the orbit camera
-            renderer.domElement.style.cursor = "grabbing";
-            renderer.domElement.setPointerCapture(evt.pointerId);
-            return;
-          }
+      // §3: the manipulation handles are their own raycast targets, checked
+      // first and in isolation (not part of the scene.children walk below, not
+      // parented under the item's group) — a hit here starts the matching drag
+      // and returns before the item-vs-empty-space logic runs, so grabbing a
+      // handle can never be mistaken for a translate-drag on its item. Rotate
+      // is checked before elevation (fixed precedence, mirrored in updateHover).
+      const selectedId = selectedItemIdRef.current;
+      const selectedGroup = selectedId ? built.furnitureGroups.get(selectedId) : undefined;
+
+      const rotateHandle = rotateHandleRef.current;
+      if (selectedId && selectedGroup && rotateHandle && raycaster.intersectObject(rotateHandle, true).length > 0) {
+        // improvements-v2.1 §4: a locked item's handle is still visible and
+        // still hit-tests (so it keeps signaling lock state via color/cursor
+        // — see setHandleHovered/updateHover), but a click on it must not
+        // start a rotate-drag. Return here rather than falling through to the
+        // body hit-test below, which would otherwise treat this click as if
+        // it landed on empty space (handles aren't part of `scene.children`'s
+        // raycast walk) and deselect.
+        if (isPlacementLocked(selectedId)) return;
+        // Rotate on the same horizontal plane through the item's center that
+        // translate uses, so the pointer's angle-around-center is well-defined.
+        // Capture the item's yaw and the pointer's angle at grab time so the
+        // drag is *relative* (see relativeYawDeg): grabbing the ring anywhere
+        // rotates from there instead of snapping the front to the cursor.
+        dragPlane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 1, 0), selectedGroup.position);
+        if (raycaster.ray.intersectPlane(dragPlane, planeHit)) {
+          const grabAngleDeg = yawDegFromPointer(
+            selectedGroup.position.x,
+            selectedGroup.position.z,
+            planeHit.x,
+            planeHit.z,
+          );
+          const startYawDeg = normalizeDeg(THREE.MathUtils.radToDeg(selectedGroup.rotation.y));
+          rotateDrag = { itemId: selectedId, group: selectedGroup, startYawDeg, grabAngleDeg };
+          gestureStart = { position: selectedGroup.position.clone(), rotationY: selectedGroup.rotation.y };
+          controls.enabled = false; // gesture owns the pointer, not the orbit camera
+          renderer.domElement.style.cursor = "grabbing";
+          renderer.domElement.setPointerCapture(evt.pointerId);
         }
+        // Code-review fix: return unconditionally once the raycast has
+        // confirmed a handle hit, even if the plane-intersect just above
+        // failed (ray parallel to the plane — near-impossible given the
+        // orbit polar-angle clamps, but not impossible). Previously the
+        // `return` only lived inside that `if`, so a failed intersect fell
+        // through into the body hit-test below and could start an ordinary
+        // translate-drag instead of the intended (aborted) handle gesture.
+        return;
+      }
+
+      const elevationHandle = elevationHandleRef.current;
+      if (selectedId && selectedGroup && elevationHandle && raycaster.intersectObject(elevationHandle, true).length > 0) {
+        // improvements-v2.1 §4: same lock guard as the rotate-handle branch
+        // above — selectable/visible, not draggable.
+        if (isPlacementLocked(selectedId)) return;
+        // Vertical drag on a camera-facing vertical plane through the item.
+        // grabOffsetY keeps the item from jumping to the pointer on the first
+        // move (vertical analog of the horizontal drag's grabOffset).
+        setVerticalDragPlane(selectedGroup.position);
+        if (raycaster.ray.intersectPlane(dragPlane, planeHit)) {
+          elevationDrag = { itemId: selectedId, group: selectedGroup, grabOffsetY: selectedGroup.position.y - planeHit.y };
+          gestureStart = { position: selectedGroup.position.clone(), rotationY: selectedGroup.rotation.y };
+          controls.enabled = false; // gesture owns the pointer, not the orbit camera
+          renderer.domElement.style.cursor = "grabbing";
+          renderer.domElement.setPointerCapture(evt.pointerId);
+        }
+        // Code-review fix: same unconditional return as the rotate-handle
+        // branch above, for the same reason.
+        return;
       }
 
       const hit = raycaster.intersectObjects(scene.children, true)[0];
@@ -662,7 +1162,13 @@ export const Viewport = forwardRef<
         selectItem(null);
         return;
       }
-      selectItem(hitGroup.userData.itemId as string);
+      const hitItemId = hitGroup.userData.itemId as string;
+      selectItem(hitItemId);
+      // improvements-v2.1 §4: selection always happens (above) so a locked
+      // item can still be inspected/unlocked — only the drag gesture itself
+      // is gated here, after selection, so this reads as "selectable but not
+      // draggable" rather than "not clickable at all."
+      if (isPlacementLocked(hitItemId)) return;
 
       // Floor-plane drag, not screen-space: a horizontal plane through the
       // item's current height, so the item tracks where the cursor ray
@@ -672,7 +1178,7 @@ export const Viewport = forwardRef<
       dragPlane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 1, 0), hitGroup.position);
       if (!raycaster.ray.intersectPlane(dragPlane, planeHit)) return;
       grabOffset.set(hitGroup.position.x - planeHit.x, 0, hitGroup.position.z - planeHit.z);
-      drag = { itemId: hitGroup.userData.itemId as string, group: hitGroup };
+      drag = { itemId: hitItemId, group: hitGroup };
       gestureStart = { position: hitGroup.position.clone(), rotationY: hitGroup.rotation.y };
       controls.enabled = false; // gesture owns the pointer, not the orbit camera
       renderer.domElement.style.cursor = "grabbing";
@@ -680,23 +1186,44 @@ export const Viewport = forwardRef<
     }
 
     function onPointerMove(evt: PointerEvent) {
-      // C1 follow-up: rotate-drag branch — angle between the item's center
-      // and the pointer's current floor-plane hit, same raycast-against-
-      // dragPlane technique translate-drag uses below, feeding the pure
-      // yawDegFromPointer helper (src/scene/rotateHandle.ts) instead of a
-      // position delta.
+      // improvements-v2.1 §5: mouselook is PointerLockControls' own mousemove
+      // listener (added in its constructor, active whenever it's locked,
+      // independent of this handler) — nothing below is reachable in walk
+      // mode anyway since onPointerDown can't set drag/rotateDrag while
+      // walking, but bailing early also skips the hover raycast for free
+      // (pointless once the pointer is locked: clientX/Y freeze at the lock
+      // point instead of tracking the actual look direction).
+      if (cameraModeRef.current === "walk") return;
+      // §3: rotate-drag branch — the pointer's angle around the item's center
+      // on the floor plane (same raycast-against-dragPlane technique translate-
+      // drag uses below), turned into a *relative* sweep from the grab anchors
+      // via relativeYawDeg, instead of a position delta.
       if (rotateDrag) {
         setPointerNdcFromEvent(evt);
         raycaster.setFromCamera(pointerNdc, camera);
         if (!raycaster.ray.intersectPlane(dragPlane, planeHit)) return; // camera edge case: ray parallel to the plane
-        const { group, itemId } = rotateDrag;
-        let yawDeg = yawDegFromPointer(group.position.x, group.position.z, planeHit.x, planeHit.z);
+        const { group, itemId, startYawDeg, grabAngleDeg } = rotateDrag;
+        const currentAngleDeg = yawDegFromPointer(group.position.x, group.position.z, planeHit.x, planeHit.z);
+        let yawDeg = relativeYawDeg(startYawDeg, grabAngleDeg, currentAngleDeg);
         // PRD-v2 §11.4 (decided): handle-drag snaps to the same 15deg steps as
         // the q/e keyboard shortcut by default; Shift held frees it to
         // continuous rotation, mirroring translate-snapping's Shift escape.
         if (!evt.shiftKey) yawDeg = snapYawDeg(yawDeg, ROTATE_STEP_DEG);
         group.rotation.y = THREE.MathUtils.degToRad(yawDeg);
         updateCollisionHighlight(itemId, group);
+        return;
+      }
+      // §3: elevation-drag branch — resolve the pointer on the camera-facing
+      // vertical plane set at grab time and map its Y (plus grabOffsetY) to the
+      // item's elevation, clamped at the floor. Footprint (x/z) is untouched,
+      // so the collision highlight — a footprint-overlap check that ignores Y
+      // entirely — can't change; we deliberately skip recomputing it here
+      // (unlike translate/rotate), rather than pay for a no-op.
+      if (elevationDrag) {
+        setPointerNdcFromEvent(evt);
+        raycaster.setFromCamera(pointerNdc, camera);
+        if (!raycaster.ray.intersectPlane(dragPlane, planeHit)) return; // ray parallel to the plane
+        elevationDrag.group.position.y = clampElevationCm(planeHit.y + elevationDrag.grabOffsetY);
         return;
       }
       if (!drag) {
@@ -747,11 +1274,23 @@ export const Viewport = forwardRef<
     }
 
     function onPointerUp(evt: PointerEvent) {
+      // improvements-v2.1 §5: no explicit walk-mode gate needed here — unlike
+      // onPointerDown/onPointerMove, this one's already inert while walking:
+      // onPointerDown's own walk-mode bail (above) means drag/rotateDrag can
+      // never be non-null to begin with, so both branches below fall through
+      // to a no-op.
       if (rotateDrag) {
         if (renderer.domElement.hasPointerCapture(evt.pointerId)) {
           renderer.domElement.releasePointerCapture(evt.pointerId);
         }
         commitRotateDrag();
+        return;
+      }
+      if (elevationDrag) {
+        if (renderer.domElement.hasPointerCapture(evt.pointerId)) {
+          renderer.domElement.releasePointerCapture(evt.pointerId);
+        }
+        commitElevationDrag();
         return;
       }
       if (!drag) return;
@@ -793,14 +1332,63 @@ export const Viewport = forwardRef<
       // pointercancel — handled before the selection/rotate logic so it works
       // whether or not an item is "still" selected mid-drag.
       if (evt.key === "Escape") {
-        if (drag || rotateDrag) {
+        if (drag || rotateDrag || elevationDrag) {
           evt.preventDefault();
           revertGesture();
         }
+        // No explicit pointer-lock-unlock call needed here: Escape is one of
+        // the browser's own built-in pointer-lock-exit gestures, so walk mode
+        // is already headed for onWalkControlsUnlock -> applyCameraMode
+        // ("orbit") on its own. drag/rotateDrag are always null in walk mode
+        // (onPointerDown's walk-mode bail — see above), so the revert branch
+        // above is a guaranteed no-op here too, not a conflict.
+        return;
+      }
+      // improvements-v2.1 §5: walk-mode WASD — held-key state, not a discrete
+      // step like q/e/PageUp/PageDown below. animate() reads walkKeys every
+      // frame via computeWalkStep; this just flips the bit and consumes the
+      // keydown so it doesn't fall through to the item-shortcut logic below
+      // (harmless either way, since w/a/s/d don't collide with q/e/[/]/
+      // PageUp/PageDown, but explicit is clearer than relying on that).
+      // Gated on walk mode so w/a/s/d are inert — no preventDefault, no state
+      // — while orbiting, the same "only acts in the mode it applies to"
+      // shape PointerLockControls' own mousemove listener already has via
+      // its isLocked check.
+      if (cameraModeRef.current === "walk") {
+        const key = evt.key.toLowerCase();
+        if (key === "w" || key === "a" || key === "s" || key === "d") {
+          evt.preventDefault();
+          if (key === "w") walkKeys.forward = true;
+          else if (key === "s") walkKeys.back = true;
+          else if (key === "a") walkKeys.left = true;
+          else walkKeys.right = true;
+          return;
+        }
+        // Code-review fix: every other key below this point is item
+        // manipulation (L, q/e/[/], PageUp/PageDown) — mirrors
+        // onPointerDown's walk-mode bail for pointer-driven selection/drag,
+        // which this fell through past before. Without this, a previously-
+        // selected item would silently rotate/elevate/(un)lock under the
+        // user while they're just trying to walk around.
         return;
       }
       const itemId = selectedItemIdRef.current;
       if (!itemId) return;
+
+      // improvements-v2.1 §4: "L" toggles the selected item's own lock flag
+      // — deliberately checked before any lock gate below, and deliberately
+      // ignores both the current lock state and the global toggle, since it
+      // has to be able to unlock an item, not just lock one. Follows the
+      // same "keyboard step on the selected item" pattern as q/e/PageUp/
+      // PageDown below (own key, no existing binding — see the constants'
+      // comments), just editing scene data (through App.tsx's commit) rather
+      // than mutating a live THREE.Group.
+      if (evt.key === "l" || evt.key === "L") {
+        evt.preventDefault();
+        onToggleLockRef.current?.(itemId);
+        return;
+      }
+
       const group = builtRef.current?.furnitureGroups.get(itemId);
       if (!group) return;
       let stepDeg = 0;
@@ -811,6 +1399,12 @@ export const Viewport = forwardRef<
       else if (evt.key === ELEVATION_KEY_DOWN) elevationDir = -1;
       else return;
       evt.preventDefault();
+      // improvements-v2.1 §4: swallow the keypress either way (consistent
+      // with every other recognized key above always calling preventDefault)
+      // but skip the actual step — a locked item (own flag or the global
+      // toggle) ignores rotate/elevation keys the same way onPointerDown
+      // ignores a drag/rotate-drag gesture on it.
+      if (isPlacementLocked(itemId)) return;
       if (stepDeg !== 0) {
         group.rotation.y += THREE.MathUtils.degToRad(stepDeg);
       } else if (elevationDir !== null) {
@@ -821,15 +1415,47 @@ export const Viewport = forwardRef<
       onCommitPlacementRef.current?.(itemId, [group.position.x, group.position.y, group.position.z], rotationDeg);
     }
 
+    // improvements-v2.1 §5: releases a held WASD key regardless of mode —
+    // unconditional (not gated on cameraModeRef like onKeyDown's press side)
+    // so a key released after a mode-switch-away-from-walk, or a keyup that
+    // arrives a tick after the mode flips, can never leave a stale `true` in
+    // walkKeys (applyCameraMode also clears all four on any mode switch —
+    // this is the ongoing steady-state complement to that one-time reset).
+    function onKeyUp(evt: KeyboardEvent) {
+      const key = evt.key.toLowerCase();
+      if (key === "w") walkKeys.forward = false;
+      else if (key === "s") walkKeys.back = false;
+      else if (key === "a") walkKeys.left = false;
+      else if (key === "d") walkKeys.right = false;
+    }
+
     // Keyboard-focus ownership (see onKeyDown): make the canvas focusable and
     // suppress the focus ring (it's a viewport, not a form control), so its
     // shortcuts are scoped to it rather than living on `window`.
     renderer.domElement.tabIndex = 0;
     renderer.domElement.style.outline = "none";
+    // improvements-v2.1 §4: a structural rebuild tears down and recreates
+    // the canvas DOM node (see the cleanup below), which drops browser focus
+    // entirely — the new node was never focused. Previously harmless (only
+    // import mutated `items`, and nothing chained a keyboard shortcut right
+    // after it), but the new "L" lock toggle does exactly that: mutating
+    // `items` via the keyboard, from a handler that's only reachable because
+    // the canvas already had focus. Without this, locking/unlocking via "L"
+    // works once, then silently strands every subsequent q/e/PageUp/L press
+    // — the rebuilt canvas is present but unfocused, so onKeyDown never
+    // fires. Restores focus only when the *previous* canvas actually had it
+    // (see the cleanup's pendingRefocusRef capture), not unconditionally, so
+    // this doesn't steal focus from, say, a sidebar input mid-edit when an
+    // unrelated import happens to land.
+    if (pendingRefocusRef.current) {
+      renderer.domElement.focus();
+      pendingRefocusRef.current = false;
+    }
     renderer.domElement.addEventListener("pointerdown", onPointerDown);
     renderer.domElement.addEventListener("pointermove", onPointerMove);
     renderer.domElement.addEventListener("pointerup", onPointerUp);
     renderer.domElement.addEventListener("pointercancel", onPointerCancel);
+    renderer.domElement.addEventListener("keyup", onKeyUp);
     renderer.domElement.addEventListener("keydown", onKeyDown);
 
     function resize() {
@@ -848,23 +1474,51 @@ export const Viewport = forwardRef<
     let frameId: number;
     function animate() {
       frameId = requestAnimationFrame(animate);
-      controls.update();
+      const now = performance.now();
+      // Frame-to-frame delta (seconds) for walk mode's constant-speed WASD
+      // integration below — OrbitControls.update() doesn't need this (it's
+      // not damped: no `controls.enableDamping` set anywhere in this file),
+      // so this clock only exists for walk mode's sake.
+      const deltaSec = (now - lastFrameTime) / 1000;
+      lastFrameTime = now;
+      // improvements-v2.1 §5: mutually exclusive per frame, matching
+      // applyCameraMode's enable/disable split. Critically, OrbitControls
+      // .update() recomputes camera.position from its own internal spherical
+      // coordinates *unconditionally* — `controls.enabled` only gates its
+      // input listeners, not update() — so calling it while walk mode is
+      // live would silently snap the camera back every single frame,
+      // undoing WASD/mouselook. Skipping it here (rather than trusting
+      // `enabled`) is what actually makes the two modes exclusive at the
+      // render level, not just at the input level.
+      if (cameraModeRef.current === "walk") {
+        if (walkControls.isLocked) {
+          const step = computeWalkStep(walkKeys, WALK_SPEED_CM_PER_SEC, deltaSec);
+          if (step.forward !== 0) walkControls.moveForward(step.forward);
+          if (step.right !== 0) walkControls.moveRight(step.right);
+        }
+      } else {
+        controls.update();
+      }
       // v2 spike (W-A): the selection outline's bounding box has to track
       // whatever the drag/rotate handlers above just mutated the group to —
       // recomputed every frame (selectionHelperRef is null when nothing is
       // selected, so this is a no-op cost the rest of the time).
       selectionHelperRef.current?.update();
-      // C1 follow-up: same idea for the rotate handle — it isn't parented
-      // under the item's group (see positionRotateHandle's comment), so its
-      // world position has to be re-derived every frame from wherever the
-      // group currently is, whether that's from a translate-drag, a
-      // rotate-drag, or a keyboard step.
-      const handle = rotateHandleRef.current;
+      // §3: same idea for both manipulation handles — neither is parented
+      // under the item's group (see positionRotateHandle's comment), so each
+      // handle's world transform has to be re-derived every frame from wherever
+      // the group currently is, whether that's from a translate-drag, a
+      // rotate-drag, an elevation-drag, or a keyboard step.
+      const rotateHandle = rotateHandleRef.current;
+      const elevationHandle = elevationHandleRef.current;
       const selId = selectedItemIdRef.current;
-      if (handle && selId) {
+      if ((rotateHandle || elevationHandle) && selId) {
         const group = built.furnitureGroups.get(selId);
         const item = itemsByIdRef.current.get(selId);
-        if (group && item) positionRotateHandle(handle, group, item, camera);
+        if (group && item) {
+          if (rotateHandle) positionRotateHandle(rotateHandle, group, item, camera);
+          if (elevationHandle) positionElevationHandle(elevationHandle, group, item, camera);
+        }
       }
       renderer.render(scene, camera);
     }
@@ -872,6 +1526,10 @@ export const Viewport = forwardRef<
 
     return () => {
       cancelled = true;
+      // improvements-v2.1 §4: capture focus ownership before anything below
+      // tears the canvas down — see pendingRefocusRef's declaration and the
+      // setup-side comment for why this matters now.
+      pendingRefocusRef.current = document.activeElement === renderer.domElement;
       // Code-review finding: a structural rebuild can land mid-drag — e.g. an
       // unrelated background import completing changes `sceneFile.items`,
       // which this effect depends on (via `structuralSceneFile`) independent
@@ -884,14 +1542,26 @@ export const Viewport = forwardRef<
       // "commit wherever it is" behavior `onPointerCancel` already accepts
       // for a browser-stolen gesture — rather than vanishing.
       commitDrag();
-      commitRotateDrag(); // C1 follow-up: same "commit wherever it is" treatment for a mid-rotate-drag interruption
+      commitRotateDrag(); // §3: same "commit wherever it is" treatment for a mid-rotate-drag interruption
+      commitElevationDrag(); // §3: and for a mid-elevation-drag interruption
       cancelAnimationFrame(frameId);
       resizeObserver.disconnect();
       renderer.domElement.removeEventListener("pointerdown", onPointerDown);
       renderer.domElement.removeEventListener("pointermove", onPointerMove);
       renderer.domElement.removeEventListener("pointerup", onPointerUp);
       renderer.domElement.removeEventListener("pointercancel", onPointerCancel);
+      renderer.domElement.removeEventListener("keyup", onKeyUp);
       renderer.domElement.removeEventListener("keydown", onKeyDown);
+      renderer.domElement.removeEventListener("click", onCanvasClickForWalkLock);
+      // improvements-v2.1 §5: walkControls.dispose() removes its own
+      // mousemove/pointerlockchange/pointerlockerror document-level listeners
+      // (see PointerLockControls.disconnect()) — without this they'd outlive
+      // this structural build and stack up across rebuilds. unlock() first so
+      // a rebuild mid-walk hands the pointer back rather than leaving the OS
+      // cursor captured to a canvas element that's about to be removed.
+      walkControls.removeEventListener("unlock", onWalkControlsUnlock);
+      walkControls.unlock();
+      walkControls.dispose();
       controls.dispose();
       renderer.dispose();
       container.removeChild(renderer.domElement);
@@ -899,11 +1569,23 @@ export const Viewport = forwardRef<
       rendererRef.current = null;
       cameraRef.current = null;
       controlsRef.current = null;
+      walkControlsRef.current = null;
+      applyModeRef.current = null;
+      // A structural rebuild tears down and recreates both controls objects
+      // above, so any "walk" mode from before this rebuild refers to nothing
+      // live anymore — reset to the default before the next build's fresh
+      // OrbitControls takes over, same "drop stale state on rebuild" reason
+      // selectItem(null) below exists for selection.
+      cameraModeRef.current = "orbit";
+      setCameraModeState("orbit");
       // A structural rebuild invalidates any selection helper's target group
       // (new BuiltScene, new groups) — the selection-outline effect further
       // down owns disposing the helper itself (keyed off buildVersion), but
       // the selection *state* has to drop too, or a stale itemId would leave
       // the app thinking something's selected with nothing to show for it.
+      // improvements-v2.1 §4: stash it first so the next setup run can
+      // restore it if the item survived the rebuild (see pendingReselectRef).
+      pendingReselectRef.current = selectedItemIdRef.current;
       selectItem(null);
       // Any texture the calibration effect had applied belonged to this
       // build's materials — dispose them all now rather than leak.
@@ -915,20 +1597,57 @@ export const Viewport = forwardRef<
   useImperativeHandle(
     handleRef,
     (): ViewportHandle => ({
+      // improvements-v2.1 §5 (camera-viewpoint compatibility — the PRD
+      // explicitly flags this): OrbitControls.target IS the lookAt point by
+      // construction, but PointerLockControls has no equivalent concept — it
+      // only ever derives look direction from the camera's own quaternion
+      // (see its getDirection()/moveForward()). So in walk mode there's no
+      // "target" to read; one has to be synthesized by walking a fixed
+      // distance out from the eye along that quaternion-derived forward
+      // direction (deriveSyntheticLookAt, src/scene/walkCamera.ts). This
+      // keeps getCurrentView()'s contract — "eye/lookAt/fov, whatever mode's
+      // active" — identical for both callers (ViewportChrome's save-view
+      // button doesn't need to know or care which control scheme produced
+      // the reading).
       getCurrentView() {
         const camera = cameraRef.current;
         const controls = controlsRef.current;
         if (!camera || !controls) return null;
+        const eye: [number, number, number] = [camera.position.x, camera.position.y, camera.position.z];
+        if (cameraModeRef.current === "walk" && walkControlsRef.current) {
+          const forward = walkControlsRef.current.getDirection(new THREE.Vector3());
+          return {
+            eye,
+            lookAt: deriveSyntheticLookAt(eye, [forward.x, forward.y, forward.z], SYNTHETIC_LOOKAT_DISTANCE_CM),
+            fovDeg: camera.fov,
+          };
+        }
         return {
-          eye: [camera.position.x, camera.position.y, camera.position.z],
+          eye,
           lookAt: [controls.target.x, controls.target.y, controls.target.z],
           fovDeg: camera.fov,
         };
       },
+      // improvements-v2.1 §5 (camera-viewpoint compatibility, other half):
+      // every saved CameraPosition was captured as an orbit-style eye+target
+      // framing (either from orbit mode directly, or synthesized above from
+      // walk mode) — there's no meaningfully different "walk-mode preset" to
+      // recall, and applying a canned eye/lookAt/fov to a still-locked
+      // PointerLockControls wouldn't even work (it never reads camera
+      // .position/.quaternion from outside itself the way OrbitControls
+      // .update() reads .target). Simplest correct behavior: recalling a
+      // saved viewpoint always switches back to orbit mode first (unlocking
+      // the pointer if walk mode had it locked), then applies the preset
+      // exactly as before — so "Save view" / "Recall view" keep working
+      // unchanged regardless of which mode the user happened to be in when
+      // they clicked flyTo, and the recalled view is always a "camera on
+      // rails around a target" shot, matching what saved viewpoints have
+      // always meant in this app.
       flyTo(preset) {
         const camera = cameraRef.current;
         const controls = controlsRef.current;
         if (!camera || !controls) return;
+        applyModeRef.current?.("orbit");
         applyCameraPreset(camera, controls, preset);
       },
     }),
@@ -1074,18 +1793,22 @@ export const Viewport = forwardRef<
       const group = built.furnitureGroups.get(selectedItemIdRef.current);
       if (group) updateCollisionHighlight(selectedItemIdRef.current, group);
     }
-    // C1 follow-up: a committed layout change (e.g. a future undo, or a
-    // programmatic edit) can move/rotate the selected item from outside this
-    // component's own drag code too — resync the handle's world position
+    // §3: a committed layout change (e.g. a future undo, or a programmatic
+    // edit) can move/rotate/elevate the selected item from outside this
+    // component's own drag code too — resync both handles' world transforms
     // here for the same reason the outline resyncs above. Also a no-op the
-    // frame after this component's own drag/rotate-handle commit, since
-    // animate() already kept it current live.
-    const handle = rotateHandleRef.current;
-    if (handle && selectedItemIdRef.current) {
+    // frame after this component's own handle commit, since animate() already
+    // kept them current live.
+    const rotateHandle = rotateHandleRef.current;
+    const elevationHandle = elevationHandleRef.current;
+    if ((rotateHandle || elevationHandle) && selectedItemIdRef.current) {
       const group = built.furnitureGroups.get(selectedItemIdRef.current);
       const item = itemsByIdRef.current.get(selectedItemIdRef.current);
       const cam = cameraRef.current;
-      if (group && item && cam) positionRotateHandle(handle, group, item, cam);
+      if (group && item && cam) {
+        if (rotateHandle) positionRotateHandle(rotateHandle, group, item, cam);
+        if (elevationHandle) positionElevationHandle(elevationHandle, group, item, cam);
+      }
     }
   }, [sceneFile.layouts, sceneFile.current, buildVersion]);
 
@@ -1108,15 +1831,19 @@ export const Viewport = forwardRef<
       prevHelper.dispose();
       selectionHelperRef.current = null;
     }
-    // C1 follow-up: rotate handle shares the outline's lifecycle — torn down
-    // on every selection change/rebuild alongside it, recreated below only
-    // if something's still selected.
-    const prevHandle = rotateHandleRef.current;
-    if (prevHandle) {
-      prevHandle.parent?.remove(prevHandle);
-      prevHandle.geometry.dispose();
-      (prevHandle.material as THREE.Material).dispose();
+    // §3: both manipulation handles share the outline's lifecycle — torn down
+    // on every selection change/rebuild alongside it, recreated below only if
+    // something's still selected. disposeHandle traverses each group (multi-
+    // mesh now), unlike the old single-sphere geometry/material dispose.
+    const prevRotate = rotateHandleRef.current;
+    if (prevRotate) {
+      disposeHandle(prevRotate);
       rotateHandleRef.current = null;
+    }
+    const prevElevation = elevationHandleRef.current;
+    if (prevElevation) {
+      disposeHandle(prevElevation);
+      elevationHandleRef.current = null;
     }
     const built = builtRef.current;
     if (!built || !selectedItemId) return;
@@ -1141,32 +1868,104 @@ export const Viewport = forwardRef<
     // before the flag shows up.
     updateCollisionHighlight(selectedItemId, group);
 
-    // C1 follow-up: rotate handle — a small sphere reusing SELECTION_COLOR
-    // (so it reads as part of the same selection affordance, not a new
-    // unrelated UI element), offset along the item's local +Z per
-    // positionRotateHandle. Not parented under the item's group: a
-    // translate-drag mutates group.position directly (see onPointerMove),
-    // and re-parenting/reading a child's world position every pointermove
-    // would need its own matrix-world update bookkeeping for no benefit over
-    // just recomputing the handle's world (x,z) from the group's own
-    // position/rotation, which animate() already does every frame. Same
-    // depth-test-disabled/late-renderOrder overlay treatment as the outline,
-    // for the same reason: a selection affordance should never be occluded
-    // by the furniture it's pointing at, and it doubles as this handle's own
-    // raycast target (onPointerDown checks it before anything else).
+    // §3: both handles reuse SELECTION_COLOR (so they read as part of the same
+    // selection affordance, not new unrelated UI). Neither is parented under
+    // the item's group: a translate-drag mutates group.position directly (see
+    // onPointerMove), and re-parenting/reading a child's world position every
+    // pointermove would need its own matrix-world bookkeeping for no benefit
+    // over recomputing each handle's transform from the group's own
+    // position/rotation, which animate() already does every frame. Both use
+    // the same depth-test-disabled/late-renderOrder overlay treatment as the
+    // outline, for the same reason: a selection affordance should never be
+    // occluded by the furniture it points at, and each doubles as its own
+    // raycast target (onPointerDown checks them before anything else).
     const item = itemsByIdRef.current.get(selectedItemId);
     if (item) {
-      const handleGeo = new THREE.SphereGeometry(ROTATE_HANDLE_RADIUS_CM, 16, 16);
-      const handleMat = new THREE.MeshBasicMaterial({ color: SELECTION_COLOR, depthTest: false });
-      const handle = new THREE.Mesh(handleGeo, handleMat);
-      handle.renderOrder = 999;
-      handle.userData.isRotateHandle = true;
       const cam = cameraRef.current;
-      if (cam) positionRotateHandle(handle, group, item, cam);
-      built.scene.add(handle);
-      rotateHandleRef.current = handle;
+      // Rotation handle: footprint ring + grip knob (replaces the C1 sphere).
+      const rotateHandle = createRotateHandle(item);
+      if (cam) positionRotateHandle(rotateHandle, group, item, cam);
+      built.scene.add(rotateHandle);
+      rotateHandleRef.current = rotateHandle;
+      // Elevation handle: vertical double-arrow above the item (net-new).
+      const elevationHandle = createElevationHandle();
+      if (cam) positionElevationHandle(elevationHandle, group, item, cam);
+      built.scene.add(elevationHandle);
+      elevationHandleRef.current = elevationHandle;
+      // improvements-v2.1 §4 / code-review fix: collision- and lock-aware
+      // initial color on both handles, the same gestureAffordanceColor
+      // composition setHandleHovered uses — a freshly-selected item that's
+      // already colliding or locked should read that way on its handles from
+      // the first frame, not just after the first hover. updateCollisionHighlight
+      // above already refreshed selectedCollidingRef for this exact item.
+      const initialColor = gestureAffordanceColor(selectedItemId, selectedCollidingRef.current);
+      if (initialColor !== SELECTION_COLOR) {
+        setHandleColor(rotateHandle, initialColor);
+        setHandleColor(elevationHandle, initialColor);
+      }
     }
   }, [selectedItemId, buildVersion]);
 
-  return <div ref={containerRef} className="viewport" />;
+  // improvements-v2.1 §4: globalLock is ephemeral App.tsx state, not part of
+  // `sceneFile` — it's deliberately NOT one of structuralSceneFile's deps
+  // (toggling it must not tear down/rebuild the renderer, same reasoning as
+  // every other view-only piece of state this component keeps out of that
+  // memo). That means flipping it doesn't fire a structural rebuild, so
+  // nothing else here would otherwise re-sync the already-live selection
+  // outline/handle color to the new lock state until the next unrelated
+  // mutation. This is that seam: re-runs the same color composition
+  // updateCollisionHighlight/handle-creation already use, purely to catch
+  // "toggled global lock while something was already selected."
+  useEffect(() => {
+    const built = builtRef.current;
+    const selId = selectedItemIdRef.current;
+    if (!built || !selId) return;
+    const group = built.furnitureGroups.get(selId);
+    if (group) updateCollisionHighlight(selId, group); // refreshes selectedCollidingRef too
+    // §3: both handles are multi-mesh THREE.Group instances (ring+knob,
+    // stem+cones) now, not a single Mesh with a top-level `.material` —
+    // setHandleColor traverses and recolors every mesh underneath.
+    // Code-review fix: collision- and lock-aware (gestureAffordanceColor),
+    // not lock-only — a locked-and-colliding item's handles should stay red,
+    // matching the outline, not fall back to amber.
+    const color = gestureAffordanceColor(selId, selectedCollidingRef.current);
+    const rotateHandle = rotateHandleRef.current;
+    if (rotateHandle) setHandleColor(rotateHandle, color);
+    const elevationHandle = elevationHandleRef.current;
+    if (elevationHandle) setHandleColor(elevationHandle, color);
+  }, [globalLock]);
+
+  // improvements-v2.1 §5: mode-toggle pill, self-contained to this component
+  // (rather than threaded through ViewportChrome/App.tsx) since the camera
+  // mode it controls only exists as live state inside this component's own
+  // Three.js build — reusing ViewportChrome's `.viewport-chrome-pill` visual
+  // language (see Viewport.css) without adopting its file, so this stays a
+  // single localized diff and doesn't collide with LayoutChrome (top-center)
+  // or ViewportChrome (bottom-center) for screen real estate. Rendered as a
+  // sibling of the canvas div (both direct children of App.tsx's
+  // position:relative `.app-viewport`), same pattern those two chromes use.
+  return (
+    <>
+      <div ref={containerRef} className="viewport" />
+      <div className="viewport-mode-toggle">
+        <button
+          type="button"
+          className="viewport-mode-toggle-pill"
+          onClick={() => applyModeRef.current?.(cameraMode === "orbit" ? "walk" : "orbit")}
+          aria-label={cameraMode === "orbit" ? "Switch to walk-around camera" : "Switch to orbit camera"}
+          title={cameraMode === "orbit" ? "Switch to walk-around camera" : "Switch to orbit camera"}
+        >
+          {cameraMode === "orbit" ? (
+            <Footprints size={14} aria-hidden="true" />
+          ) : (
+            <OrbitIcon size={14} aria-hidden="true" />
+          )}
+          {cameraMode === "orbit" ? "Walk" : "Orbit"}
+        </button>
+        {cameraMode === "walk" && (
+          <p className="viewport-mode-hint">Click to look around · WASD to move · Esc to exit</p>
+        )}
+      </div>
+    </>
+  );
 });

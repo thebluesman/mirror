@@ -35,3 +35,16 @@ export function stepElevationCm(
   const next = currentY + direction * stepCm;
   return Math.max(MIN_ELEVATION_CM, next);
 }
+
+/** Clamps a raw elevation (cm) to the same floor as `stepElevationCm`, without
+ *  the discrete stepping. This is the continuous analog: the elevation
+ *  drag-handle (§3, improvements-v2.1) resolves the pointer's position on a
+ *  camera-facing vertical plane straight to a world-space Y, so its per-
+ *  pointermove path wants "just clamp this arbitrary height at the floor,"
+ *  not "add a fixed step." Factored out (rather than inlining a `Math.max`)
+ *  so the drag and the keyboard step share one definition of MIN_ELEVATION_CM
+ *  — a future non-zero floor (e.g. a raised platform) would change both at
+ *  once — and so it stays unit-testable the same way stepElevationCm is. */
+export function clampElevationCm(rawY: number): number {
+  return Math.max(MIN_ELEVATION_CM, rawY);
+}

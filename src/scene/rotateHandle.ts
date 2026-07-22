@@ -48,3 +48,24 @@ export function rotateHandleWorldXZ(
   const rad = (yawDeg * Math.PI) / 180;
   return [centerX + offset * Math.sin(rad), centerZ + offset * Math.cos(rad)];
 }
+
+/** Yaw (degrees, normalized to [0,360)) for a *relative* rotate-ring drag
+ *  (§3, improvements-v2.1): given the item's yaw at grab time (`startYawDeg`),
+ *  the pointer's angle-around-center at grab time (`grabAngleDeg`), and its
+ *  current angle-around-center (`currentAngleDeg`), rotate the item by exactly
+ *  the angle the pointer has swept since grab.
+ *
+ *  Why relative rather than the old sphere-handle's absolute `yaw =
+ *  angleToPointer`: the footprint ring that replaces the sphere is grabbable
+ *  anywhere along its circumference, so absolute mapping would snap the item's
+ *  front to wherever the pointer first landed — grabbing the ring's side would
+ *  jump the item 90deg before the drag even moved. Anchoring to the pointer's
+ *  *sweep* from the grab point instead means the item turns with the drag from
+ *  wherever it started, no jump. Both `grabAngleDeg` and `currentAngleDeg` come
+ *  from the same `yawDegFromPointer`, so their difference is a clean signed
+ *  sweep; Viewport.tsx still runs the result through `snapYawDeg` (unless Shift
+ *  is held), so the 15deg-snap contract is unchanged. */
+export function relativeYawDeg(startYawDeg: number, grabAngleDeg: number, currentAngleDeg: number): number {
+  const deg = startYawDeg + (currentAngleDeg - grabAngleDeg);
+  return ((deg % 360) + 360) % 360;
+}

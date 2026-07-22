@@ -47,6 +47,9 @@
   --space-32: 32px;
   --space-80: 80px;
 
+  /* Layout */
+  --sidebar-width: 320px;
+
   /* Radius scale */
   --radius-xs: 4px;
   --radius-sm: 8px;

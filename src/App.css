@@ -25,6 +25,9 @@
    undo. */
 .app-undo {
   margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
   font: var(--text-button);
   color: var(--color-canvas);
   background: none;
@@ -57,12 +60,22 @@
 }
 
 .app-panel {
-  flex: 0 0 320px;
+  /* Pinned via a token, not a magic number, and min-width: 0 so it's a hard
+   * cap: flex children default to min-width: auto, which lets any tab's
+   * content (a long filename, a wide <select>) force this container wider
+   * than its basis instead of clipping. Overflow handling belongs in each
+   * panel's own content (see ImportPanel.css/SettingsPanel.css/ShellPanel.css
+   * `width: 100%` on inputs/selects), not here. */
+  flex: 0 0 var(--sidebar-width);
+  min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
   border-left: 1px solid var(--color-hairline);
-  background: var(--color-soft-stone);
+  /* DESIGN.md §1/§5: canvas is the dominant background; soft-stone is a card
+   * surface, not a panel shell. Card-level content within carries
+   * soft-stone instead (shell-row, import-panel cards, settings-row). */
+  background: var(--color-canvas);
 }
 
 .app-panel-tabs {

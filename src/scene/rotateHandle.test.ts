@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { rotateHandleWorldXZ, snapYawDeg, yawDegFromPointer } from "./rotateHandle";
+import { relativeYawDeg, rotateHandleWorldXZ, snapYawDeg, yawDegFromPointer } from "./rotateHandle";
 
 describe("yawDegFromPointer", () => {
   it("returns 0 when the pointer is straight ahead on +Z (the handle's rest direction)", () => {
@@ -68,5 +68,39 @@ describe("snapYawDeg", () => {
   it("handles negative yaw by normalizing into [0, 360)", () => {
     expect(snapYawDeg(-15, 15)).toBe(345);
     expect(snapYawDeg(-7, 15)).toBe(0); // rounds to -0/0
+  });
+});
+
+describe("relativeYawDeg", () => {
+  it("leaves yaw unchanged when the pointer hasn't swept from the grab point", () => {
+    expect(relativeYawDeg(90, 30, 30)).toBeCloseTo(90, 5);
+  });
+
+  it("adds the pointer's sweep to the yaw at grab time", () => {
+    // Grabbed at 30deg-around-center, dragged to 75deg: a +45deg sweep.
+    expect(relativeYawDeg(90, 30, 75)).toBeCloseTo(135, 5);
+  });
+
+  it("applies a negative sweep (dragging the other way)", () => {
+    expect(relativeYawDeg(90, 30, 10)).toBeCloseTo(70, 5);
+  });
+
+  it("normalizes a result that wraps past 360 back into [0, 360)", () => {
+    const yaw = relativeYawDeg(350, 0, 40); // 390 -> 30
+    expect(yaw).toBeCloseTo(30, 5);
+    expect(yaw).toBeGreaterThanOrEqual(0);
+    expect(yaw).toBeLessThan(360);
+  });
+
+  it("normalizes a result that wraps below 0 back into [0, 360)", () => {
+    expect(relativeYawDeg(10, 0, -40)).toBeCloseTo(330, 5); // -30 -> 330
+  });
+
+  it("is grab-point-agnostic: grabbing anywhere and not moving is a no-op", () => {
+    // Whatever angle the ring was grabbed at, a zero-sweep drag returns the
+    // starting yaw — this is the property that kills the old sphere handle's
+    // grab-anywhere jump.
+    expect(relativeYawDeg(217, 12, 12)).toBeCloseTo(217, 5);
+    expect(relativeYawDeg(217, 200, 200)).toBeCloseTo(217, 5);
   });
 });

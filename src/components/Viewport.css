@@ -9,3 +9,52 @@
   width: 100%;
   height: 100%;
 }
+
+/* improvements-v2.1 §5: camera-mode toggle. Same floating-pill visual
+ * language as ViewportChrome.css's `.viewport-chrome-pill`/`.viewport-chrome-
+ * bar` (near-black translucent bar, pill button, per DESIGN.md) but its own
+ * classnames rather than importing that file — this component's toggle is
+ * self-contained (see the return statement's comment), and duplicating a
+ * handful of declarations here is cheaper than coupling two sibling
+ * components' CSS load order for one shared look. Top-right corner: LayoutChrome
+ * sits top-center, ViewportChrome bottom-center, so this is the one corner of
+ * the HUD nothing else already claims. */
+.viewport-mode-toggle {
+  position: absolute;
+  top: var(--space-24);
+  right: var(--space-24);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-8);
+}
+
+.viewport-mode-toggle-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-8);
+  font: var(--text-button);
+  font-size: 13px;
+  background: var(--color-primary);
+  color: var(--color-canvas);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: var(--radius-pill);
+  padding: var(--space-8) var(--space-16);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.viewport-mode-toggle-pill:hover {
+  border-color: var(--color-canvas);
+}
+
+.viewport-mode-hint {
+  font: var(--text-mono-label);
+  font-size: 11px;
+  color: var(--color-canvas);
+  background: rgba(23, 23, 28, 0.6);
+  padding: var(--space-2) var(--space-8);
+  border-radius: var(--radius-pill);
+  margin: 0;
+  white-space: nowrap;
+}
