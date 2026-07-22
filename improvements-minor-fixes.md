@@ -375,3 +375,38 @@ nothing for realladygrey to do until that lands. §16 needs no action. §17
 and §18 each want a short proposal (preset/slider shape for §17; preview-
 render approach + tooltip mechanism for §18) before building, same
 proposal-then-build treatment as §11/§14 above.
+
+---
+
+## Build round — 2026-07-22 (this PR)
+
+**Built directly** (decided scope, no proposal gate): §4 (walk-mode crouch/
+"sit" key — `C`, instant snap to 120cm), §12 (walk-mode hard-stop collision,
+30cm eye-radius buffer, reusing `collision.ts`'s AABB machinery), §13
+(top-down HUD minimap, boxes + camera dot, bottom-right corner), §2 + §1
+(icon-sizing system — 16px inline / 20px standalone, codified in `DESIGN.md`
+§6 and `tokens.css`, applied to `ViewportChrome.tsx`/`LayoutChrome.tsx`/
+`App.tsx`, resolving §1's misalignment as a side effect), §7 (sidebar panel
+titles bold via a new `--text-feature-heading-bold` token, weight 600 —
+`.app-title` left untouched), and the approved `category` schema field from
+`object-categories.md` (now marked built).
+
+**§6 audit done, findings reported, not fixed** — comparing `DESIGN.md`
+against `cohere/DESIGN.md` surfaced 9 gaps beyond icon sizing (notably: a
+live contradiction where `ObjectInspector.css` already uses a blurred
+box-shadow the docs both say not to use; ~30 hand-picked font sizes because
+`DESIGN.md`'s type scale is missing Caption/Micro roles that `cohere/
+DESIGN.md` defines; no motion/transition system in either doc; and a direct
+tension with §7 above — Cohere's own typography principles say "avoid heavy
+bold weights," which is why §7's fix used 600 rather than 700). Full list in
+the PR description — needs a scope call from Shyam, nothing auto-applied.
+
+**Researched, proposal docs written, NOT built** — each needs Shyam's call
+before implementation, per this doc's own sequencing notes:
+`docs/proposals/keyboard-cheatsheet.md` (§3), `reimport-entry-point.md`
+(§14), `object-inspector-anchor.md` (§11), `camera-lens-picker.md` (§17),
+`handle-reskin.md` (§5), `shell-texture-preview.md` (§18),
+`location-lighting.md` (§9), `tint-blend-modes.md` (§10).
+
+**Still blocked** — §15 (rug bug repro still not provided). **No action
+needed** — §8, §16 (unchanged from prior round).
