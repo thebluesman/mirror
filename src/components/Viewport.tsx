@@ -4,7 +4,13 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { Footprints, Orbit as OrbitIcon } from "lucide-react";
-import { addFurnitureBoxMeshes, buildScene, furnitureOverallDims, type BuiltScene } from "../scene/buildScene";
+import {
+  addFurnitureBoxMeshes,
+  buildScene,
+  furnitureOverallDims,
+  sunPositionFromAngles,
+  type BuiltScene,
+} from "../scene/buildScene";
 import { applyShellSurface, updateSurfaceCalibrationInPlace, type ShellSurface } from "../scene/shellMaterials";
 import { loadShellTexture } from "../scene/loadShellTexture";
 import { fitModelToDims, loadFurnitureModel } from "../scene/loadFurnitureModel";
@@ -22,8 +28,10 @@ import {
   type WalkInput,
 } from "../scene/walkCamera";
 import {
+  DEFAULT_LIGHTING,
   DEFAULT_SURFACE_CALIBRATION,
   type CameraPosition,
+  type Lighting,
   type ShellCalibration,
   type SurfaceCalibration,
 } from "../schema/scene";
@@ -382,6 +390,10 @@ export const Viewport = forwardRef<
     /** Live calibration, applied without rebuilding the scene/renderer — see
      *  the shell-update effect below. Defaults to sceneFile.room.shell. */
     shellCalibration?: ShellCalibration;
+    /** improvements-v2.2 §4a: live sun/hemisphere params, applied without
+     *  rebuilding the scene/renderer — see the lighting-update effect below.
+     *  Defaults to sceneFile.room.lighting (then DEFAULT_LIGHTING). */
+    lighting?: Lighting;
     /** v2 spike (W-A): fired once per gesture — on drag-release for a move,
      *  or per keypress for a rotate step — with the item's final position/
      *  rotation. Never fired per-frame mid-drag; see the pointer-handler
@@ -399,7 +411,7 @@ export const Viewport = forwardRef<
      *  see today's unlocked behavior. */
     globalLock?: boolean;
   }
->(function Viewport({ sceneFile, shellCalibration, onCommitPlacement, onToggleLock, globalLock }, handleRef) {
+>(function Viewport({ sceneFile, shellCalibration, lighting, onCommitPlacement, onToggleLock, globalLock }, handleRef) {
   const containerRef = useRef<HTMLDivElement>(null);
   const builtRef = useRef<BuiltScene | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -573,9 +585,9 @@ export const Viewport = forwardRef<
   // e.g. furniture/walls/camera edits, silently stopped rebuilding).
   //
   // The effect depends on `structuralSceneFile`, a useMemo'd reference to
-  // `sceneFile` that only changes when a *non-shell* top-level field
-  // changes — NOT on `sceneFile` directly. That distinction matters beyond
-  // "skip the work": an effect's cleanup always runs before its next
+  // `sceneFile` that only changes when a *non-shell, non-lighting* top-level
+  // field changes — NOT on `sceneFile` directly. That distinction matters
+  // beyond "skip the work": an effect's cleanup always runs before its next
   // invocation whenever its dependency changes, full stop, regardless of
   // what the new invocation's body decides to do — so gating the rebuild
   // with an early-return *inside* an effect keyed on raw `sceneFile` would
@@ -1740,6 +1752,26 @@ export const Viewport = forwardRef<
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- buildVersion is a signal (rebuild happened), not a value read in the effect
   }, [calibration, buildVersion]);
+
+  // Live sun/hemisphere updates (improvements-v2.2 §4a): same "mutate the
+  // structural effect's already-created objects in place, no renderer/camera
+  // churn" shape as the calibration effect above, just simpler — lighting is
+  // plain numbers (no async texture decode/dispose), so there's only ever
+  // the "cheap path" and no diffing against a previously-applied value is
+  // needed; recomputing is trivial and idempotent.
+  const lightingSettings = lighting ?? sceneFile.room.lighting ?? DEFAULT_LIGHTING;
+
+  useEffect(() => {
+    const built = builtRef.current;
+    if (!built) return;
+    const { sun, hemisphere } = built.lighting;
+    hemisphere.intensity = lightingSettings.hemisphereIntensity;
+    sun.intensity = lightingSettings.sunIntensity;
+    sun.position.copy(
+      sunPositionFromAngles(lightingSettings.sunAzimuthDeg, lightingSettings.sunElevationDeg, sun.target.position),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- buildVersion is a signal (rebuild happened), not a value read in the effect
+  }, [lightingSettings, buildVersion]);
 
   // v2 spike (W-A) — placement reconciliation: the other half of the
   // mutate-during-gesture/commit-on-drop seam (the drag/rotate handlers in

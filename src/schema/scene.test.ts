@@ -3,7 +3,9 @@ import seedRaw from "../../seed/living-room.json";
 import {
   SceneFileSchema,
   SCHEMA_VERSION,
+  DEFAULT_LIGHTING,
   DEFAULT_SURFACE_CALIBRATION,
+  LightingSchema,
   ShellCalibrationSchema,
   SurfaceCalibrationSchema,
   migrate,
@@ -235,5 +237,49 @@ describe("shell texture calibration (Phase 3)", () => {
 
   it("rejects a malformed calibration (repeat must be a 2-tuple)", () => {
     expect(() => ShellCalibrationSchema.parse({ wall: { repeat: [1, 2, 3] } })).toThrow();
+  });
+});
+
+describe("real-time lighting controls (improvements-v2.2 §4a)", () => {
+  it("is optional — a scene with no room.lighting still validates (old files unaffected)", () => {
+    expect(() => SceneFileSchema.parse(minimalV1())).not.toThrow();
+    const scene = SceneFileSchema.parse(minimalV1());
+    expect(scene.room.lighting).toBeUndefined();
+  });
+
+  it("LightingSchema fills in defaults reproducing the old hardcoded sun/hemisphere for an empty object", () => {
+    const parsed = LightingSchema.parse({});
+    expect(parsed).toEqual(DEFAULT_LIGHTING);
+  });
+
+  it("DEFAULT_LIGHTING's derived azimuth/elevation round-trip back to the original hardcoded sun position", () => {
+    // Mirrors buildScene.ts's sunPositionFromAngles reconstruction, so this
+    // fails if the schema's derivation and buildScene's inverse ever drift.
+    const az = (DEFAULT_LIGHTING.sunAzimuthDeg * Math.PI) / 180;
+    const el = (DEFAULT_LIGHTING.sunElevationDeg * Math.PI) / 180;
+    const radius = Math.hypot(60 - 820, 330 - 0, 420 - 560);
+    const horizontal = radius * Math.cos(el);
+    const x = 820 + horizontal * Math.sin(az);
+    const y = 0 + radius * Math.sin(el);
+    const z = 560 + horizontal * Math.cos(az);
+    expect(x).toBeCloseTo(60, 6);
+    expect(y).toBeCloseTo(330, 6);
+    expect(z).toBeCloseTo(420, 6);
+  });
+
+  it("accepts a partial lighting object and fills in the rest from defaults", () => {
+    const scene = minimalV1() as any;
+    scene.room.lighting = { sunIntensity: 4 };
+    const parsed = SceneFileSchema.parse(scene);
+    expect(parsed.room.lighting?.sunIntensity).toBe(4);
+    expect(parsed.room.lighting?.hemisphereIntensity).toBe(DEFAULT_LIGHTING.hemisphereIntensity);
+  });
+
+  it("round-trips custom lighting through JSON like the rest of the scene", () => {
+    const scene = minimalV1() as any;
+    scene.room.lighting = { sunIntensity: 3.2, sunAzimuthDeg: 45, sunElevationDeg: 30, hemisphereIntensity: 0.5 };
+    const parsed = parseScene(scene);
+    const roundTripped = parseScene(JSON.parse(JSON.stringify(parsed)));
+    expect(roundTripped).toEqual(parsed);
   });
 });

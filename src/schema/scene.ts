@@ -107,11 +107,54 @@ export const ShellCalibrationSchema = z
   })
   .loose();
 
+// Real-time lighting controls (improvements-v2.2 §4a): exposes buildScene.ts's
+// previously-hardcoded DirectionalLight ("sun") + HemisphereLight params as
+// scene data. Distance-from-target is deliberately NOT a field — only angle
+// (azimuth/elevation) and intensity are in scope per the improvements doc —
+// so the sun orbits its fixed target at a fixed radius; buildScene.ts derives
+// both from the original hardcoded position/target below and reconstructs
+// `sun.position` from azimuth/elevation/radius at render time.
+//
+// Math (reproducing today's exact hardcoded look, so a saved file without
+// `room.lighting` — or a user who hasn't touched the sliders — renders
+// pixel-identical to before this feature existed):
+//   sun.position = (60, 330, 420), sun.target.position = (820, 0, 560)
+//   vector (position - target) = (60-820, 330-0, 420-560) = (-760, 330, -140)
+//   radius (SUN_DISTANCE_CM)   = |vector| = sqrt(760^2 + 330^2 + 140^2) ≈ 840.30cm
+//   elevation                 = asin(vector.y / radius)          -- angle above horizontal
+//   azimuth                   = atan2(vector.x, vector.z)        -- horizontal angle, 0deg = +Z, 90deg = +X
+// The constants below compute this via actual Math calls (not rounded
+// decimal literals) so the round-trip through buildScene's inverse
+// (position = target + radius * (sin(az)cos(el), sin(el), cos(az)cos(el)))
+// reproduces the original vector to floating-point precision.
+const SUN_REFERENCE_VECTOR = { x: 60 - 820, y: 330 - 0, z: 420 - 560 };
+export const SUN_DISTANCE_CM = Math.hypot(
+  SUN_REFERENCE_VECTOR.x,
+  SUN_REFERENCE_VECTOR.y,
+  SUN_REFERENCE_VECTOR.z,
+);
+const DEFAULT_SUN_ELEVATION_DEG =
+  (Math.asin(SUN_REFERENCE_VECTOR.y / SUN_DISTANCE_CM) * 180) / Math.PI;
+const DEFAULT_SUN_AZIMUTH_DEG =
+  (Math.atan2(SUN_REFERENCE_VECTOR.x, SUN_REFERENCE_VECTOR.z) * 180) / Math.PI;
+const DEFAULT_SUN_INTENSITY = 2.6;
+const DEFAULT_HEMISPHERE_INTENSITY = 1.05;
+
+export const LightingSchema = z
+  .object({
+    sunIntensity: z.number().default(DEFAULT_SUN_INTENSITY),
+    sunAzimuthDeg: z.number().default(DEFAULT_SUN_AZIMUTH_DEG),
+    sunElevationDeg: z.number().default(DEFAULT_SUN_ELEVATION_DEG),
+    hemisphereIntensity: z.number().default(DEFAULT_HEMISPHERE_INTENSITY),
+  })
+  .loose();
+
 export const RoomSchema = z.object({
   ceilingHeightCm: z.number(),
   floor: z.array(FloorRect),
   walls: z.array(WallDefSchema),
   shell: ShellCalibrationSchema.optional(),
+  lighting: LightingSchema.optional(),
 });
 
 /** No-op calibration — used when a surface has no entry in `room.shell` yet. */
@@ -119,6 +162,16 @@ export const DEFAULT_SURFACE_CALIBRATION: SurfaceCalibration = {
   tint: "#ffffff",
   repeat: [1, 1],
   roughnessScale: 1,
+};
+
+/** No-op lighting — used when `room.lighting` is absent (old saved files, or
+ *  a user who hasn't touched the sliders yet). Reproduces buildScene.ts's
+ *  original hardcoded sun/hemisphere exactly — see the derivation above. */
+export const DEFAULT_LIGHTING: Lighting = {
+  sunIntensity: DEFAULT_SUN_INTENSITY,
+  sunAzimuthDeg: DEFAULT_SUN_AZIMUTH_DEG,
+  sunElevationDeg: DEFAULT_SUN_ELEVATION_DEG,
+  hemisphereIntensity: DEFAULT_HEMISPHERE_INTENSITY,
 };
 
 // FurnitureItem is a union rather than a flat shape with an optional
@@ -242,6 +295,7 @@ export type WallDef = z.infer<typeof WallDefSchema>;
 export type Room = z.infer<typeof RoomSchema>;
 export type SurfaceCalibration = z.infer<typeof SurfaceCalibrationSchema>;
 export type ShellCalibration = z.infer<typeof ShellCalibrationSchema>;
+export type Lighting = z.infer<typeof LightingSchema>;
 export type FurnitureItem = z.infer<typeof FurnitureItemSchema>;
 export type CameraPosition = z.infer<typeof CameraPositionSchema>;
 export type PlaceCommand = z.infer<typeof PlaceCommandSchema>;
