@@ -64,11 +64,29 @@
   color: var(--color-muted-slate);
   cursor: pointer;
   padding: 0 var(--space-8) 0 var(--space-2);
-  margin-left: calc(var(--space-8) * -1);
   line-height: 1;
 }
 
 .viewport-chrome-remove:hover {
+  color: var(--color-canvas);
+}
+
+/* Sits between the pill and the (optional) remove button — pulled snug
+ * against the pill the same way .viewport-chrome-remove originally was,
+ * since it's now the first icon-button neighbor; .viewport-chrome-remove's
+ * own pull was dropped so the two icon buttons don't overlap each other. */
+.viewport-chrome-rename {
+  font-size: 11px;
+  background: none;
+  border: none;
+  color: var(--color-muted-slate);
+  cursor: pointer;
+  padding: 0 var(--space-2);
+  margin-left: calc(var(--space-8) * -1);
+  line-height: 1;
+}
+
+.viewport-chrome-rename:hover {
   color: var(--color-canvas);
 }
 

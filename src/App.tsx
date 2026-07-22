@@ -7,8 +7,8 @@ import { ShellPanel } from "./components/ShellPanel";
 import { ImportPanel } from "./components/ImportPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { parseScene, type CameraPosition, type SceneFile, type SurfaceCalibration } from "./schema/scene";
-import { makeCameraPosition } from "./scene/cameraViewpoints";
-import { makeLayout } from "./scene/layouts";
+import { makeCameraPosition, renameCameraPosition } from "./scene/cameraViewpoints";
+import { makeLayout, renameLayout } from "./scene/layouts";
 import { commitToActiveLayout, setPlaceCommand } from "./scene/commit";
 import { loadProject, saveProjectDebounced, saveProjectNow } from "./storage/autosave";
 import "./App.css";
@@ -113,6 +113,13 @@ function App() {
     commit({ ...sceneFile, cameras: sceneFile.cameras.filter((c) => c.id !== id) });
   }
 
+  // PRD-v2 §7.2: in-place rename — id/eye/lookAt/fovDeg untouched, so this is
+  // a plain map over cameras[], same shape as handleDeleteView above.
+  function handleRenameView(id: string, name: string) {
+    if (!sceneFile) return;
+    commit({ ...sceneFile, cameras: sceneFile.cameras.map((c) => (c.id === id ? renameCameraPosition(c, name) : c)) });
+  }
+
   // D3 (v2 spike, W-A persistence): saving/deleting a layout, and switching
   // which one is `current`, are each a discrete, deliberate action — same
   // immediate-persist treatment (via `commit`) as viewpoint save/delete.
@@ -137,6 +144,13 @@ function App() {
     // second guard against the same invariant, not the only one.
     if (id === sceneFile.current || sceneFile.layouts.length <= 1) return;
     commit({ ...sceneFile, layouts: sceneFile.layouts.filter((l) => l.id !== id) });
+  }
+
+  // PRD-v2 §7.2: in-place rename — id/base/commands untouched, so this is a
+  // plain map over layouts[], same shape as handleDeleteLayout above.
+  function handleRenameLayout(id: string, name: string) {
+    if (!sceneFile) return;
+    commit({ ...sceneFile, layouts: sceneFile.layouts.map((l) => (l.id === id ? renameLayout(l, name) : l)) });
   }
 
   // v2 spike (W-A, `v2/spike-arrange`): Viewport's drag-release/rotate-step
@@ -172,12 +186,14 @@ function App() {
                 onSwitch={handleSwitchLayout}
                 onSave={handleSaveLayout}
                 onDelete={handleDeleteLayout}
+                onRename={handleRenameLayout}
               />
               <ViewportChrome
                 cameras={sceneFile.cameras}
                 onRecall={(preset) => viewportRef.current?.flyTo(preset)}
                 onSave={handleSaveView}
                 onDelete={handleDeleteView}
+                onRename={handleRenameView}
               />
             </>
           ) : (

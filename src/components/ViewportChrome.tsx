@@ -11,6 +11,7 @@ export function ViewportChrome({
   onRecall,
   onSave,
   onDelete,
+  onRename,
 }: {
   cameras: CameraPosition[];
   onRecall: (preset: CameraPosition) => void;
@@ -19,10 +20,16 @@ export function ViewportChrome({
    *  failed save doesn't silently read as done. */
   onSave: (name: string) => boolean;
   onDelete: (id: string) => void;
+  /** In-place rename (PRD-v2 §7.2) — id/eye/lookAt/fovDeg are untouched, only
+   *  the display name changes. Unlike onSave, there's no failure mode worth
+   *  surfacing here, so this is fire-and-forget like onDelete. */
+  onRename: (id: string, name: string) => void;
 }) {
   const [naming, setNaming] = useState(false);
   const [name, setName] = useState("");
   const [saveFailed, setSaveFailed] = useState(false);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
 
   function commitSave() {
     const trimmed = name.trim();
@@ -36,25 +43,75 @@ export function ViewportChrome({
     }
   }
 
+  function startRename(cam: CameraPosition) {
+    setRenamingId(cam.id);
+    setRenameValue(cam.name);
+  }
+
+  function commitRename() {
+    if (renamingId) onRename(renamingId, renameValue);
+    setRenamingId(null);
+    setRenameValue("");
+  }
+
+  function cancelRename() {
+    setRenamingId(null);
+    setRenameValue("");
+  }
+
   return (
     <div className="viewport-chrome">
       <p className="viewport-chrome-hint">Drag to orbit · scroll to zoom · right-drag to pan</p>
       <div className="viewport-chrome-bar">
-        {cameras.map((cam) => (
-          <div key={cam.id} className="viewport-chrome-view">
-            <button type="button" className="viewport-chrome-pill" onClick={() => onRecall(cam)}>
-              {cam.name}
-            </button>
-            <button
-              type="button"
-              className="viewport-chrome-remove"
-              aria-label={`Delete saved view "${cam.name}"`}
-              onClick={() => onDelete(cam.id)}
+        {cameras.map((cam) =>
+          renamingId === cam.id ? (
+            <form
+              key={cam.id}
+              className="viewport-chrome-naming"
+              onSubmit={(e) => {
+                e.preventDefault();
+                commitRename();
+              }}
             >
-              ×
-            </button>
-          </div>
-        ))}
+              <input
+                type="text"
+                autoFocus
+                className="viewport-chrome-naming-input"
+                aria-label={`Rename saved view "${cam.name}"`}
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") cancelRename();
+                }}
+              />
+              <button type="submit" className="viewport-chrome-pill viewport-chrome-pill--outline">
+                Save
+              </button>
+            </form>
+          ) : (
+            <div key={cam.id} className="viewport-chrome-view">
+              <button type="button" className="viewport-chrome-pill" onClick={() => onRecall(cam)}>
+                {cam.name}
+              </button>
+              <button
+                type="button"
+                className="viewport-chrome-rename"
+                aria-label={`Rename saved view "${cam.name}"`}
+                onClick={() => startRename(cam)}
+              >
+                ✎
+              </button>
+              <button
+                type="button"
+                className="viewport-chrome-remove"
+                aria-label={`Delete saved view "${cam.name}"`}
+                onClick={() => onDelete(cam.id)}
+              >
+                ×
+              </button>
+            </div>
+          ),
+        )}
 
         {naming ? (
           <form
