@@ -1,8 +1,9 @@
 import * as THREE from "three";
-import type { CameraPosition, FurnitureItem, SceneFile, WallDef } from "./types";
+import type { CameraPosition, FurnitureItem, Room, SceneFile, WallDef } from "./types";
 import { flatTextureBoxDims } from "./flatItemTexture";
 import { applyTintBlend } from "./tintBlend";
-import { DEFAULT_LIGHTING, SUN_DISTANCE_CM, type Lighting } from "../schema/scene";
+import { DEFAULT_LIGHTING, SUN_DISTANCE_CM } from "../schema/scene";
+import { sceneSunAnglesFromLocation } from "../util/solarPosition";
 
 // Exported for src/scene/collision.ts (v2 spike D2 code-review finding):
 // collision/snap wall AABBs need the exact same thickness the renderer
@@ -443,6 +444,56 @@ export function sunPositionFromAngles(
   );
 }
 
+/** Elevation (deg) below which location mode's sun fades all the way to
+ *  zero intensity — proposal §6 Q2's "scale sun intensity down as true
+ *  elevation drops through 0, so night reads dark without breaking shadows."
+ *  10deg (not 0) gives a short dusk/dawn taper instead of a hard cut. */
+const NIGHT_FADE_ELEVATION_DEG = 10;
+
+/** Resolved sun/hemisphere render params — the single place that decides
+ *  "manual sliders" vs "computed from location" (improvements-minor-fixes
+ *  §9). Shared by buildScene's initial construction and Viewport's live
+ *  lighting-update effect, the same "one seam, never compute this
+ *  differently in two places" shape as `sunPositionFromAngles` itself.
+ *
+ * Location mode drives angle only (proposal §6 Q3) — `sunIntensity`/
+ * `hemisphereIntensity` always come from the manual sliders (`room.lighting`)
+ * in both modes, just scaled by a day/night fade factor derived from the
+ * *unclamped* computed elevation. `room.lighting` itself is never read as
+ * "mode: manual" and mutated — this only ever computes an ephemeral render
+ * value, so toggling back to manual restores the stored sliders untouched
+ * (proposal §4.3). */
+export function resolveSunLighting(
+  room: Pick<Room, "lighting" | "lightingMode" | "location">,
+): { sunAzimuthDeg: number; sunElevationDeg: number; sunIntensity: number; hemisphereIntensity: number } {
+  const manual = room.lighting ?? DEFAULT_LIGHTING;
+  const mode = room.lightingMode ?? "manual";
+
+  if (mode === "location" && room.location) {
+    const { sceneAzimuthDeg, sceneElevationDeg } = sceneSunAnglesFromLocation(room.location);
+    // Same 5-85deg clamp the manual elevation slider uses, and for the same
+    // reason (LightingPanel.tsx: avoids the degenerate near-horizon/near-
+    // zenith angles where the fixed shadow-camera frustum stops usefully
+    // covering the room) — a real computed sun can sit anywhere, including
+    // below the horizon.
+    const clampedElevation = THREE.MathUtils.clamp(sceneElevationDeg, 5, 85);
+    const nightFade = THREE.MathUtils.clamp(sceneElevationDeg / NIGHT_FADE_ELEVATION_DEG, 0, 1);
+    return {
+      sunAzimuthDeg: sceneAzimuthDeg,
+      sunElevationDeg: clampedElevation,
+      sunIntensity: manual.sunIntensity * nightFade,
+      hemisphereIntensity: manual.hemisphereIntensity,
+    };
+  }
+
+  return {
+    sunAzimuthDeg: manual.sunAzimuthDeg,
+    sunElevationDeg: manual.sunElevationDeg,
+    sunIntensity: manual.sunIntensity,
+    hemisphereIntensity: manual.hemisphereIntensity,
+  };
+}
+
 export interface BuiltScene {
   scene: THREE.Scene;
   cameras: CameraPosition[];
@@ -465,7 +516,9 @@ export function buildScene(sceneFile: SceneFile): BuiltScene {
   // improvements-v2.2 §4a: was hardcoded (intensity 2.6, fixed position);
   // now reads room.lighting (falling back to DEFAULT_LIGHTING, which
   // reproduces the old hardcoded look exactly — see schema/scene.ts).
-  const lighting: Lighting = sceneFile.room.lighting ?? DEFAULT_LIGHTING;
+  // improvements-minor-fixes §9: resolveSunLighting additionally picks
+  // location-derived angles when room.lightingMode is "location".
+  const lighting = resolveSunLighting(sceneFile.room);
 
   const sun = new THREE.DirectionalLight(0xffdcae, lighting.sunIntensity);
   sun.target.position.set(820, 0, 560); // fixed target — only angle/intensity are in scope, not distance

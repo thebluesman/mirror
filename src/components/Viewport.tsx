@@ -8,6 +8,7 @@ import {
   addFurnitureBoxMeshes,
   buildScene,
   furnitureOverallDims,
+  resolveSunLighting,
   sunPositionFromAngles,
   type BuiltScene,
 } from "../scene/buildScene";
@@ -34,10 +35,11 @@ import {
   type WalkInput,
 } from "../scene/walkCamera";
 import {
-  DEFAULT_LIGHTING,
   DEFAULT_SURFACE_CALIBRATION,
   type CameraPosition,
   type Lighting,
+  type LightingMode,
+  type Location,
   type ShellCalibration,
   type SurfaceCalibration,
 } from "../schema/scene";
@@ -405,6 +407,11 @@ export const Viewport = forwardRef<
      *  rebuilding the scene/renderer — see the lighting-update effect below.
      *  Defaults to sceneFile.room.lighting (then DEFAULT_LIGHTING). */
     lighting?: Lighting;
+    /** improvements-minor-fixes §9: live mode/location, same "applied
+     *  without rebuilding" shape as `lighting` above. Default to
+     *  sceneFile.room.lightingMode / .location. */
+    lightingMode?: LightingMode;
+    location?: Location;
     /** v2 spike (W-A): fired once per gesture — on drag-release for a move,
      *  or per keypress for a rotate step — with the item's final position/
      *  rotation. Never fired per-frame mid-drag; see the pointer-handler
@@ -428,7 +435,7 @@ export const Viewport = forwardRef<
     onEditItem?: (itemId: string, patch: ObjectEditPatch) => void;
   }
 >(function Viewport(
-  { sceneFile, shellCalibration, lighting, onCommitPlacement, onToggleLock, globalLock, onEditItem },
+  { sceneFile, shellCalibration, lighting, lightingMode, location, onCommitPlacement, onToggleLock, globalLock, onEditItem },
   handleRef,
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1926,13 +1933,22 @@ export const Viewport = forwardRef<
     // eslint-disable-next-line react-hooks/exhaustive-deps -- buildVersion is a signal (rebuild happened), not a value read in the effect
   }, [calibration, buildVersion]);
 
-  // Live sun/hemisphere updates (improvements-v2.2 §4a): same "mutate the
+  // Live sun/hemisphere updates (improvements-v2.2 §4a; extended by
+  // improvements-minor-fixes §9 for location mode): same "mutate the
   // structural effect's already-created objects in place, no renderer/camera
   // churn" shape as the calibration effect above, just simpler — lighting is
   // plain numbers (no async texture decode/dispose), so there's only ever
   // the "cheap path" and no diffing against a previously-applied value is
-  // needed; recomputing is trivial and idempotent.
-  const lightingSettings = lighting ?? sceneFile.room.lighting ?? DEFAULT_LIGHTING;
+  // needed; recomputing is trivial and idempotent. resolveSunLighting is the
+  // single seam (shared with buildScene's initial build) that decides
+  // manual-vs-location — see buildScene.ts.
+  const effectiveLighting = lighting ?? sceneFile.room.lighting;
+  const effectiveLightingMode = lightingMode ?? sceneFile.room.lightingMode;
+  const effectiveLocation = location ?? sceneFile.room.location;
+  const lightingSettings = useMemo(
+    () => resolveSunLighting({ lighting: effectiveLighting, lightingMode: effectiveLightingMode, location: effectiveLocation }),
+    [effectiveLighting, effectiveLightingMode, effectiveLocation],
+  );
 
   useEffect(() => {
     const built = builtRef.current;

@@ -190,12 +190,64 @@ export const LightingSchema = z
   })
   .loose();
 
+// improvements-minor-fixes §9 (docs/proposals/location-lighting.md §4):
+// selects where the sun's azimuth/elevation come from. "manual" = the
+// LightingSchema sliders (today's behavior). "location" = derived from
+// `room.location` via the NOAA solar calc + orientation transform
+// (src/util/solarPosition.ts), fed into the SAME sunPositionFromAngles path
+// buildScene.ts already uses. An enum, not a boolean, so a future third
+// source (e.g. an animated time-lapse) is additive.
+export const LightingModeSchema = z.enum(["manual", "location"]);
+export type LightingMode = z.infer<typeof LightingModeSchema>;
+
+// The location inputs (proposal §4.1). Separate from LightingSchema on
+// purpose: LightingSchema holds the *resolved* render params (azimuth/
+// elevation/intensities); this holds the *source* facts (where/when/which-
+// way-the-room-faces) that location mode computes azimuth/elevation FROM.
+// Keeping them separate means switching modes never destroys the other
+// mode's data — the manual slider values and the location facts both
+// persist, and the toggle just chooses which feeds the sun. `.loose()` for
+// forward-compat notes, matching every sibling schema.
+export const LocationSchema = z
+  .object({
+    latitudeDeg: z.number().min(-90).max(90),
+    longitudeDeg: z.number().min(-180).max(180),
+    // Compass bearing the scene's +Z axis faces (0 = north, clockwise). The
+    // orientation input; NOT compass-aligned to the scene by default, which
+    // is the whole reason §9 calls for a separate field. Both the degree
+    // entry and the compass-point <select> write this one number (proposal
+    // §3.3).
+    orientationDeg: z.number(),
+    // Local clock hour, 0..24 (fractional allowed for half-hours). See
+    // proposal §2.
+    timeOfDayHour: z.number().min(0).max(24),
+    // ISO YYYY-MM-DD. OPTIONAL by design: present => hour+date (seasonal sun
+    // height correct); absent => hour-only against a fixed reference date
+    // (proposal §2, §4.3). Making it optional is what lets "hour-only first,
+    // add date later" be a non-breaking change if that's ever revisited.
+    date: z.string().optional(),
+    // OPTIONAL escape hatch: if set, overrides the longitude-derived
+    // timezone (round(lng/15)) the solar calc uses by default (proposal
+    // §1.2). Absent => derived.
+    timezoneOffsetHours: z.number().optional(),
+  })
+  .loose();
+export type Location = z.infer<typeof LocationSchema>;
+
 export const RoomSchema = z.object({
   ceilingHeightCm: z.number(),
   floor: z.array(FloorRect),
   walls: z.array(WallDefSchema),
   shell: ShellCalibrationSchema.optional(),
-  lighting: LightingSchema.optional(),
+  lighting: LightingSchema.optional(), // unchanged — the manual params
+  // improvements-minor-fixes §9: absent => "manual" (back-compat) — read via
+  // `room.lightingMode ?? "manual"`, never a schema `.default()` (that would
+  // rewrite every legacy file's meaning at parse time — the same mistake
+  // object-categories.md §1 calls out for `category`).
+  lightingMode: LightingModeSchema.optional(),
+  // improvements-minor-fixes §9: absent => location mode has nothing to
+  // compute from (UI-guarded, not a schema error — see proposal §4.3).
+  location: LocationSchema.optional(),
 });
 
 /** No-op calibration — used when a surface has no entry in `room.shell` yet. */

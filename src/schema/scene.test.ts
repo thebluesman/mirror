@@ -283,3 +283,70 @@ describe("real-time lighting controls (improvements-v2.2 §4a)", () => {
     expect(roundTripped).toEqual(parsed);
   });
 });
+
+// improvements-minor-fixes §9 (docs/proposals/location-lighting.md §4):
+// `lightingMode`/`location` are additive-optional, exactly like `locked`/
+// `category` before them — no `.default()`, so a legacy file with neither
+// field validates unchanged and reads as "manual" via `room.lightingMode ??
+// "manual"` in consuming code, never via a schema default.
+describe("location-driven lighting (improvements-minor-fixes §9)", () => {
+  it("lightingMode and location are both optional — a scene with neither still validates and reads undefined", () => {
+    const parsed = SceneFileSchema.parse(minimalV1());
+    expect(parsed.room.lightingMode).toBeUndefined();
+    expect(parsed.room.location).toBeUndefined();
+  });
+
+  it("does NOT default lightingMode to 'manual' at parse time — absence must stay absence, not get stamped", () => {
+    const parsed = SceneFileSchema.parse(minimalV1());
+    expect(parsed.room).not.toHaveProperty("lightingMode", "manual");
+    expect("lightingMode" in parsed.room).toBe(false);
+  });
+
+  it("accepts a full location object and carries it through unchanged", () => {
+    const scene = minimalV1() as any;
+    scene.room.lightingMode = "location";
+    scene.room.location = {
+      latitudeDeg: 40.7128,
+      longitudeDeg: -74.006,
+      orientationDeg: 135,
+      timeOfDayHour: 9.5,
+      date: "2026-07-22",
+    };
+    const parsed = SceneFileSchema.parse(scene);
+    expect(parsed.room.lightingMode).toBe("location");
+    expect(parsed.room.location).toEqual(scene.room.location);
+  });
+
+  it("location.date and location.timezoneOffsetHours are optional (hour-only fallback / derive-from-longitude escape hatch)", () => {
+    const scene = minimalV1() as any;
+    scene.room.location = { latitudeDeg: 0, longitudeDeg: 0, orientationDeg: 0, timeOfDayHour: 12 };
+    const parsed = SceneFileSchema.parse(scene);
+    expect(parsed.room.location?.date).toBeUndefined();
+    expect(parsed.room.location?.timezoneOffsetHours).toBeUndefined();
+  });
+
+  it("rejects latitude/longitude out of range", () => {
+    const scene = minimalV1() as any;
+    scene.room.location = { latitudeDeg: 91, longitudeDeg: 0, orientationDeg: 0, timeOfDayHour: 12 };
+    expect(() => SceneFileSchema.parse(scene)).toThrow();
+  });
+
+  it("keeps room.lighting (the manual sliders) intact alongside a set location — the two never clobber each other", () => {
+    const scene = minimalV1() as any;
+    scene.room.lighting = { sunIntensity: 3.2, sunAzimuthDeg: 45, sunElevationDeg: 30, hemisphereIntensity: 0.5 };
+    scene.room.lightingMode = "location";
+    scene.room.location = { latitudeDeg: 51.5, longitudeDeg: -0.12, orientationDeg: 0, timeOfDayHour: 8 };
+    const parsed = parseScene(scene);
+    expect(parsed.room.lighting?.sunIntensity).toBe(3.2);
+    expect(parsed.room.location?.latitudeDeg).toBe(51.5);
+  });
+
+  it("round-trips lightingMode/location through JSON like the rest of the scene", () => {
+    const scene = minimalV1() as any;
+    scene.room.lightingMode = "location";
+    scene.room.location = { latitudeDeg: 1, longitudeDeg: 2, orientationDeg: 3, timeOfDayHour: 4, date: "2026-01-01" };
+    const parsed = parseScene(scene);
+    const roundTripped = parseScene(JSON.parse(JSON.stringify(parsed)));
+    expect(roundTripped).toEqual(parsed);
+  });
+});

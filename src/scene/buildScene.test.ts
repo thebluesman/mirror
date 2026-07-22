@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
-import { buildScene, addFurnitureBoxMeshes } from "./buildScene";
+import { buildScene, addFurnitureBoxMeshes, resolveSunLighting } from "./buildScene";
 import type { SceneFile } from "./types";
-import type { Lighting } from "../schema/scene";
+import type { Lighting, LightingMode, Location } from "../schema/scene";
 
 // v2 spike D4 (W-B, rug fix ladder lever 2 — see spike-v2/OUTCOME.md):
 // covers buildScene's new flat-textured-plane path for a box item carrying
@@ -11,7 +11,12 @@ import type { Lighting } from "../schema/scene";
 // construct THREE objects), same "exercise the real builder function"
 // approach collision.test.ts/loadFurnitureModel.test.ts already use.
 
-function sceneFileWithItem(item: SceneFile["items"][number], lighting?: Lighting): SceneFile {
+function sceneFileWithItem(
+  item: SceneFile["items"][number],
+  lighting?: Lighting,
+  lightingMode?: LightingMode,
+  location?: Location,
+): SceneFile {
   return {
     meta: { source: "test", units: "cm", schemaVersion: "v1" },
     room: {
@@ -19,6 +24,8 @@ function sceneFileWithItem(item: SceneFile["items"][number], lighting?: Lighting
       floor: [{ name: "main", x: 0, z: 0, w: 500, d: 500 }],
       walls: [],
       lighting,
+      lightingMode,
+      location,
     },
     items: [item],
     cameras: [],
@@ -272,5 +279,92 @@ describe("buildScene — lighting (improvements-v2.2 §4a)", () => {
     expect(sun.target.position.toArray()).toEqual([820, 0, 560]); // target still fixed
     // A different azimuth/elevation must move the sun off its default spot.
     expect(sun.position.toArray()).not.toEqual([60, 330, 420]);
+  });
+});
+
+// improvements-minor-fixes §9: location-driven sun. resolveSunLighting is
+// the single seam buildScene's initial build and Viewport's live effect both
+// go through — these exercise it directly, plus a couple of buildScene
+// integration checks.
+describe("resolveSunLighting (improvements-minor-fixes §9)", () => {
+  const manual: Lighting = { sunIntensity: 3, sunAzimuthDeg: 200, sunElevationDeg: 40, hemisphereIntensity: 0.5 };
+
+  it("with no lightingMode, resolves manual angles/intensity unchanged (back-compat default)", () => {
+    const resolved = resolveSunLighting({ lighting: manual, lightingMode: undefined, location: undefined });
+    expect(resolved).toEqual({
+      sunAzimuthDeg: 200,
+      sunElevationDeg: 40,
+      sunIntensity: 3,
+      hemisphereIntensity: 0.5,
+    });
+  });
+
+  it('with lightingMode "location" but no room.location, falls back to manual (UI-guarded state, not an error)', () => {
+    const resolved = resolveSunLighting({ lighting: manual, lightingMode: "location", location: undefined });
+    expect(resolved.sunAzimuthDeg).toBe(200);
+    expect(resolved.sunElevationDeg).toBe(40);
+  });
+
+  it("in location mode, computes azimuth/elevation from location and leaves the manual sliders it read untouched", () => {
+    const location: Location = {
+      latitudeDeg: 40.7128,
+      longitudeDeg: -74.006,
+      orientationDeg: 180, // +Z faces south
+      timeOfDayHour: 12,
+      date: "2023-06-21", // June solstice, ~solar noon
+    };
+    const resolved = resolveSunLighting({ lighting: manual, lightingMode: "location", location });
+
+    // Solar noon, +Z faces south -> sun lands near the scene's +Z side
+    // (sceneAzimuthDeg ~= 0) — see solarPosition.test.ts's sign pin-down.
+    expect(resolved.sunAzimuthDeg).toBeLessThan(2);
+    // High summer-noon elevation for this latitude (~72.7deg), within the
+    // 5-85deg clamp so it passes through unchanged.
+    expect(resolved.sunElevationDeg).toBeCloseTo(72.7, 0);
+    // hemisphereIntensity is untouched by location mode either way.
+    expect(resolved.hemisphereIntensity).toBe(0.5);
+    // Input `manual` object itself is never mutated.
+    expect(manual.sunAzimuthDeg).toBe(200);
+  });
+
+  it("fades sunIntensity toward zero as the computed elevation drops through the horizon (night)", () => {
+    const nightLocation: Location = {
+      latitudeDeg: 40.7128,
+      longitudeDeg: -74.006,
+      orientationDeg: 0,
+      timeOfDayHour: 2, // 2am — well below the horizon in June
+      date: "2023-06-21",
+    };
+    const resolved = resolveSunLighting({ lighting: manual, lightingMode: "location", location: nightLocation });
+
+    expect(resolved.sunIntensity).toBe(0); // fully faded
+    // Shadow-driving elevation still clamps to the 5deg floor even though
+    // the true sun is below the horizon — shadows don't break, they just
+    // render at (near) zero brightness.
+    expect(resolved.sunElevationDeg).toBe(5);
+  });
+
+  it("buildScene wires resolveSunLighting's output into the actual THREE lights in location mode", () => {
+    const plainItem = { id: "plain-box", name: "Plain", shape: "box" as const, dimsCm: { w: 50, d: 50, h: 50 } };
+    const location: Location = {
+      latitudeDeg: 40.7128,
+      longitudeDeg: -74.006,
+      orientationDeg: 180,
+      timeOfDayHour: 12,
+      date: "2023-06-21",
+    };
+    const built = buildScene(sceneFileWithItem(plainItem, manual, "location", location));
+    const { sun } = built.lighting;
+
+    // Sun offset from target should sit close to the scene's +Z axis (small
+    // x, large positive z) per the same solar-noon/+Z-faces-south check
+    // above — sceneAzimuthDeg is a couple of degrees off exact 0 (clock
+    // noon isn't exact solar noon), so assert the offset is z-dominant
+    // rather than pinning x to ~0.
+    const target = sun.target.position;
+    const dx = sun.position.x - target.x;
+    const dz = sun.position.z - target.z;
+    expect(dz).toBeGreaterThan(0);
+    expect(Math.abs(dx)).toBeLessThan(dz * 0.1);
   });
 });

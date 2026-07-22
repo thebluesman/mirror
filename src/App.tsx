@@ -13,6 +13,8 @@ import {
   parseScene,
   type CameraPosition,
   type Lighting,
+  type LightingMode,
+  type Location,
   type SceneFile,
   type SurfaceCalibration,
 } from "./schema/scene";
@@ -98,6 +100,30 @@ function App() {
     setSceneFile((prev) => {
       if (!prev) return prev;
       const next: SceneFile = { ...prev, room: { ...prev.room, lighting } };
+      saveProjectDebounced(next);
+      return next;
+    });
+  }
+
+  // improvements-minor-fixes §9: mode toggle + location facts, same
+  // debounced-autosave shape as updateLighting above. Deliberately separate
+  // setters (not folded into updateLighting) since `lightingMode`/`location`
+  // are source facts distinct from `lighting`'s resolved slider values
+  // (proposal §4.1) — switching modes must never clobber the other mode's
+  // stored data.
+  function updateLightingMode(lightingMode: LightingMode) {
+    setSceneFile((prev) => {
+      if (!prev) return prev;
+      const next: SceneFile = { ...prev, room: { ...prev.room, lightingMode } };
+      saveProjectDebounced(next);
+      return next;
+    });
+  }
+
+  function updateLocation(location: Location) {
+    setSceneFile((prev) => {
+      if (!prev) return prev;
+      const next: SceneFile = { ...prev, room: { ...prev.room, location } };
       saveProjectDebounced(next);
       return next;
     });
@@ -362,6 +388,8 @@ function App() {
                 sceneFile={sceneFile}
                 shellCalibration={sceneFile.room.shell}
                 lighting={sceneFile.room.lighting}
+                lightingMode={sceneFile.room.lightingMode}
+                location={sceneFile.room.location}
                 onCommitPlacement={commitPlacement}
                 onToggleLock={handleToggleLock}
                 globalLock={globalLock}
@@ -408,7 +436,14 @@ function App() {
               <ShellPanel shell={sceneFile.room.shell} onUpdateSurface={updateShellSurface} />
             )}
             {sceneFile && tab === "Lighting" && (
-              <LightingPanel lighting={sceneFile.room.lighting} onChange={updateLighting} />
+              <LightingPanel
+                lighting={sceneFile.room.lighting}
+                onChange={updateLighting}
+                lightingMode={sceneFile.room.lightingMode}
+                onChangeMode={updateLightingMode}
+                location={sceneFile.room.location}
+                onChangeLocation={updateLocation}
+              />
             )}
             {sceneFile && tab === "Import" && <ImportPanel sceneFile={sceneFile} onImported={handleImported} />}
             {tab === "Settings" && (

@@ -1,16 +1,20 @@
 # Proposal: location-driven sun/lighting — improvements-minor-fixes §9
 
-**Status:** approved for build (2026-07-22 review) — **hour + date** input
-confirmed (§2's open question), per this doc's own recommendation: the date
-field defaults to today's date, capturing the seasonal sun-height swing
-rather than shipping a control that's only correct one season a year.
-Scope (toggle-not-replacement, raw lat/long, separate orientation input,
-basic form styled per `cohere/DESIGN.md`) is already resolved by Shyam
-(2026-07-22, `improvements-minor-fixes.md` §9); this document brings back the
-solar-position math, the concrete input-form design, and the schema shape so
-an implementer can build directly. Two things are deliberately left as
-Shyam's confirm, not silently decided: **time-of-day granularity** (§2) and a
-short list of render-time edge calls (§6).
+**Status:** Built (2026-07-22) — see PR. Implemented as scoped: hand-rolled
+NOAA low-precision solar math (`src/util/solarPosition.ts`), the mode toggle
+inside `LightingPanel.tsx` (Manual / By location, sliders vs. lat/long +
+orientation + time + date fields, degree field + 16-pt compass `<select>`
+both writing `orientationDeg`), and the additive-optional schema shape
+(`LightingModeSchema`, `LocationSchema`, `room.lightingMode`/`room.location`,
+no `SCHEMA_VERSION` bump) exactly as specified below, including this doc's
+own hour+date recommendation (§2). The §1.3 orientation sign was pinned down
+empirically via a unit test (`solarPosition.test.ts`) — plain subtraction
+(`solarAzimuthDeg - orientationDeg`), no flip needed. §6's open questions
+were resolved per the implementer's brief: hour+date (Q1), elevation clamped
+to 5-85° with sun intensity fading to zero as computed elevation drops
+through 0 (Q2), angle-only — intensity stays manual-slider-controlled in both
+modes (Q3), timezone derived from longitude only, no UI field (Q4), and both
+the degree field and the compass `<select>` (Q5).
 **Date:** 2026-07-22
 **Scope frame:** derive the sun's azimuth/elevation from lat/long + date +
 time entirely client-side (no network, per CLAUDE.md's standing "only network
