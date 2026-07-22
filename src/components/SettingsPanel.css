@@ -14,8 +14,7 @@
 }
 
 .settings-row {
-  background: var(--color-canvas);
-  border: 1px solid var(--color-card-border);
+  background: var(--color-soft-stone);
   border-radius: var(--radius-sm);
   padding: var(--space-12);
   display: flex;
@@ -67,6 +66,7 @@
 }
 
 .settings-row-input {
+  width: 100%;
   font: var(--text-body);
   font-size: 13px;
   padding: var(--space-8);
@@ -74,6 +74,13 @@
   border-radius: var(--radius-xs);
   background: var(--color-canvas);
   color: var(--color-ink);
+}
+
+/* DESIGN.md §5 form fields: focus state = colored border + 2px glow ring. */
+.settings-row-input:focus-visible {
+  outline: none;
+  border-color: var(--color-focus-blue);
+  box-shadow: 0 0 0 2px rgba(76, 110, 230, 0.65);
 }
 
 .settings-row-actions {

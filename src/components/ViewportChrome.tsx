@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Pencil, X } from "lucide-react";
 import type { CameraPosition } from "../schema/scene";
 import "./ViewportChrome.css";
 
@@ -99,7 +100,7 @@ export function ViewportChrome({
                 aria-label={`Rename saved view "${cam.name}"`}
                 onClick={() => startRename(cam)}
               >
-                ✎
+                <Pencil size={12} aria-hidden="true" />
               </button>
               <button
                 type="button"
@@ -107,7 +108,7 @@ export function ViewportChrome({
                 aria-label={`Delete saved view "${cam.name}"`}
                 onClick={() => onDelete(cam.id)}
               >
-                ×
+                <X size={14} aria-hidden="true" />
               </button>
             </div>
           ),

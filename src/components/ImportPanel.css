@@ -44,6 +44,12 @@
 
 .import-field select,
 .import-field input {
+  /* Sidebar-width root-cause fix (§1): a <select> sizes to its widest
+   * <option> by default (e.g. "Sofa (re-import, replaces current model)"),
+   * which is wider than the 320px sidebar — width: 100% + the parent's
+   * min-width: 0 (App.css) makes it clip/scroll instead of forcing the
+   * sidebar wider. */
+  width: 100%;
   font: var(--text-body);
   font-size: 13px;
   padding: var(--space-8);
@@ -51,6 +57,14 @@
   border-radius: var(--radius-xs);
   background: var(--color-canvas);
   color: var(--color-ink);
+}
+
+/* DESIGN.md §5 form fields: focus state = colored border + 2px glow ring. */
+.import-field select:focus-visible,
+.import-field input:focus-visible {
+  outline: none;
+  border-color: var(--color-focus-blue);
+  box-shadow: 0 0 0 2px rgba(76, 110, 230, 0.65);
 }
 
 .import-panel-file-input {
@@ -88,8 +102,7 @@
 .import-panel-progress,
 .import-panel-dims,
 .import-panel-error {
-  background: var(--color-canvas);
-  border: 1px solid var(--color-card-border);
+  background: var(--color-soft-stone);
   border-radius: var(--radius-sm);
   padding: var(--space-12);
   display: flex;
@@ -136,8 +149,7 @@
 /* Phase 6 (PRD §7.6): flat-texture upload row, mirroring ShellPanel.css's
    .shell-row card shape (status pill + upload button + error state). */
 .import-panel-flat-texture {
-  background: var(--color-canvas);
-  border: 1px solid var(--color-card-border);
+  background: var(--color-soft-stone);
   border-radius: var(--radius-sm);
   padding: var(--space-12);
   display: flex;

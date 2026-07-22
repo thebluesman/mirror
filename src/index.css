@@ -1,3 +1,10 @@
+/* Self-hosted (bundled, no CDN/network call — see CLAUDE.md's browser-only/
+   fal.ai-only-network-call rule) weights matching tokens.css's usage: 400 for
+   body/headings, 500 for --text-button (Space Grotesk); 400 for
+   --text-mono-label (Space Mono). */
+@import "@fontsource/space-grotesk/400.css";
+@import "@fontsource/space-grotesk/500.css";
+@import "@fontsource/space-mono/400.css";
 @import "./styles/tokens.css";
 
 * {

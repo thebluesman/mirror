@@ -58,7 +58,8 @@
 }
 
 .viewport-chrome-remove {
-  font: var(--text-button);
+  display: inline-flex;
+  align-items: center;
   background: none;
   border: none;
   color: var(--color-muted-slate);
@@ -76,7 +77,8 @@
  * since it's now the first icon-button neighbor; .viewport-chrome-remove's
  * own pull was dropped so the two icon buttons don't overlap each other. */
 .viewport-chrome-rename {
-  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
   background: none;
   border: none;
   color: var(--color-muted-slate);

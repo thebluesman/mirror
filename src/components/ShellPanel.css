@@ -20,9 +20,11 @@
   margin: 0;
 }
 
+/* DESIGN.md §5 product-card: soft-stone bg, 8px (--radius-sm) radius — the
+ * sidebar shell itself is canvas (App.css), so this is where soft-stone
+ * actually belongs. */
 .shell-row {
-  background: var(--color-canvas);
-  border: 1px solid var(--color-card-border);
+  background: var(--color-soft-stone);
   border-radius: var(--radius-sm);
   padding: var(--space-12);
   display: flex;
@@ -110,4 +112,10 @@
 .shell-row-field input[type="range"] {
   width: 100%;
   accent-color: var(--color-action-blue);
+}
+
+/* DESIGN.md §5 form fields: focus state = colored border + 2px glow ring. */
+.shell-row-field input:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(76, 110, 230, 0.65);
 }

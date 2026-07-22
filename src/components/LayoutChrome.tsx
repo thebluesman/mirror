@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Pencil, X } from "lucide-react";
 import type { Layout } from "../schema/scene";
 import "./ViewportChrome.css";
 import "./LayoutChrome.css";
@@ -107,7 +108,7 @@ export function LayoutChrome({
                 aria-label={`Rename layout "${layout.name}"`}
                 onClick={() => startRename(layout)}
               >
-                ✎
+                <Pencil size={12} aria-hidden="true" />
               </button>
               {/* Deleting the only remaining layout, or the one currently in
                *  view, would leave sceneFile.current pointing at nothing —
@@ -120,7 +121,7 @@ export function LayoutChrome({
                   aria-label={`Delete layout "${layout.name}"`}
                   onClick={() => onDelete(layout.id)}
                 >
-                  ×
+                  <X size={14} aria-hidden="true" />
                 </button>
               )}
             </div>

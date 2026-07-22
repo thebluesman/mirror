@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Undo2 } from "lucide-react";
 import seedRaw from "../seed/living-room.json";
 import { Viewport, type ViewportHandle } from "./components/Viewport";
 import { ViewportChrome } from "./components/ViewportChrome";
@@ -253,7 +254,7 @@ function App() {
           title="Undo last action (Cmd/Ctrl+Z)"
           aria-label="Undo last action"
         >
-          ↶ Undo
+          <Undo2 size={14} aria-hidden="true" /> Undo
         </button>
       </header>
       <div className="app-body">
