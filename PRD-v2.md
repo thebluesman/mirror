@@ -69,17 +69,20 @@ from-scratch implementation of arrangement.
   deferred W-B ladder — §7.5.
 - **Flat-texture items get a real import path** — the rug fix currently has
   no UI; adopting it for real requires a small upload affordance — §7.6.
+- **Lift an item off the floor** — a minimal elevation control on the
+  selected item (writes `elevationCm`), for the C1 lamp-over-bookshelf case.
+  Decided 2026-07-22 (§11.1) — §7.8.
+- **Undo the last arrangement action** — a single-step undo over the
+  existing `commands[]` shape. Decided 2026-07-22 (§11.3), reversing this
+  draft's original "defer again" recommendation — §7.9.
 
 ## 4. Non-goals (v2)
 
 - **Measurement (v3)** — clearance/distance overlays. Depends on v2's
   placement model, now real; still not pulled forward.
 - **General physics, tilt, free 3D transform** — placement stays floor-plane
-  + yaw (+ the narrow elevation question in §11.1 if Shyam takes it).
-- **Undo/history** — the schema's `commands[]` shape still anticipates one;
-  recommendation is to defer again (§11.3). Nothing in the spike surfaced
-  undo as a felt need; collision flagging + multi-layout cover the "safely
-  experiment" case for now.
+  + yaw + the one elevation scalar decided in §11.1 (§7.8); no free vertical
+  dragging, no stacking physics.
 - **Top-down 2D arrange mode** — the spike's named fallback was never
   needed; C1 passed on direct 3D manipulation. Stays in reserve.
 - **Multi-state furniture** — the spike's multi-view probe was inconclusive
@@ -97,9 +100,13 @@ Single user (Shyam), personal use, own home. Unchanged from v1.
 
 1. **Arrange** — click an item to select (outline + rotate handle); drag on
    the floor plane to move; drag the handle or use `q`/`e` (15° steps) to
-   rotate; outline turns red on item/wall overlap; snapping pulls to
-   wall-abutment and edge-alignment within 8cm, Shift held disables it.
-   Placement commits to the current layout on release and autosaves.
+   rotate — handle-drag snaps to the same 15° steps by default, Shift held
+   frees it; a small elevation control on the selection (keyboard step /
+   numeric field) raises or lowers the item via `elevationCm`; outline turns
+   red on item/wall overlap; snapping pulls to wall-abutment and
+   edge-alignment within 8cm, Shift held disables it. Placement commits to
+   the current layout on release and autosaves. Undo reverts the last
+   committed action (§7.9).
 2. **Layouts** — a top-center pill bar: save the current arrangement under a
    name, switch by clicking, delete (guarded — never the active/last one),
    rename (new in v2). Each layout owns its own placement commands;
@@ -148,9 +155,11 @@ accepted below:
 - **Accept:** wall AABBs don't subtract door/window openings — no current
   placement hits it; fix only if a real arrangement does.
 - **Polish (C1-deferred, in scope here):** rotate-handle grab-target sizing
-  (camera-relative), a 0°/snap-angle affordance, hover/cursor affordances
-  for drag and handle, an explicit revert on pointer-cancel, and a
-  deliberate keyboard-focus ownership model for viewport shortcuts.
+  (camera-relative); handle-drag snaps to the same 15° steps as the
+  keyboard shortcut by default, Shift held frees it (decided 2026-07-22,
+  §11.4); hover/cursor affordances for drag and handle; an explicit revert
+  on pointer-cancel; and a deliberate keyboard-focus ownership model for
+  viewport shortcuts.
 
 ### 7.2 Layout rename
 
@@ -190,7 +199,7 @@ the same reference photos as C2. Levers, in cost order per the original plan:
    — better tileability (seam removal, larger effective tile), de-lighting,
    higher-res input.
 
-Recommendation on ordering in §11.2; fail = record what was tried and cap
+Ordering decided in §11.2 (CC0-first); fail = record what was tried and cap
 expectations, same as the spike plan's rule.
 
 ### 7.6 Flat-texture import UI
@@ -207,6 +216,26 @@ The bookshelf's structural defect (cubbies on the narrow end, no backboard)
 reproduces on both providers — it's the source photo. The fix is a re-shoot
 and re-import through the §7.3 flow, tracked as content work for Shyam, not
 build scope.
+
+### 7.8 Elevation control (from §11.1)
+
+A minimal control on the selected item writing `elevationCm` — already
+modeled in the schema and seed data, unused until now. Keyboard step and/or
+a numeric field in the selection UI, mirroring the existing rotate-step
+affordance. No free vertical dragging, no stacking physics: floor-plane XZ +
+yaw + this one elevation scalar is the complete v2 placement model.
+
+### 7.9 Undo (from §11.3, reversing the draft's original recommendation)
+
+Shyam wants an undo control in v2 rather than deferring it again. Scoped as
+**single-step undo**: a button (plus keyboard shortcut) that pops the last
+committed command — move, rotate, elevation change, replace, or
+layout save/delete/rename — off the active layout's `commands[]` and
+rebuilds the scene from what remains. Multi-step history and redo are open
+implementation questions for the build phase, not decided here; start with
+the single step Shyam actually asked for and extend only if he wants more
+once he's using it. This is the one item in this build with no spike
+de-risking behind it — treat its estimate accordingly (§12).
 
 ## 8. Architecture
 
@@ -248,38 +277,42 @@ views. Concretely, the v1 acceptance run's actionable items (#2 orientation,
 #2/#3/#4/#8 already are via the spike merges and D0's fix landing here;
 #5 is this build's remaining quality gate.
 
-## 11. Open questions (flagged for Shyam at review — each has a
-recommendation, none is decided here)
+## 11. Decisions (resolved 2026-07-22, per Shyam)
 
-1. **Vertical placement axis.** Surfaced as a real want at C1 (lifting a
-   table lamp clear of a bookshelf collision); explicitly excluded from the
-   spike. Recommendation: a *minimal* elevation control on the selected item
-   (keyboard step / numeric field writing `elevationCm`, which the schema and
-   seed already model) — not free vertical dragging, no stacking physics.
-   Cheap, uses existing data shape, addresses the C1 case. The alternative is
-   a clean "no, floor + yaw only" — either is fine, but it should be a
-   deliberate call, not a silent carry-forward.
-2. **Shell-texture lever order.** Recommendation: CC0-first (lever 1) — it's
-   bounded, and OUTCOME-3 already showed catalog-quality source material
-   beats pipeline cleverness; run the agent-driven pass only if lever 1
-   fails the bar.
-3. **Undo/history.** Recommendation: defer again (see §4). If deferred, the
-   `commands[]` shape continues to anticipate it at zero cost.
-4. **Rotate-handle angle snapping.** Free-angle handle drag and 15° keyboard
-   steps can disagree by a few degrees. Recommendation: handle snaps to the
-   same 15° steps by default, free-angle while Shift is held — consistent
-   with how translate-snapping is escapable.
-5. **Multi-view generation.** The plumbing works and costs +$0.15/run, but
-   its actual value (back-view fidelity) is unproven — the spike had no real
-   back/side photo to test with. Recommendation: keep v2 single-photo; if
-   Shyam wants the answer, it's one deliberately-shot back/side photo of a
-   test item away, as a standalone probe, not a v2 feature.
+This section was "Open questions" in the initial draft — each item carried a
+recommendation but was explicitly undecided. Shyam has now ruled on all five;
+the resulting scope changes are folded into §3/§4/§6/§7/§12 above, and are
+only summarized here for the record.
+
+1. **Vertical placement axis — in scope.** Surfaced as a real want at C1
+   (lifting a table lamp clear of a bookshelf collision); explicitly excluded
+   from the spike. **Decided: yes**, build the minimal elevation control
+   (keyboard step / numeric field writing `elevationCm`) — not free vertical
+   dragging, no stacking physics. See §7.8.
+2. **Shell-texture lever order — CC0-first confirmed.** Better CC0 source
+   textures (lever 1) run before any agent-driven pipeline pass (lever 2);
+   lever 2 only if lever 1 fails the bar. No change to §7.5.
+3. **Undo/history — in scope, reversing this draft's original "defer
+   again" recommendation.** Shyam wants an undo control in v2. See §7.9 for
+   the scoped-down (single-step) build and §12 for the estimate impact —
+   this is the one build item with no spike de-risking behind it.
+4. **Rotate-handle angle snapping — confirmed.** Handle-drag snaps to the
+   same 15° steps as the keyboard shortcut by default, Shift held frees it —
+   consistent with how translate-snapping is escapable. No change to §7.1's
+   existing polish item beyond making the behavior explicit.
+5. **Multi-view generation — confirmed out of scope for v2.** Post-v2 is
+   fine per Shyam; stays a standalone probe (one deliberately-shot back/side
+   photo) if he wants the back-view-fidelity answer later. No change to §4.
 
 ## 12. Estimate
 
 PRD-v1 §11's "3–5 weeks once scoped" predated both the scope expansion and
-the spike's merges. Re-cut from what's actually left (§7): provider swap +
-CORS check ≈ 2–3 days; default placement + import-path hardening ≈ 2–3 days;
-shell ladder ≈ 2–4 days (hard-capped per lever); rename + flat-texture UI +
-polish batch ≈ 3–5 days. **Roughly 2–3 weeks elapsed**, with the shell ladder
-the widest error bar (it's the one piece with no spike de-risking behind it).
+the spike's merges. Re-cut from what's actually left (§7), now including the
+§11 decisions that add scope beyond the draft (elevation control, undo):
+provider swap + CORS check ≈ 2–3 days; default placement + import-path
+hardening ≈ 2–3 days; shell ladder ≈ 2–4 days (hard-capped per lever); rename
++ flat-texture UI + polish batch (incl. rotate-handle default-snap, elevation
+control) ≈ 4–6 days; undo (single-step, §7.9) ≈ 2–4 days. **Roughly 3–4 weeks
+elapsed**, revised up from the draft's 2–3 given Shyam's undo decision — undo
+and the shell ladder are the widest error bars, since neither has spike
+de-risking behind it.
