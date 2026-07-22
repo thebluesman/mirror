@@ -1,0 +1,28 @@
+{
+  "note": "Phase 5 (PRD-v2 §7.5) lever-1 starting calibration — see src/scene/defaultShellTextures.ts and src/assets/shell-source-textures/README.md for the full explanation. Values below are a computed starting point (average-color-matched against spike/inputs/surfaces/*.JPG), not a final hand-tuned result — Shyam's own tint/repeat/roughness sliders in ShellPanel.tsx remain the way to refine further. wall/ceiling's source was converted to true greyscale (see README) before this sampling, specifically so tint alone can reach the target color exactly (no channel-clamping) — an unmodified color photo left an uncorrectable ~40/255 blue-channel deficit that rendered as a visible olive/yellow cast (recorded here as a real finding, not swept away).",
+  "sampledColors": {
+    "method": "64x64 canvas downsample, mean RGB over all pixels, 0-255 scale",
+    "referenceFloor": { "rgb": [151.1, 149.7, 142.8], "file": "spike/inputs/surfaces/floor.JPG" },
+    "referenceWall": { "rgb": [149.0, 149.5, 143.6], "file": "spike/inputs/surfaces/wall.JPG" },
+    "referenceCeiling": { "rgb": [148.0, 146.0, 134.7], "file": "spike/inputs/surfaces/ceiling.JPG" },
+    "sourceFloor": { "rgb": [164.2, 151.4, 130.8], "file": "src/assets/shell-source-textures/floor-rocky-ground.png" },
+    "sourceWallCeiling": { "rgb": [156.7, 156.7, 156.7], "file": "src/assets/shell-source-textures/wall-ceiling-plaster-grain.jpg" }
+  },
+  "surfaces": {
+    "floor": {
+      "sourceFile": "src/assets/shell-source-textures/floor-rocky-ground.png",
+      "attribution": "BabylonJS/Assets (CC BY 4.0) — textures/rockyGround_basecolor.png",
+      "calibration": { "tint": "#ebfcff", "repeat": [0.7, 0.7], "roughnessScale": 1 }
+    },
+    "wall": {
+      "sourceFile": "src/assets/shell-source-textures/wall-ceiling-plaster-grain.jpg",
+      "attribution": "BabylonJS/Assets (CC BY 4.0) — textures/sand.jpg, converted to greyscale before use (see README)",
+      "calibration": { "tint": "#f3f3ea", "repeat": [4, 4], "roughnessScale": 1 }
+    },
+    "ceiling": {
+      "sourceFile": "src/assets/shell-source-textures/wall-ceiling-plaster-grain.jpg",
+      "attribution": "BabylonJS/Assets (CC BY 4.0) — textures/sand.jpg, converted to greyscale before use (see README)",
+      "calibration": { "tint": "#f1eedb", "repeat": [4, 4], "roughnessScale": 1 }
+    }
+  }
+}

@@ -49,7 +49,8 @@
     { "id": "table-lamp", "name": "Table Lamp", "dimsCm": { "w": 29, "d": 29, "h": 32 }, "notes": "New since spike 3. Footprint is base diameter. Rests on top of the now-horizontal bookshelf." }
   ],
   "cameras": [
-    { "id": "couch-view", "name": "couch-view", "eye": [660, 115, 640], "lookAt": [683, 120, 324], "fovDeg": 60, "note": "seated on the sofa main seat, looking north at the TV wall" }
+    { "id": "couch-view", "name": "couch-view", "eye": [660, 115, 640], "lookAt": [683, 120, 324], "fovDeg": 60, "note": "seated on the sofa main seat, looking north at the TV wall" },
+    { "id": "reverse-view", "name": "reverse-view", "eye": [1400, 150, 630], "lookAt": [660, 60, 590], "fovDeg": 60, "note": "the second of the project's two standard views (spike/scene2.html key 9): from the main-door/hallway passage looking back at the sofa + swivel chair. Same eye/lookAt as the spike's reverse preset — this room's wall coordinates are unchanged since spike 3, so the framing carries over directly. Added for Phase 5's shell-texture before/after comparison (PRD-v2 §7.5)." }
   ],
   "layouts": [
     {
