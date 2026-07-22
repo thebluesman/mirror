@@ -26,3 +26,15 @@ export function makeLayout(name: string, source: Layout, existingLayouts: readon
     commands: source.commands.map((cmd) => ({ ...cmd })),
   };
 }
+
+/** In-place rename (PRD-v2 §7.2): updates a layout's display `name` only —
+ *  `id` and `commands[]` (and `base`) are untouched, so switching, deleting,
+ *  and every placement command already referencing this layout keep working
+ *  unchanged. Same blank-name fallback `makeLayout` uses (trim, fall back to
+ *  the stable id) rather than re-slugifying — the id was already minted at
+ *  creation and renaming must never move it out from under `current` or a
+ *  `base` reference. Pure — caller replaces the matching entry in
+ *  `sceneFile.layouts`. */
+export function renameLayout(layout: Layout, name: string): Layout {
+  return { ...layout, name: name.trim() || layout.id };
+}

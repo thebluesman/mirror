@@ -14,6 +14,7 @@ export function LayoutChrome({
   onSwitch,
   onSave,
   onDelete,
+  onRename,
 }: {
   layouts: Layout[];
   currentId: string;
@@ -23,10 +24,17 @@ export function LayoutChrome({
    *  onSave uses, so a failed save doesn't silently close the naming form. */
   onSave: (name: string) => boolean;
   onDelete: (id: string) => void;
+  /** In-place rename (PRD-v2 §7.2) — id and commands[] are untouched, only
+   *  the display name changes. Unlike onSave, there's no failure mode worth
+   *  surfacing here (renaming never needs a source layout to snapshot from),
+   *  so this is fire-and-forget like onDelete. */
+  onRename: (id: string, name: string) => void;
 }) {
   const [naming, setNaming] = useState(false);
   const [name, setName] = useState("");
   const [saveFailed, setSaveFailed] = useState(false);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
 
   function commitSave() {
     const trimmed = name.trim();
@@ -40,34 +48,84 @@ export function LayoutChrome({
     }
   }
 
+  function startRename(layout: Layout) {
+    setRenamingId(layout.id);
+    setRenameValue(layout.name);
+  }
+
+  function commitRename() {
+    if (renamingId) onRename(renamingId, renameValue);
+    setRenamingId(null);
+    setRenameValue("");
+  }
+
+  function cancelRename() {
+    setRenamingId(null);
+    setRenameValue("");
+  }
+
   return (
     <div className="viewport-chrome viewport-chrome--top">
       <div className="viewport-chrome-bar">
-        {layouts.map((layout) => (
-          <div key={layout.id} className="viewport-chrome-view">
-            <button
-              type="button"
-              className={`viewport-chrome-pill${layout.id === currentId ? " viewport-chrome-pill--active" : ""}`}
-              onClick={() => onSwitch(layout.id)}
+        {layouts.map((layout) =>
+          renamingId === layout.id ? (
+            <form
+              key={layout.id}
+              className="viewport-chrome-naming"
+              onSubmit={(e) => {
+                e.preventDefault();
+                commitRename();
+              }}
             >
-              {layout.name}
-            </button>
-            {/* Deleting the only remaining layout, or the one currently in
-             *  view, would leave sceneFile.current pointing at nothing —
-             *  guarded here (disabled) rather than in the handler, so the
-             *  reason is visible instead of a silent no-op click. */}
-            {layouts.length > 1 && layout.id !== currentId && (
+              <input
+                type="text"
+                autoFocus
+                className="viewport-chrome-naming-input"
+                aria-label={`Rename layout "${layout.name}"`}
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") cancelRename();
+                }}
+              />
+              <button type="submit" className="viewport-chrome-pill viewport-chrome-pill--outline">
+                Save
+              </button>
+            </form>
+          ) : (
+            <div key={layout.id} className="viewport-chrome-view">
               <button
                 type="button"
-                className="viewport-chrome-remove"
-                aria-label={`Delete layout "${layout.name}"`}
-                onClick={() => onDelete(layout.id)}
+                className={`viewport-chrome-pill${layout.id === currentId ? " viewport-chrome-pill--active" : ""}`}
+                onClick={() => onSwitch(layout.id)}
               >
-                ×
+                {layout.name}
               </button>
-            )}
-          </div>
-        ))}
+              <button
+                type="button"
+                className="viewport-chrome-rename"
+                aria-label={`Rename layout "${layout.name}"`}
+                onClick={() => startRename(layout)}
+              >
+                ✎
+              </button>
+              {/* Deleting the only remaining layout, or the one currently in
+               *  view, would leave sceneFile.current pointing at nothing —
+               *  guarded here (disabled) rather than in the handler, so the
+               *  reason is visible instead of a silent no-op click. */}
+              {layouts.length > 1 && layout.id !== currentId && (
+                <button
+                  type="button"
+                  className="viewport-chrome-remove"
+                  aria-label={`Delete layout "${layout.name}"`}
+                  onClick={() => onDelete(layout.id)}
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          ),
+        )}
 
         {naming ? (
           <form
