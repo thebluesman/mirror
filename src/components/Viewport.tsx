@@ -24,12 +24,13 @@ import { normalizeXZ } from "../scene/minimapProjection";
 import {
   computeWalkStep,
   deriveSyntheticLookAt,
+  isWalkCollidableItem,
+  resolveWalkCollision,
   SYNTHETIC_LOOKAT_DISTANCE_CM,
   WALK_COLLISION_RADIUS_CM,
   WALK_CROUCH_EYE_HEIGHT_CM,
   WALK_EYE_HEIGHT_CM,
   WALK_SPEED_CM_PER_SEC,
-  walkStepCollides,
   type WalkInput,
 } from "../scene/walkCamera";
 import {
@@ -596,17 +597,22 @@ export const Viewport = forwardRef<
     (helper.material as THREE.LineBasicMaterial).color.set(gestureAffordanceColor(itemId, colliding));
   }
 
-  // improvements-minor-fixes.md §12: every placed item's footprint AABB, for
-  // the walk-mode hard-stop check in the animate loop below. Unlike
-  // updateCollisionHighlight's `others`, there's no itemId to exclude here —
-  // the camera is never itself one of built.furnitureGroups.
+  // improvements-minor-fixes.md §12 (revisited): every placed item's
+  // footprint AABB, for the walk-mode collision check in the animate loop
+  // below. Unlike updateCollisionHighlight's `others`, there's no itemId to
+  // exclude here — the camera is never itself one of built.furnitureGroups.
+  // Rugs/flat floor coverings (isWalkCollidableItem) are skipped entirely —
+  // they don't block walking in real life, and leaving sonderod-rug in this
+  // list was the confirmed "can't walk near the rug" bug. Room-shell walls
+  // are a separate, untouched list (wallFootprintAABBs) — this only ever
+  // filters furniture items.
   function allItemFootprintAABBs(): AABB[] {
     const built = builtRef.current;
     if (!built) return [];
     const aabbs: AABB[] = [];
     built.furnitureGroups.forEach((group, itemId) => {
       const item = itemsByIdRef.current.get(itemId);
-      if (!item) return;
+      if (!item || !isWalkCollidableItem(item)) return;
       const rotationDeg = ((THREE.MathUtils.radToDeg(group.rotation.y) % 360) + 360) % 360;
       aabbs.push(itemFootprintAABB(item, [group.position.x, group.position.y, group.position.z], rotationDeg));
     });
@@ -1598,34 +1604,36 @@ export const Viewport = forwardRef<
         if (walkControls.isLocked) {
           const step = computeWalkStep(walkKeys, WALK_SPEED_CM_PER_SEC, deltaSec);
           if (step.forward !== 0 || step.right !== 0) {
-            // improvements-minor-fixes.md §12: hard-stop collision. Reuses
-            // the same drag-placement AABB machinery (itemFootprintAABB/
-            // wallFootprintAABBs/aabbOverlap, via walkCamera.ts's
-            // walkStepCollides) rather than a second collision system.
-            // moveForward/moveRight are PointerLockControls' own mutate-in-
-            // place methods — there's no "propose a position, then decide"
-            // API to check *before* applying the step — so this applies the
-            // step first, then reverts the XZ position back to where it was
-            // this frame if the resulting eye footprint collides. Y is never
+            // improvements-minor-fixes.md §12 (revisited): axis-independent
+            // slide collision response. Reuses the same drag-placement AABB
+            // machinery (itemFootprintAABB/wallFootprintAABBs/aabbOverlap,
+            // via walkCamera.ts's resolveWalkCollision/walkStepCollides)
+            // rather than a second collision system. moveForward/moveRight
+            // are PointerLockControls' own mutate-in-place methods — there's
+            // no "propose a position, then decide" API to check *before*
+            // applying the step — so this applies the step first, reads back
+            // the resulting XZ, then resolves each axis independently
+            // against the pre-step position: brushing a wall/item on one
+            // axis reverts just that axis, not the whole frame, so movement
+            // along the other axis keeps going (the v1 whole-frame hard stop
+            // this replaces froze both axes on any overlap). Y is never
             // touched by WASD (see computeWalkStep's own comment), so only
-            // X/Z need saving. This is a whole-frame hard stop, not per-axis
-            // sliding — the decided v1 scope; slide-along-wall is deferred.
+            // X/Z need resolving.
             const prevX = camera.position.x;
             const prevZ = camera.position.z;
             if (step.forward !== 0) walkControls.moveForward(step.forward);
             if (step.right !== 0) walkControls.moveRight(step.right);
-            if (
-              walkStepCollides(
-                camera.position.x,
-                camera.position.z,
-                WALK_COLLISION_RADIUS_CM,
-                allItemFootprintAABBs(),
-                wallAABBsRef.current,
-              )
-            ) {
-              camera.position.x = prevX;
-              camera.position.z = prevZ;
-            }
+            const resolved = resolveWalkCollision(
+              prevX,
+              prevZ,
+              camera.position.x,
+              camera.position.z,
+              WALK_COLLISION_RADIUS_CM,
+              allItemFootprintAABBs(),
+              wallAABBsRef.current,
+            );
+            camera.position.x = resolved.x;
+            camera.position.z = resolved.z;
           }
         }
       } else {

@@ -10,7 +10,13 @@
 // collision check below extend the same file rather than starting a new one
 // — both are still "camera math with no THREE dependency," and §12 reuses
 // collision.ts's own AABB type/overlap test rather than duplicating it.
+//
+// improvements-minor-fixes.md §12 (revisited, 2026-07-22): the v1 hard-stop
+// response (whole-frame XZ revert on any overlap) and the fact that rugs
+// were themselves colliding both turned out to be real navigation problems,
+// not polish — see resolveWalkCollision and isWalkCollidableItem below.
 import { aabbOverlap, type AABB } from "./collision";
+import type { FurnitureItem } from "./types";
 
 /** Which WASD keys are currently held, keyed by intent rather than physical
  *  key (w/a/s/d) so Viewport.tsx's keydown/keyup handlers are the only place
@@ -124,17 +130,14 @@ export function walkCameraFootprintAABB(x: number, z: number, radius: number): A
   return { minX: x - radius, maxX: x + radius, minZ: z - radius, maxZ: z + radius };
 }
 
-/** True if the camera's current XZ position, expanded to a WALK_COLLISION_
- *  RADIUS_CM footprint, overlaps any item or wall AABB — Viewport.tsx's
- *  animate loop calls this *after* speculatively applying a frame's
- *  moveForward/moveRight (PointerLockControls mutates camera.position
- *  in place; there's no "propose a position" API to check beforehand) and
- *  reverts the XZ position back to where it was that frame if this returns
- *  true. That's the decided v1 response — a hard stop, not slide-along-wall
- *  (improvements-minor-fixes.md §12) — so the caller doesn't need this
- *  function to report *which* axis collided, only whether the resulting
- *  spot is clear. Pure/testable without a WebGL context, same shape as
- *  collision.ts's own checkCollisions. */
+/** True if the given XZ position, expanded to a WALK_COLLISION_RADIUS_CM
+ *  footprint, overlaps any item or wall AABB. Originally written to check
+ *  only the camera's *current* (post-full-step) position for the v1 whole-
+ *  frame hard stop; kept as the single-position primitive both that v1 shape
+ *  and §12's revisited per-axis resolveWalkCollision below build on — it just
+ *  answers "is this one XZ spot clear," not which axis a caller should
+ *  attribute a collision to. Pure/testable without a WebGL context, same
+ *  shape as collision.ts's own checkCollisions. */
 export function walkStepCollides(
   x: number,
   z: number,
@@ -144,4 +147,54 @@ export function walkStepCollides(
 ): boolean {
   const footprint = walkCameraFootprintAABB(x, z, radius);
   return items.some((aabb) => aabbOverlap(footprint, aabb)) || walls.some((aabb) => aabbOverlap(footprint, aabb));
+}
+
+/** improvements-minor-fixes.md §12 (revisited): axis-independent "slide
+ *  along the surface" collision response, replacing the v1 whole-frame hard
+ *  revert. The v1 shape applied a frame's full moveForward/moveRight step
+ *  and then reverted the *entire* XZ move back to (prevX, prevZ) if the
+ *  resulting spot collided — which meant brushing a wall or item on one axis
+ *  (e.g. strafing into a wall on X while also moving cleanly along Z) froze
+ *  movement on the other axis too, the confirmed "tight spaces are nearly
+ *  unnavigable" problem.
+ *
+ *  This instead treats the X and Z deltas independently: does moving to
+ *  `nextX` (holding Z at its pre-step value) collide? If not, keep it, else
+ *  fall back to `prevX`. Separately, does moving to `nextZ` (holding X at
+ *  its pre-step value) collide? If not, keep it, else fall back to `prevZ`.
+ *  Both checks are against the *pre-step* position on the other axis, not
+ *  chained off each other's result — deliberately "two independent
+ *  candidates," matching how a standard FPS slide response is scoped
+ *  (compute (x+dx, z) and (x, z+dz) as two separate candidates), not a
+ *  three-way combined/ordered resolution that would make the outcome depend
+ *  on which axis happens to be checked first. Viewport.tsx's animate loop
+ *  calls this once per frame after speculatively applying moveForward/
+ *  moveRight (PointerLockControls mutates camera.position in place; there's
+ *  no "propose a position" API to check beforehand), passing in the pre-step
+ *  position and the post-step position it just read back off the camera. */
+export function resolveWalkCollision(
+  prevX: number,
+  prevZ: number,
+  nextX: number,
+  nextZ: number,
+  radius: number,
+  items: readonly AABB[],
+  walls: readonly AABB[],
+): { x: number; z: number } {
+  const x = walkStepCollides(nextX, prevZ, radius, items, walls) ? prevX : nextX;
+  const z = walkStepCollides(prevX, nextZ, radius, items, walls) ? prevZ : nextZ;
+  return { x, z };
+}
+
+/** improvements-minor-fixes.md §12 (revisited): true for any item that
+ *  should still block walk-mode movement. Flat floor coverings (rugs) don't
+ *  block walking in real life — `sonderod-rug`'s `category: "rug"` tag
+ *  (object-categories.md) is the signal Viewport.tsx's
+ *  allItemFootprintAABBs() filters on before handing the AABB list to
+ *  resolveWalkCollision/walkStepCollides, so a rug never enters the
+ *  walk-collision list at all rather than being excluded deeper in the AABB
+ *  math. Room-shell walls are untouched by this — wallFootprintAABBs stays a
+ *  separate, fully-collidable list. */
+export function isWalkCollidableItem(item: Pick<FurnitureItem, "category">): boolean {
+  return item.category !== "rug";
 }
