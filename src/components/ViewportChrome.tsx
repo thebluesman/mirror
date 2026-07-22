@@ -6,6 +6,10 @@ import "./ViewportChrome.css";
 // Floating viewport chrome (PRD §9: "built from DESIGN.md's existing tokens
 // — near-black floating control bar, pill buttons — not a new system") for
 // Phase 5's named-viewpoint save/recall (plan-v1.md Phase 5 item 1).
+//
+// Icon sizes below follow DESIGN.md §6: 16 for icon+label pills (inline),
+// 20 for icon-only buttons (standalone) — mirrors tokens.css's
+// --icon-size-inline/--icon-size-standalone.
 
 export function ViewportChrome({
   cameras,
@@ -89,7 +93,7 @@ export function ViewportChrome({
           aria-pressed={globalLock}
           title={globalLock ? "Unlock all items (drag/rotate/elevate re-enabled)" : "Lock all items (prevent accidental drag/rotate/elevate)"}
         >
-          {globalLock ? <Lock size={13} aria-hidden="true" /> : <LockOpen size={13} aria-hidden="true" />}
+          {globalLock ? <Lock size={16} aria-hidden="true" /> : <LockOpen size={16} aria-hidden="true" />}
           {globalLock ? "All locked" : "Lock all"}
         </button>
         {/* improvements-v2.2 §8: one-click download of the current camera
@@ -101,7 +105,7 @@ export function ViewportChrome({
           onClick={onSnapshot}
           title="Download a PNG of the current view"
         >
-          <Camera size={13} aria-hidden="true" />
+          <Camera size={16} aria-hidden="true" />
           Snapshot
         </button>
         {cameras.map((cam) =>
@@ -140,7 +144,7 @@ export function ViewportChrome({
                 aria-label={`Rename saved view "${cam.name}"`}
                 onClick={() => startRename(cam)}
               >
-                <Pencil size={12} aria-hidden="true" />
+                <Pencil size={20} aria-hidden="true" />
               </button>
               <button
                 type="button"
@@ -148,7 +152,7 @@ export function ViewportChrome({
                 aria-label={`Delete saved view "${cam.name}"`}
                 onClick={() => onDelete(cam.id)}
               >
-                <X size={14} aria-hidden="true" />
+                <X size={20} aria-hidden="true" />
               </button>
             </div>
           ),

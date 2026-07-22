@@ -349,7 +349,8 @@ function App() {
           title="Undo last action (Cmd/Ctrl+Z)"
           aria-label="Undo last action"
         >
-          <Undo2 size={14} aria-hidden="true" /> Undo
+          {/* Inline icon+label (DESIGN.md §6): 16 — mirrors tokens.css's --icon-size-inline. */}
+          <Undo2 size={16} aria-hidden="true" /> Undo
         </button>
       </header>
       <div className="app-body">
