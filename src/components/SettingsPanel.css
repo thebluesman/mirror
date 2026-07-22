@@ -114,3 +114,26 @@
   cursor: pointer;
   align-self: flex-start;
 }
+
+/* Import project (improvements-v2.1 §6): hidden file input, same
+   click-through-button pattern as ImportPanel's .import-panel-file-input. */
+.settings-row-file-input {
+  display: none;
+}
+
+/* Mirrors ImportPanel.css's .import-panel-warning — a destructive-action
+   callout, not an error state, so it's styled distinctly from
+   .settings-row-error below even though both use --color-error. */
+.settings-row-warning {
+  font: var(--text-body);
+  font-size: 12px;
+  color: var(--color-error);
+  margin: 0;
+}
+
+.settings-row-error {
+  font: var(--text-body);
+  font-size: 12px;
+  color: var(--color-error);
+  margin: 0;
+}

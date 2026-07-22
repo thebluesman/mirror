@@ -167,6 +167,15 @@ function App() {
     commit(next);
   }
 
+  // Whole-project import (SettingsPanel, improvements-v2.1 §6): `next`
+  // arrives already unzipped/validated/rehydrated-into-OPFS by
+  // importProjectZip — same one-liner tail as handleImported above, so a
+  // project import is persisted immediately and is one-step undoable like
+  // any other discrete commit.
+  function handleImportProject(next: SceneFile) {
+    commit(next);
+  }
+
   const viewportRef = useRef<ViewportHandle>(null);
 
   // ViewportChrome only renders once `sceneFile` is loaded, so it's never null
@@ -305,7 +314,9 @@ function App() {
               <ShellPanel shell={sceneFile.room.shell} onUpdateSurface={updateShellSurface} />
             )}
             {sceneFile && tab === "Import" && <ImportPanel sceneFile={sceneFile} onImported={handleImported} />}
-            {tab === "Settings" && <SettingsPanel sceneFile={sceneFile} />}
+            {tab === "Settings" && (
+              <SettingsPanel sceneFile={sceneFile} onImportProject={handleImportProject} />
+            )}
           </div>
         </aside>
       </div>
