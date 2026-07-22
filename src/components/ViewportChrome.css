@@ -57,6 +57,31 @@
   border-style: dashed;
 }
 
+/* improvements-v2.1 §4: global lock toggle — same pill shape as the rest of
+ * the bar, plus an icon+label pairing (the bar's other pills are text-only
+ * or icon-only, never both) since "Lock all" alone reads ambiguously as an
+ * action label vs. a state, and the icon alone doesn't carry the word
+ * "all" that distinguishes it from a per-item lock. */
+.viewport-chrome-lock {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+/* Active state deliberately does NOT reuse Viewport.tsx's collision-red
+ * (COLLISION_COLOR) — locked-and-safe isn't an error state. Solid fill in
+ * the canvas/ink pairing instead, so "all locked" reads as an armed toggle
+ * (like a pressed button), not a warning. */
+.viewport-chrome-lock--active {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  border-color: var(--color-canvas);
+}
+
+.viewport-chrome-lock--active:hover {
+  border-color: var(--color-canvas);
+}
+
 .viewport-chrome-remove {
   display: inline-flex;
   align-items: center;

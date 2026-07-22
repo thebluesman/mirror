@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Pencil, X } from "lucide-react";
+import { Lock, LockOpen, Pencil, X } from "lucide-react";
 import type { CameraPosition } from "../schema/scene";
 import "./ViewportChrome.css";
 
@@ -13,6 +13,8 @@ export function ViewportChrome({
   onSave,
   onDelete,
   onRename,
+  globalLock,
+  onToggleGlobalLock,
 }: {
   cameras: CameraPosition[];
   onRecall: (preset: CameraPosition) => void;
@@ -25,6 +27,13 @@ export function ViewportChrome({
    *  the display name changes. Unlike onSave, there's no failure mode worth
    *  surfacing here, so this is fire-and-forget like onDelete. */
   onRename: (id: string, name: string) => void;
+  /** improvements-v2.1 §4: "lock all" safety toggle — when on, no item can
+   *  be dragged/rotated/elevated regardless of its own `locked` flag.
+   *  Ephemeral (App.tsx state, not sceneFile), so this pill reflects it the
+   *  same way the rest of this bar reflects live view state, not persisted
+   *  scene data. */
+  globalLock: boolean;
+  onToggleGlobalLock: () => void;
 }) {
   const [naming, setNaming] = useState(false);
   const [name, setName] = useState("");
@@ -64,6 +73,20 @@ export function ViewportChrome({
     <div className="viewport-chrome">
       <p className="viewport-chrome-hint">Drag to orbit · scroll to zoom · right-drag to pan</p>
       <div className="viewport-chrome-bar">
+        {/* improvements-v2.1 §4: global "lock all" — a safety toggle, not a
+         *  saved-view/layout op, so it sits apart from the rest of the bar's
+         *  content rather than inline with the cameras list it happens to
+         *  share a pill-button visual language with. */}
+        <button
+          type="button"
+          className={`viewport-chrome-pill viewport-chrome-lock${globalLock ? " viewport-chrome-lock--active" : ""}`}
+          onClick={onToggleGlobalLock}
+          aria-pressed={globalLock}
+          title={globalLock ? "Unlock all items (drag/rotate/elevate re-enabled)" : "Lock all items (prevent accidental drag/rotate/elevate)"}
+        >
+          {globalLock ? <Lock size={13} aria-hidden="true" /> : <LockOpen size={13} aria-hidden="true" />}
+          {globalLock ? "All locked" : "Lock all"}
+        </button>
         {cameras.map((cam) =>
           renamingId === cam.id ? (
             <form

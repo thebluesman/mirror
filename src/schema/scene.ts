@@ -152,6 +152,16 @@ const BoxFurniture = z
     modelRotationDeg: ModelRotation.optional(),
     notes: z.string().optional(),
     purchaseInfo: z.string().optional(),
+    // improvements-v2.1 §4: per-item placement lock. A scene fact (persists
+    // with the item, round-trips through save/export), distinct from the
+    // ephemeral "lock all" HUD toggle Viewport/ViewportChrome carry in plain
+    // React state — that one is view-only safety and deliberately never
+    // touches SceneFile. Optional/defaults-to-unlocked so every existing
+    // seed/saved file still validates unchanged. Declared on both union
+    // branches explicitly (not left to `.loose()`'s passthrough) so
+    // `z.infer` actually types it on FurnitureItem instead of leaving it
+    // reachable only via an `any`-typed loose access.
+    locked: z.boolean().optional(),
   })
   .loose();
 
@@ -170,6 +180,8 @@ const CompoundSofaFurniture = z
     modelRotationDeg: ModelRotation.optional(),
     notes: z.string().optional(),
     purchaseInfo: z.string().optional(),
+    // See BoxFurniture's `locked` comment — same field, same rationale.
+    locked: z.boolean().optional(),
   })
   .loose();
 
