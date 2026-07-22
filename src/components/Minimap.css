@@ -1,0 +1,22 @@
+/* improvements-minor-fixes.md §13: minimap HUD panel — same near-black
+ * floating-pill visual language as ViewportChrome.css/Viewport.css's mode
+ * toggle, in the one HUD corner none of those already claim (top-center:
+ * LayoutChrome; bottom-center: ViewportChrome; top-right: the mode-toggle
+ * pill; bottom-left: ObjectInspector). */
+.minimap {
+  position: absolute;
+  right: var(--space-24);
+  bottom: var(--space-24);
+  background: var(--color-primary);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: var(--radius-md);
+  padding: var(--space-8);
+  /* HUD overlay only — never steals a drag/orbit gesture meant for the
+   * viewport canvas beneath it. */
+  pointer-events: none;
+}
+
+.minimap-canvas {
+  display: block;
+  border-radius: var(--radius-sm);
+}

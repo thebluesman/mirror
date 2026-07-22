@@ -20,6 +20,7 @@ import { checkCollisions, itemFootprintAABB, wallFootprintAABBs, type AABB } fro
 import { snapPosition } from "../scene/snapping";
 import { relativeYawDeg, rotateHandleWorldXZ, snapYawDeg, yawDegFromPointer } from "../scene/rotateHandle";
 import { clampElevationCm, ELEVATION_STEP_CM, stepElevationCm } from "../scene/elevation";
+import { normalizeXZ } from "../scene/minimapProjection";
 import {
   computeWalkStep,
   deriveSyntheticLookAt,
@@ -38,6 +39,7 @@ import {
 } from "../schema/scene";
 import type { FurnitureItem, SceneFile } from "../scene/types";
 import { ObjectInspector, type ObjectEditPatch } from "./ObjectInspector";
+import { Minimap, type MinimapHandle } from "./Minimap";
 import "./Viewport.css";
 
 // v2 spike (W-A, `v2/spike-arrange` — see spike-v2/OUTCOME.md): move + rotate
@@ -430,6 +432,13 @@ export const Viewport = forwardRef<
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
+  // improvements-minor-fixes.md §13: the minimap only exists as a HUD overlay
+  // sibling of the canvas (see the return statement), rendered by this
+  // component the same "self-contained, not threaded through App.tsx" way
+  // the mode-toggle pill is — its live camera dot needs a per-frame read of
+  // the exact camera/controls this component owns, same as that pill's mode
+  // switching does.
+  const minimapRef = useRef<MinimapHandle>(null);
   // improvements-v2.1 §5: the walk-mode counterpart to controlsRef, plus the
   // mode flag and a way to flip it from outside the structural effect (the
   // HUD toggle button and ViewportHandle.flyTo both live outside it — see
@@ -913,6 +922,10 @@ export const Viewport = forwardRef<
     const dragPlane = new THREE.Plane();
     const planeHit = new THREE.Vector3();
     const grabOffset = new THREE.Vector3();
+    // §13: reused every animate() frame for the minimap's facing wedge (walk
+    // mode's forward direction) — a single preallocated Vector3, same "avoid
+    // a per-frame allocation" treatment as the drag-gesture vectors above.
+    const minimapForward = new THREE.Vector3();
     let drag: { itemId: string; group: THREE.Group } | null = null;
     // §3: a second, mutually-exclusive gesture — dragging the rotate ring/knob
     // turns group.rotation.y by the angle the pointer has swept around the
@@ -1557,6 +1570,26 @@ export const Viewport = forwardRef<
         );
         camera.position.set(clamped[0], clamped[1], clamped[2]);
       }
+      // §13: minimap camera dot/wedge, updated every frame in both modes —
+      // mirrors getCurrentView()'s eye/facing split (orbit derives facing
+      // from controls.target, walk from PointerLockControls' quaternion) but
+      // wants a direction, not an absolute lookAt point, and runs on every
+      // frame rather than on demand, so it reuses the preallocated
+      // minimapForward vector instead of getCurrentView()'s own allocations.
+      if (minimapRef.current) {
+        let dx: number;
+        let dz: number;
+        if (cameraModeRef.current === "walk") {
+          walkControls.getDirection(minimapForward);
+          dx = minimapForward.x;
+          dz = minimapForward.z;
+        } else {
+          dx = controls.target.x - camera.position.x;
+          dz = controls.target.z - camera.position.z;
+        }
+        const [dirX, dirZ] = normalizeXZ(dx, dz);
+        minimapRef.current.updateCamera(camera.position.x, camera.position.z, dirX, dirZ);
+      }
       // v2 spike (W-A): the selection outline's bounding box has to track
       // whatever the drag/rotate handlers above just mutated the group to —
       // recomputed every frame (selectionHelperRef is null when nothing is
@@ -2034,6 +2067,11 @@ export const Viewport = forwardRef<
   // imperative refs the drag/rotate/elevation code reads) since this only
   // feeds the docked editor's render, not a per-frame/per-gesture hot path.
   const selectedItem = selectedItemId ? sceneFile.items.find((i) => i.id === selectedItemId) : undefined;
+  // §13: the minimap draws from the same committed sceneFile data Viewport
+  // already has (not the live mutate-during-gesture groups — see Minimap.tsx's
+  // header comment), so this is a plain render-time lookup, same shape as
+  // selectedItem above, not a memo keyed for the structural WebGL rebuild.
+  const currentLayoutCommands = sceneFile.layouts.find((l) => l.id === sceneFile.current)?.commands ?? [];
 
   return (
     <>
@@ -2046,6 +2084,7 @@ export const Viewport = forwardRef<
           onClose={() => setSelectedItemId(null)}
         />
       )}
+      <Minimap ref={minimapRef} room={sceneFile.room} items={sceneFile.items} commands={currentLayoutCommands} />
       <div className="viewport-mode-toggle">
         <button
           type="button"
