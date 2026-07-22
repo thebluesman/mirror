@@ -27,3 +27,14 @@ export function makeCameraPosition(
     fovDeg,
   };
 }
+
+/** In-place rename (PRD-v2 §7.2): updates a saved viewpoint's display `name`
+ *  only — `id`, `eye`, `lookAt`, and `fovDeg` are untouched, so recall and any
+ *  other reference to this viewpoint's id keep working unchanged. Same
+ *  blank-name fallback `makeCameraPosition` uses (trim, fall back to the
+ *  stable id) rather than re-slugifying — the id was already minted at
+ *  creation. Pure — caller replaces the matching entry in
+ *  `sceneFile.cameras`. */
+export function renameCameraPosition(camera: CameraPosition, name: string): CameraPosition {
+  return { ...camera, name: name.trim() || camera.id };
+}
