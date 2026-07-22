@@ -132,3 +132,53 @@
   color: var(--color-error);
   margin: 0;
 }
+
+/* Phase 6 (PRD §7.6): flat-texture upload row, mirroring ShellPanel.css's
+   .shell-row card shape (status pill + upload button + error state). */
+.import-panel-flat-texture {
+  background: var(--color-canvas);
+  border: 1px solid var(--color-card-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-12);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.import-panel-flat-texture-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.import-panel-flat-texture-title {
+  font: var(--text-body);
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+.import-panel-flat-texture-status {
+  font: var(--text-mono-label);
+  font-size: 11px;
+  padding: var(--space-2) var(--space-8);
+  border-radius: var(--radius-pill);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.import-panel-flat-texture-status--photo {
+  background: var(--color-deep-green);
+  color: var(--color-canvas);
+}
+
+.import-panel-flat-texture-status--none {
+  background: var(--color-soft-stone);
+  color: var(--color-muted-slate);
+}
+
+.import-panel-flat-texture-hint {
+  font: var(--text-body);
+  font-size: 12px;
+  color: var(--color-body-muted);
+  margin: 0;
+}

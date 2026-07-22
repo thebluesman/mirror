@@ -24,6 +24,17 @@ export function yawDegFromPointer(centerX: number, centerZ: number, pointerX: nu
   return ((deg % 360) + 360) % 360;
 }
 
+/** Rounds a yaw (degrees) to the nearest multiple of `stepDeg`, normalized to
+ *  [0, 360). PRD-v2 §11.4 (decided): a rotate-handle drag snaps to the same
+ *  15deg steps as the `q`/`e` keyboard shortcut by default (Viewport.tsx frees
+ *  it to continuous rotation while Shift is held), consistent with how
+ *  translate-snapping is escapable. Kept here beside the other rotate trig so
+ *  it's unit-testable without a THREE.Scene. */
+export function snapYawDeg(yawDeg: number, stepDeg: number): number {
+  const snapped = Math.round(yawDeg / stepDeg) * stepDeg;
+  return ((snapped % 360) + 360) % 360;
+}
+
 /** World-space (x, z) for the rotate handle itself, given the item's center,
  *  its current yaw (degrees), and how far out along its local +Z the handle
  *  sits. The exact inverse of `yawDegFromPointer` — feeding this function's

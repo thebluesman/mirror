@@ -279,7 +279,12 @@ export function addFurnitureBoxMeshes(group: THREE.Group, item: FurnitureItem): 
 // resolve to an unhelpful `{}`-ish type on the wider union.
 export type BoxFurnitureItem = Extract<FurnitureItem, { shape?: "box" }>;
 
-function isBoxFurnitureItem(item: FurnitureItem): item is BoxFurnitureItem {
+// Exported for src/import/applyFlatTexture.ts and src/components/ImportPanel.tsx
+// (Phase 6, PRD §7.6): the flat-texture upload control is box-items-only,
+// same restriction `flatTextureHash` itself carries in the schema — this is
+// the one place that discriminant is computed, so the UI and the renderer
+// above can't drift on which items qualify.
+export function isBoxFurnitureItem(item: FurnitureItem): item is BoxFurnitureItem {
   return item.shape === undefined || item.shape === "box";
 }
 

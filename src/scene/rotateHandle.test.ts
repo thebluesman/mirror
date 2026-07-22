@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { rotateHandleWorldXZ, yawDegFromPointer } from "./rotateHandle";
+import { rotateHandleWorldXZ, snapYawDeg, yawDegFromPointer } from "./rotateHandle";
 
 describe("yawDegFromPointer", () => {
   it("returns 0 when the pointer is straight ahead on +Z (the handle's rest direction)", () => {
@@ -50,5 +50,23 @@ describe("rotateHandleWorldXZ", () => {
     const [hx, hz] = rotateHandleWorldXZ(center[0], center[1], yawDeg, offset);
     const recovered = yawDegFromPointer(center[0], center[1], hx, hz);
     expect(recovered).toBeCloseTo(yawDeg, 5);
+  });
+});
+
+describe("snapYawDeg", () => {
+  it("rounds to the nearest 15deg step", () => {
+    expect(snapYawDeg(8, 15)).toBe(15);
+    expect(snapYawDeg(7.4, 15)).toBe(0);
+    expect(snapYawDeg(52, 15)).toBe(45);
+    expect(snapYawDeg(53, 15)).toBe(60);
+  });
+
+  it("normalizes the wrap at 360 back to 0", () => {
+    expect(snapYawDeg(358, 15)).toBe(0); // rounds to 360 -> 0
+  });
+
+  it("handles negative yaw by normalizing into [0, 360)", () => {
+    expect(snapYawDeg(-15, 15)).toBe(345);
+    expect(snapYawDeg(-7, 15)).toBe(0); // rounds to -0/0
   });
 });
