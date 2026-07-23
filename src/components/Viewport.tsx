@@ -45,10 +45,7 @@ import {
 } from "../scene/shortcuts";
 import {
   computeWalkStep,
-  isWalkCollidableItem,
-  resolveWalkCollision,
   SYNTHETIC_LOOKAT_DISTANCE_CM,
-  WALK_COLLISION_RADIUS_CM,
   WALK_CROUCH_EYE_HEIGHT_CM,
   WALK_EYE_HEIGHT_CM,
   WALK_SPEED_CM_PER_SEC,
@@ -902,28 +899,6 @@ export const Viewport = forwardRef<
     (helper.material as THREE.LineBasicMaterial).color.set(gestureAffordanceColor(itemId, colliding));
   }
 
-  // improvements-minor-fixes.md §12 (revisited): every placed item's
-  // footprint AABB, for the walk-mode collision check in the animate loop
-  // below. Unlike updateCollisionHighlight's `others`, there's no itemId to
-  // exclude here — the camera is never itself one of built.furnitureGroups.
-  // Rugs/flat floor coverings (isWalkCollidableItem) are skipped entirely —
-  // they don't block walking in real life, and leaving sonderod-rug in this
-  // list was the confirmed "can't walk near the rug" bug. Room-shell walls
-  // are a separate, untouched list (wallFootprintAABBs) — this only ever
-  // filters furniture items.
-  function allItemFootprintAABBs(): AABB[] {
-    const built = builtRef.current;
-    if (!built) return [];
-    const aabbs: AABB[] = [];
-    built.furnitureGroups.forEach((group, itemId) => {
-      const item = itemsByIdRef.current.get(itemId);
-      if (!item || !isWalkCollidableItem(item)) return;
-      const rotationDeg = ((THREE.MathUtils.radToDeg(group.rotation.y) % 360) + 360) % 360;
-      aabbs.push(itemFootprintAABB(item, [group.position.x, group.position.y, group.position.z], rotationDeg));
-    });
-    return aabbs;
-  }
-
   // Per-surface tracking for the calibration effect below: the last
   // calibration actually applied (so it can diff and skip no-op work) and
   // the live THREE.Texture instances currently referenced by a material (so
@@ -1123,6 +1098,13 @@ export const Viewport = forwardRef<
 
     const pmrem = new THREE.PMREMGenerator(renderer);
     scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    // pmrem.dispose() only frees its own internal blur-pass render
+    // targets/materials, not the returned `.texture` above — safe to call
+    // right away. Every material-only edit (tint, blend mode) currently
+    // reruns this whole effect (see structuralSceneFile's comment), so
+    // without this a PMREMGenerator's GPU resources leaked on every one of
+    // those edits, not just on genuinely structural changes.
+    pmrem.dispose();
 
     const camera = new THREE.PerspectiveCamera(HUMAN_FOV, 1, 5, 3000);
     // Bug fix (improvements-minor-fixes.md §15): prefer the previous build's
@@ -2058,36 +2040,20 @@ export const Viewport = forwardRef<
         if (walkControls.isLocked) {
           const step = computeWalkStep(walkKeys, WALK_SPEED_CM_PER_SEC, deltaSec);
           if (step.forward !== 0 || step.right !== 0) {
-            // improvements-minor-fixes.md §12 (revisited): axis-independent
-            // slide collision response. Reuses the same drag-placement AABB
-            // machinery (itemFootprintAABB/wallFootprintAABBs/aabbOverlap,
-            // via walkCamera.ts's resolveWalkCollision/walkStepCollides)
-            // rather than a second collision system. moveForward/moveRight
-            // are PointerLockControls' own mutate-in-place methods — there's
-            // no "propose a position, then decide" API to check *before*
-            // applying the step — so this applies the step first, reads back
-            // the resulting XZ, then resolves each axis independently
-            // against the pre-step position: brushing a wall/item on one
-            // axis reverts just that axis, not the whole frame, so movement
-            // along the other axis keeps going (the v1 whole-frame hard stop
-            // this replaces froze both axes on any overlap). Y is never
-            // touched by WASD (see computeWalkStep's own comment), so only
-            // X/Z need resolving.
-            const prevX = camera.position.x;
-            const prevZ = camera.position.z;
+            // Disabled 2026-07-23 per Shyam: the axis-independent slide
+            // collision (improvements-minor-fixes.md §12 revisited) blocks
+            // entering/moving in walk mode whenever the camera's current
+            // position already overlaps a footprint (e.g. starting walk mode
+            // while orbit-parked above/near furniture) — the collision
+            // system has no "already inside something" recovery, only
+            // "resist crossing a boundary." Rather than patch that in without
+            // discussion, walk mode is free-roam (no collision at all) until
+            // Shyam decides how re-entry should work. See the removed
+            // resolveWalkCollision call (git history) for the collision math
+            // itself — walkCamera.ts's resolveWalkCollision/walkStepCollides
+            // are unused now but left in place for that discussion.
             if (step.forward !== 0) walkControls.moveForward(step.forward);
             if (step.right !== 0) walkControls.moveRight(step.right);
-            const resolved = resolveWalkCollision(
-              prevX,
-              prevZ,
-              camera.position.x,
-              camera.position.z,
-              WALK_COLLISION_RADIUS_CM,
-              allItemFootprintAABBs(),
-              wallAABBsRef.current,
-            );
-            camera.position.x = resolved.x;
-            camera.position.z = resolved.z;
           }
         }
       } else {
@@ -2217,6 +2183,27 @@ export const Viewport = forwardRef<
       walkControls.dispose();
       controls.dispose();
       renderer.dispose();
+      // Bug fix (2026-07-23, post-merge review of PR #28): renderer.dispose()
+      // clears Three.js's own internal caches, but does NOT release the
+      // underlying WebGL context — that only happens once the canvas element
+      // is garbage-collected, which isn't synchronous. Every material-only
+      // edit (tint, blend mode) reruns this whole effect (a new
+      // WebGLRenderer + fresh context on every single one — see
+      // structuralSceneFile's comment on why items isn't split into
+      // structural-vs-material deps yet), so a burst of edits — e.g.
+      // dragging the tint color picker — could spin up dozens of contexts
+      // before the browser's GC ever ran, hitting Chrome's ~16-live-context
+      // cap. Past that cap the browser force-loses the *oldest* context with
+      // no recovery path (no webglcontextlost handler exists anywhere in
+      // this app), which reads as "the viewport goes blank, needs a
+      // refresh" — reproduced via Playwright: 90 rapid tint edits produced
+      // 92 context creations and 76 forced context losses before this fix.
+      // Explicitly losing the context here, synchronously, the moment this
+      // renderer is actually done with, is the standard fix for repeated
+      // WebGLRenderer teardown/recreate (see WEBGL_lose_context spec) —
+      // it returns the context slot to the browser immediately instead of
+      // waiting on GC.
+      renderer.getContext().getExtension("WEBGL_lose_context")?.loseContext();
       container.removeChild(renderer.domElement);
       builtRef.current = null;
       rendererRef.current = null;
