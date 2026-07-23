@@ -7,15 +7,19 @@ import { Footprints, Orbit as OrbitIcon } from "lucide-react";
 import {
   addFurnitureBoxMeshes,
   buildScene,
+  furnitureMaterialFor,
   furnitureOverallDims,
+  isBoxFurnitureItem,
   resolveSunLighting,
+  structurallyEqualFurnitureItems,
   sunPositionFromAngles,
   type BuiltScene,
 } from "../scene/buildScene";
 import { computeRoomBoundsCm, softClampCameraPosition, type RoomBoundsCm } from "../scene/cameraBounds";
 import { applyShellSurface, updateSurfaceCalibrationInPlace, type ShellSurface } from "../scene/shellMaterials";
 import { loadShellTexture } from "../scene/loadShellTexture";
-import { applyModelTint, fitModelToDims, loadFurnitureModel } from "../scene/loadFurnitureModel";
+import { fitModelToDims, loadFurnitureModel } from "../scene/loadFurnitureModel";
+import { applyItemTint, captureTintableMaterials, type TintableMaterial } from "../scene/furnitureTint";
 import { computeFlatTextureFit, FULL_CONTENT_BOX, type ContentBox } from "../scene/flatItemTexture";
 import { checkCollisions, itemFootprintAABB, wallFootprintAABBs, type AABB } from "../scene/collision";
 import {
@@ -59,6 +63,7 @@ import {
   type Location,
   type ShellCalibration,
   type SurfaceCalibration,
+  type TintBlendMode,
 } from "../schema/scene";
 import type { FurnitureItem, SceneFile } from "../scene/types";
 import { deriveLiveCameraReading, resolveStructuralBuildCameraPreset } from "../scene/cameraViewpoints";
@@ -912,6 +917,43 @@ export const Viewport = forwardRef<
   const appliedTexturesRef = useRef<Partial<Record<ShellSurface, THREE.Texture[]>>>({});
   const [buildVersion, setBuildVersion] = useState(0);
 
+  // Per-item tracking for the furniture material-only live-update effect
+  // further down (the "stop full-rebuilding on material-only edits" fix) —
+  // same shape as the shell-calibration refs above, just keyed by itemId
+  // instead of surface. Reset whenever the structural effect rebuilds the
+  // scene, same reason: a rebuild gets fresh per-item materials that haven't
+  // had any live-update applied yet.
+  const lastAppliedTintRef = useRef<Map<string, { tintColor?: string; tintBlendMode?: TintBlendMode }>>(new Map());
+  // GLB items only: captured once per item right after its model decodes
+  // (see pendingModels.forEach below), since — unlike furnitureMaterialFor's
+  // shared MAT.furniture base for the box/flat-texture path — a GLB's own
+  // material colors are the "base" a repeated tint edit needs to reset to.
+  const glbTintableRef = useRef<Map<string, TintableMaterial[]>>(new Map());
+  // flatTextureHash's *value* (a rug re-upload, as opposed to first-ever
+  // set/clear, which stays structural — see structurallyEqualFurnitureItems)
+  // live-updates the same top-face material buildScene created, keyed here
+  // by itemId so the live-update effect doesn't have to re-derive it.
+  const flatTextureMaterialsRef = useRef<Map<string, THREE.MeshStandardMaterial>>(new Map());
+  const lastAppliedFlatTextureHashRef = useRef<Map<string, string | undefined>>(new Map());
+  const appliedFlatTexturesRef = useRef<Map<string, THREE.Texture>>(new Map());
+  // Per-item generation token, same purpose/shape as the calibration
+  // effect's single `runIdRef` (mirrors updateSurfaceCalibrationInPlace's
+  // race guard): a re-upload superseding an in-flight decode must not let
+  // the stale one win — this is what actually fixes the rug-texture race,
+  // which previously had nothing to race against a full rebuild's own async
+  // work (there was no in-place update path for furniture at all).
+  const flatTextureRunIdRef = useRef<Map<string, number>>(new Map());
+  // Always-latest mirror of `sceneFile.items`, readable from inside the
+  // structural effect's async GLB-load continuation below — that effect's
+  // own closure captures `structuralSceneFile` from whenever it last ran,
+  // which (by design, see structuralSceneFile's comment) can be stale on
+  // tint/blend fields if a material-only edit happened without a rebuild in
+  // between. A plain ref assigned every render (not through an effect) is
+  // the standard "always current" escape hatch this file already uses
+  // elsewhere (see onCommitPlacementRef, selectedItemIdRef, etc.).
+  const sceneFileItemsRef = useRef(sceneFile.items);
+  sceneFileItemsRef.current = sceneFile.items;
+
   // Structural build: renderer, lighting, room shell geometry, furniture,
   // camera, controls. Previously ran once per mount only (sceneFile
   // captured via useRef at mount) — restored here to react to structural
@@ -957,10 +999,37 @@ export const Viewport = forwardRef<
   // a structural change — a different command set, possibly different
   // items in view — and should get a real rebuild, unlike an in-place edit
   // to the current layout's commands.
+  //
+  // `sceneFile.items` is NOT read here directly, for the same "don't rebuild
+  // for a change this effect has its own in-place path for" reason cameras/
+  // layouts aren't: 8c226d3 diagnosed (but didn't fix — see that commit's
+  // comment at the PMREMGenerator.dispose() call below) that a material-only
+  // edit — tint, blend mode, a flat-texture/rug re-upload — mutates
+  // `sceneFile.items` too, and since `items` is a new array reference on
+  // every edit, keying this memo on it directly meant *every* one of those
+  // also tore down and rebuilt the renderer, same as a genuinely structural
+  // change (add/remove an item, swap its model, resize it). structuralItemsRef
+  // instead holds onto the previous items array across renders where the
+  // only difference is material-only fields, via structurallyEqualFurnitureItems
+  // (buildScene.ts) — so this memo's `items` dependency, and therefore the
+  // structural effect below, doesn't change at all for those edits. The
+  // furniture material-only live-update effect further down (mirroring the
+  // shell-calibration effect's shape) is what actually applies tint/blend/
+  // flat-texture-value changes, reading `sceneFile.items` directly instead.
+  const structuralItemsRef = useRef(sceneFile.items);
+  if (!structurallyEqualFurnitureItems(structuralItemsRef.current, sceneFile.items)) {
+    structuralItemsRef.current = sceneFile.items;
+  }
   const structuralSceneFile = useMemo(
-    () => sceneFile,
+    () => ({ ...sceneFile, items: structuralItemsRef.current }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: this is the memo's whole purpose, see comment above
-    [sceneFile.room.ceilingHeightCm, sceneFile.room.floor, sceneFile.room.walls, sceneFile.items, sceneFile.current],
+    [
+      sceneFile.room.ceilingHeightCm,
+      sceneFile.room.floor,
+      sceneFile.room.walls,
+      structuralItemsRef.current,
+      sceneFile.current,
+    ],
   );
 
   useEffect(() => {
@@ -990,6 +1059,18 @@ export const Viewport = forwardRef<
     // treat this as a first-ever apply for all three surfaces.
     lastAppliedCalibRef.current = {};
     appliedTexturesRef.current = {};
+    // Same "fresh materials, nothing live-updated onto them yet" reset as
+    // the shell-calibration refs above, for the furniture material-only
+    // live-update effect further down — a rebuild's fresh per-item materials
+    // (buildScene.ts's furnitureMaterialFor / addFlatTexturedFurnitureMesh)
+    // already carry whatever tint/flat-texture the item's current fields
+    // say, so there's nothing stale to diff against.
+    lastAppliedTintRef.current = new Map();
+    glbTintableRef.current = new Map();
+    lastAppliedFlatTextureHashRef.current = new Map();
+    appliedFlatTexturesRef.current = new Map();
+    flatTextureRunIdRef.current = new Map();
+    flatTextureMaterialsRef.current = new Map(built.pendingFlatTextures.map(({ item, material }) => [item.id, material]));
     // D2: wall geometry and item definitions are structural too — recomputed
     // here alongside `built` so a collision check during this build's
     // lifetime never reads stale walls/items from a previous room.
@@ -1025,10 +1106,22 @@ export const Viewport = forwardRef<
           // improvements-v2.2 §5: a real imported GLB is the common case for
           // a placed item, not just the box placeholder — don't skip tinting
           // it just because it has its own imported materials.
-          // improvements-minor-fixes §10: passes the item's chosen blend mode
-          // through, falling back to "multiply" (applyModelTint's own
-          // default) when unset.
-          if (item.tintColor) applyModelTint(model, item.tintColor, item.tintBlendMode);
+          // Captures each material's original color once (furnitureTint.ts)
+          // so the material-only live-update effect below can retint this
+          // model later without redecoding it, then applies whatever tint
+          // the item's *current* fields say — read via sceneFileItemsRef,
+          // not the possibly-stale `item` this callback closed over, in case
+          // a tint edit landed while this GLB was still decoding (that edit
+          // wouldn't have triggered a rebuild — see structuralSceneFile's
+          // comment — so there'd otherwise be nothing to apply it here).
+          const tintable = captureTintableMaterials(model);
+          glbTintableRef.current.set(item.id, tintable);
+          const latestItem = sceneFileItemsRef.current.find((i) => i.id === item.id) ?? item;
+          applyItemTint(tintable, latestItem.tintColor, latestItem.tintBlendMode ?? "multiply");
+          lastAppliedTintRef.current.set(item.id, {
+            tintColor: latestItem.tintColor,
+            tintBlendMode: latestItem.tintBlendMode,
+          });
           group.add(model);
         })
         .catch((err) => {
@@ -1083,6 +1176,12 @@ export const Viewport = forwardRef<
           texture.needsUpdate = true;
           material.map = texture;
           material.needsUpdate = true;
+          // Seeds the material-only live-update effect's per-item tracking
+          // so it doesn't redundantly redecode this same hash the first
+          // time it runs after this build — only a *later* value change
+          // (a re-upload) should kick off another load.
+          lastAppliedFlatTextureHashRef.current.set(item.id, hash);
+          appliedFlatTexturesRef.current.set(item.id, texture);
         })
         .catch((err) => {
           // No box-mesh fallback needed here (unlike the GLB path above) —
@@ -1100,10 +1199,11 @@ export const Viewport = forwardRef<
     scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
     // pmrem.dispose() only frees its own internal blur-pass render
     // targets/materials, not the returned `.texture` above — safe to call
-    // right away. Every material-only edit (tint, blend mode) currently
-    // reruns this whole effect (see structuralSceneFile's comment), so
-    // without this a PMREMGenerator's GPU resources leaked on every one of
-    // those edits, not just on genuinely structural changes.
+    // right away. Structural rebuilds are rarer now that a material-only
+    // edit (tint, blend mode, flat-texture value) no longer reruns this
+    // whole effect (see structuralSceneFile's comment), but a genuinely
+    // structural change still does, and without this a PMREMGenerator's GPU
+    // resources leaked on every one of those (8c226d3).
     pmrem.dispose();
 
     const camera = new THREE.PerspectiveCamera(HUMAN_FOV, 1, 5, 3000);
@@ -2393,6 +2493,132 @@ export const Viewport = forwardRef<
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- buildVersion is a signal (rebuild happened), not a value read in the effect
   }, [calibration, buildVersion]);
+
+  // Live furniture material-only updates: tint, blend mode, and a
+  // flat-texture (rug)'s *value* (re-uploading a new photo onto an
+  // already-textured item — see structurallyEqualFurnitureItems for why a
+  // first-ever set/clear stays structural) mutate the already-built
+  // meshes'/models' materials in place, no renderer/camera churn — same
+  // shape as the shell-calibration effect above, just diffing per item
+  // instead of per surface. Reads `sceneFile.items` directly (not the
+  // memoized `structuralSceneFile`), the same "read the raw prop, not the
+  // structural memo" move the placement-reconciliation effect further down
+  // makes for `sceneFile.layouts`.
+  //
+  // This is the actual fix for the rug-texture race 8c226d3 diagnosed but
+  // didn't fix: that commit patched the GL-context leak a rapid tint drag
+  // caused (each edit forced a full rebuild), but there was never an
+  // in-place update path for furniture, so a re-upload racing a previous
+  // decode had nothing to race against except another full rebuild's own
+  // async work. flatTextureRunIdRef gives each item's re-upload the same
+  // per-run generation-token guard updateSurfaceCalibrationInPlace's caller
+  // already has for the shell.
+  useEffect(() => {
+    const built = builtRef.current;
+    if (!built) return;
+
+    sceneFile.items.forEach((item) => {
+      const prevTint = lastAppliedTintRef.current.get(item.id);
+      const tintChanged =
+        !prevTint || prevTint.tintColor !== item.tintColor || prevTint.tintBlendMode !== item.tintBlendMode;
+
+      if (tintChanged) {
+        const glbEntries = glbTintableRef.current.get(item.id);
+        if (glbEntries) {
+          applyItemTint(glbEntries, item.tintColor, item.tintBlendMode ?? "multiply");
+          lastAppliedTintRef.current.set(item.id, { tintColor: item.tintColor, tintBlendMode: item.tintBlendMode });
+        } else if (!item.glbHash) {
+          // Box or flat-textured placeholder: furnitureMaterialFor is a pure
+          // function of the item's own tint fields (always derived fresh
+          // from the shared MAT.furniture base — see its comment in
+          // buildScene.ts), so building a fresh one and swapping it onto
+          // every mesh that used the old one is simpler and safer than
+          // trying to reset-then-reapply a possibly-*shared* MAT.furniture
+          // instance in place (untinted items intentionally share one
+          // instance, so mutating it would recolor every other untinted
+          // item too).
+          const group = built.furnitureGroups.get(item.id);
+          if (group) {
+            const fresh = furnitureMaterialFor(item);
+            group.traverse((child) => {
+              if (!(child instanceof THREE.Mesh)) return;
+              if (Array.isArray(child.material)) {
+                // Flat-textured box: BoxGeometry's default face-group order
+                // is [+X, -X, +Y, -Y, +Z, -Z] — index 2 (+Y, top) carries the
+                // rug photo's own material and never takes tint (see
+                // addFlatTexturedFurnitureMesh's comment); every other slot
+                // is the same shared side material this item owns.
+                child.material = child.material.map((m, i) => (i === 2 ? m : fresh));
+              } else {
+                child.material = fresh;
+              }
+            });
+            lastAppliedTintRef.current.set(item.id, { tintColor: item.tintColor, tintBlendMode: item.tintBlendMode });
+          }
+          // else: no group at all (shouldn't happen for a non-GLB item) —
+          // leave lastAppliedTintRef unset so this re-checks next run.
+        }
+        // else: a glbHash item whose model hasn't finished decoding yet —
+        // leave lastAppliedTintRef unset; the GLB-attach handler above
+        // applies the then-current tint itself once it captures this item's
+        // tintable materials, and will have caught up by then.
+      }
+
+      const prevHash = lastAppliedFlatTextureHashRef.current.get(item.id);
+      if (isBoxFurnitureItem(item) && item.flatTextureHash && prevHash !== item.flatTextureHash) {
+        const material = flatTextureMaterialsRef.current.get(item.id);
+        const dims = item.dimsCm;
+        if (material && dims) {
+          const hash = item.flatTextureHash;
+          const myRun = (flatTextureRunIdRef.current.get(item.id) ?? 0) + 1;
+          flatTextureRunIdRef.current.set(item.id, myRun);
+          // Set optimistically (before the async load below resolves) so a
+          // later effect run with this same hash still pending doesn't
+          // dispatch a second, redundant load — mirrors the calibration
+          // effect's `lastAppliedCalibRef` update timing for its own
+          // texture-affecting branch.
+          lastAppliedFlatTextureHashRef.current.set(item.id, hash);
+
+          loadShellTexture(hash)
+            .then((source) => {
+              if (!source) return;
+              if (flatTextureRunIdRef.current.get(item.id) !== myRun) {
+                // Superseded by a newer re-upload for this same item — bail
+                // without touching the material (the fix for the race).
+                source.bitmap.close();
+                return;
+              }
+              const targetAspect = dims.w / dims.d;
+              const rawImageAspect = source.bitmap.width / source.bitmap.height;
+              const contentBox = detectContentBox(source.bitmap);
+              const { repeat, offset, rotation } = computeFlatTextureFit(contentBox, rawImageAspect, targetAspect);
+              const texture = new THREE.Texture(source.bitmap);
+              texture.colorSpace = THREE.SRGBColorSpace;
+              texture.wrapS = texture.wrapT = THREE.ClampToEdgeWrapping;
+              texture.rotation = rotation;
+              texture.repeat.set(repeat[0], repeat[1]);
+              texture.offset.set(offset[0], offset[1]);
+              texture.needsUpdate = true;
+              // Force the GPU upload now, synchronously (same reasoning as
+              // the calibration effect's texture-affecting branch), so it's
+              // safe to close the ImageBitmap right after instead of
+              // leaking it.
+              rendererRef.current?.initTexture(texture);
+              source.bitmap.close();
+              const old = appliedFlatTexturesRef.current.get(item.id);
+              material.map = texture;
+              material.needsUpdate = true;
+              appliedFlatTexturesRef.current.set(item.id, texture);
+              old?.dispose();
+            })
+            .catch((err) => {
+              console.error(`[Viewport] failed to load flat texture for "${item.id}"`, err);
+            });
+        }
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- buildVersion is a signal (rebuild happened), not a value read in the effect
+  }, [sceneFile.items, buildVersion]);
 
   // Live sun/hemisphere updates (improvements-v2.2 §4a; extended by
   // improvements-minor-fixes §9 for location mode): same "mutate the

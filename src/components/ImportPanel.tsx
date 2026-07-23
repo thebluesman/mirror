@@ -14,8 +14,10 @@ import "./ImportPanel.css";
 
 // improvements-v2.2 §5: same debounce window ShellPanel.tsx's surface tint
 // picker uses — a `<input type="color">` drag fires onChange continuously,
-// and each commit here triggers a full structural scene rebuild (see
-// TintRow below), not just a cheap in-place material tweak.
+// and each commit here used to trigger a full structural scene rebuild (see
+// TintRow below); Viewport.tsx's material-only live-update effect now
+// applies it as an in-place material tweak instead, but the debounce still
+// earns its keep (no reason to redo the tint math every pointermove tick).
 const TINT_DEBOUNCE_MS = 120;
 
 type Stage =

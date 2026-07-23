@@ -259,11 +259,65 @@ export function furnitureOverallDims(item: FurnitureItem): { w: number; d: numbe
 // shared src/scene/tintBlend.ts helper — MAT.furniture never carries a `.map`,
 // so this always takes applyTintBlend's cheap flat-scalar shortcut, same cost
 // as the plain `.color.multiply()` call this replaced.
-function furnitureMaterialFor(item: FurnitureItem): THREE.MeshStandardMaterial {
+// Exported for src/components/Viewport.tsx's material-only live-update
+// effect (fix for the "stop full-rebuilding on material-only edits" gap —
+// see structurallyEqualFurnitureItems below): a tint/blend-mode edit no
+// longer reaches this function via a structural rebuild, so Viewport calls
+// it directly to build a fresh material and swap it onto the already-built
+// mesh(es) in place. Safe to call repeatedly (always derives fresh from the
+// shared MAT.furniture base, never mutates a previously-returned instance),
+// unlike a "reset then reapply" scheme.
+export function furnitureMaterialFor(item: FurnitureItem): THREE.MeshStandardMaterial {
   if (!item.tintColor) return MAT.furniture;
   const mat = MAT.furniture.clone();
   applyTintBlend(mat, item.tintColor, item.tintBlendMode ?? "multiply");
   return mat;
+}
+
+// Fields that never change which mesh(es) buildScene constructs for an item
+// (only how they're colored/textured) — a change to just these shouldn't
+// count as "structural" for Viewport's structuralSceneFile memo, or every
+// tint drag / flat-texture (rug) re-upload would tear down and rebuild the
+// entire renderer/scene/camera/controls, the root cause diagnosed but not
+// fixed in 8c226d3 (that commit patched the resulting GL-context leak, not
+// this). `flatTextureHash` is handled separately below rather than listed
+// here: unlike tint, whether it's set at all changes the mesh path itself
+// (addFlatTexturedFurnitureMesh vs. addFurnitureBoxMeshes/a GLB) — only a
+// changed *value* while already-set is material-only.
+const MATERIAL_ONLY_FIELDS = new Set(["tintColor", "tintBlendMode"]);
+
+function structurallyEqualFurnitureItem(a: FurnitureItem, b: FurnitureItem): boolean {
+  if (a === b) return true;
+  // Presence (not value) of flatTextureHash decides the mesh path (see
+  // addFurniture below) — a photo re-upload on an already-textured item
+  // keeps the same box+top-face-material mesh, so only a presence flip is
+  // structural.
+  if (Boolean(a.flatTextureHash) !== Boolean(b.flatTextureHash)) return false;
+
+  const ra = a as unknown as Record<string, unknown>;
+  const rb = b as unknown as Record<string, unknown>;
+  const keys = new Set([...Object.keys(ra), ...Object.keys(rb)]);
+  for (const key of keys) {
+    if (MATERIAL_ONLY_FIELDS.has(key) || key === "flatTextureHash") continue;
+    if (!Object.is(ra[key], rb[key])) return false;
+  }
+  return true;
+}
+
+/** Whether two item arrays would make buildScene construct the exact same
+ *  mesh graph — i.e. differ (if at all) only in tint/blend-mode/flat-texture-
+ *  value fields on items that are otherwise identical, in the same order.
+ *  Viewport.tsx's structuralSceneFile memo uses this instead of raw
+ *  reference/array-dependency equality so a material-only edit doesn't
+ *  trigger a full rebuild — see MATERIAL_ONLY_FIELDS above for why each
+ *  field is (or isn't) excluded. */
+export function structurallyEqualFurnitureItems(a: FurnitureItem[], b: FurnitureItem[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (!structurallyEqualFurnitureItem(a[i], b[i])) return false;
+  }
+  return true;
 }
 
 // Elevation is already baked into a placement command's position[1] (see

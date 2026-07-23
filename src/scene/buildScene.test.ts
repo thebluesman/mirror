@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
-import { buildScene, addFurnitureBoxMeshes, resolveSunLighting } from "./buildScene";
-import type { SceneFile } from "./types";
+import { buildScene, addFurnitureBoxMeshes, resolveSunLighting, structurallyEqualFurnitureItems } from "./buildScene";
+import type { FurnitureItem, SceneFile } from "./types";
 import type { Lighting, LightingMode, Location } from "../schema/scene";
 
 // v2 spike D4 (W-B, rug fix ladder lever 2 — see spike-v2/OUTCOME.md):
@@ -366,5 +366,70 @@ describe("resolveSunLighting (improvements-minor-fixes §9)", () => {
     const dz = sun.position.z - target.z;
     expect(dz).toBeGreaterThan(0);
     expect(Math.abs(dx)).toBeLessThan(dz * 0.1);
+  });
+});
+
+// "Stop full-rebuilding on material-only edits" fix: structurallyEqualFurnitureItems
+// is what Viewport.tsx's structuralSceneFile memo uses to decide whether an
+// items-array change needs a full renderer/scene rebuild, or can be left to
+// the material-only live-update effect instead. Pure-logic, no THREE/WebGL
+// involved — testable directly against plain item objects.
+describe("structurallyEqualFurnitureItems", () => {
+  const box: FurnitureItem = { id: "a", name: "Box", shape: "box", dimsCm: { w: 50, d: 50, h: 50 } };
+
+  it("returns true for identical arrays (same reference)", () => {
+    const items = [box];
+    expect(structurallyEqualFurnitureItems(items, items)).toBe(true);
+  });
+
+  it("returns true when only tintColor differs", () => {
+    const a = [box];
+    const b = [{ ...box, tintColor: "#ff0000" }];
+    expect(structurallyEqualFurnitureItems(a, b)).toBe(true);
+  });
+
+  it("returns true when only tintBlendMode differs", () => {
+    const a = [{ ...box, tintColor: "#ff0000", tintBlendMode: "multiply" as const }];
+    const b = [{ ...box, tintColor: "#ff0000", tintBlendMode: "screen" as const }];
+    expect(structurallyEqualFurnitureItems(a, b)).toBe(true);
+  });
+
+  it("returns true when a flatTextureHash's value changes but stays set (a rug re-upload)", () => {
+    const a = [{ ...box, flatTextureHash: "hash1" }];
+    const b = [{ ...box, flatTextureHash: "hash2" }];
+    expect(structurallyEqualFurnitureItems(a, b)).toBe(true);
+  });
+
+  it("returns false when flatTextureHash goes from unset to set (mesh path changes)", () => {
+    const a = [box];
+    const b = [{ ...box, flatTextureHash: "hash1" }];
+    expect(structurallyEqualFurnitureItems(a, b)).toBe(false);
+  });
+
+  it("returns false when flatTextureHash goes from set to unset", () => {
+    const a = [{ ...box, flatTextureHash: "hash1" }];
+    const b = [box];
+    expect(structurallyEqualFurnitureItems(a, b)).toBe(false);
+  });
+
+  it("returns false when dimsCm changes (real geometry change)", () => {
+    const a = [box];
+    const b = [{ ...box, dimsCm: { w: 60, d: 50, h: 50 } }];
+    expect(structurallyEqualFurnitureItems(a, b)).toBe(false);
+  });
+
+  it("returns false when glbHash changes (a different imported model)", () => {
+    const a = [{ ...box, glbHash: "model1" }];
+    const b = [{ ...box, glbHash: "model2" }];
+    expect(structurallyEqualFurnitureItems(a, b)).toBe(false);
+  });
+
+  it("returns false when item count differs", () => {
+    expect(structurallyEqualFurnitureItems([box], [box, box])).toBe(false);
+  });
+
+  it("returns false when order differs", () => {
+    const other: FurnitureItem = { ...box, id: "b" };
+    expect(structurallyEqualFurnitureItems([box, other], [other, box])).toBe(false);
   });
 });
