@@ -2,7 +2,20 @@ import { useEffect, useRef, useState } from "react";
 import type { Dims, FurnitureItem, ModelRotation, SceneFile, TintBlendMode } from "../schema/scene";
 import { loadFalKey } from "../storage/settings";
 import { putAsset } from "../storage/assets";
-import { generateFurnitureGlb, FalKeyMissingError, type GenerationPhase } from "../import/falClient";
+import {
+  listPendingImports,
+  savePendingImport,
+  clearPendingImport,
+  type PendingImport,
+} from "../storage/pendingImports";
+import {
+  generateFurnitureGlb,
+  checkPendingImportStatus,
+  fetchPendingImportGlb,
+  FalKeyMissingError,
+  HUNYUAN_ENDPOINT,
+  type GenerationPhase,
+} from "../import/falClient";
 import { applyFurnitureImport } from "../import/applyImport";
 import { applyFlatTexture } from "../import/applyFlatTexture";
 import { furnitureOverallDims, isBoxFurnitureItem, type BoxFurnitureItem } from "../scene/buildScene";
@@ -24,7 +37,16 @@ type Stage =
   | { kind: "pick" }
   | { kind: "confirm-cost"; photo: File }
   | { kind: "generating"; photo: File; phase: GenerationPhase; message?: string }
-  | { kind: "confirm-dims"; glbBlob: Blob; photoBlob: Blob | File; dims: Dims; modelRotationDeg: ModelRotation }
+  | {
+      kind: "confirm-dims";
+      glbBlob: Blob;
+      // Undefined for a manually uploaded .glb (see handleGlbPicked) — those
+      // don't come with a source photo at all, unlike every fal.ai-generated
+      // path here, which always has one by the time it reaches this stage.
+      photoBlob?: Blob | File;
+      dims: Dims;
+      modelRotationDeg: ModelRotation;
+    }
   | { kind: "error"; message: string; photo: File; photoUrl: string | null };
 
 // furnitureOverallDims (not a raw item.dimsCm check) so a compound-sofa's
@@ -50,30 +72,64 @@ export function ImportPanel({
   sceneFile,
   onImported,
   initialSelection,
+  initialSelectionNonce,
 }: {
   sceneFile: SceneFile;
   onImported: (next: SceneFile) => void;
   /** docs/proposals/reimport-entry-point.md §14: pre-selects an item in the
    *  picker below when arriving here via ObjectInspector's "Re-import…"
-   *  button. Consumed only as `selection`'s `useState` initializer — safe
-   *  because App.tsx only mounts this component while `tab === "Import"`
-   *  (a plain conditional render, not a `display:none`-style keep-alive),
-   *  so every switch to this tab is a fresh mount, not a re-render of a
-   *  live instance an effect would need to sync into. */
+   *  button. Also read once as `selection`'s `useState` initializer for the
+   *  first mount, but the real sync happens in the effect below, keyed off
+   *  `initialSelectionNonce` — see that prop's comment for why. */
   initialSelection?: string;
+  /** Bumped by App.tsx on every "Re-import…" click, including repeat clicks
+   *  targeting the same item. Needed because App.tsx only mounts this panel
+   *  while `tab === "Import"` — if that tab is already open when "Re-
+   *  import…" is clicked in the viewport, this component doesn't remount,
+   *  so `initialSelection`'s `useState` initializer never re-runs and the
+   *  dropdown/cards silently stay on whatever was selected before. The
+   *  effect below watches this nonce (not `initialSelection` alone, which
+   *  wouldn't change on a repeat click of the same item) to re-sync
+   *  `selection` on every click, mount or not. */
+  initialSelectionNonce?: number;
 }) {
   // All items are selectable, including ones with a glbHash already —
   // picking an already-imported item re-runs the import and replaces its
   // photo/model/dims/orientation (fixes a wrong source photo without
   // needing a separate "delete and re-add" flow).
   const [selection, setSelection] = useState<string>(initialSelection ?? "__new__");
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- fires per
+  // reimport click (tracked by the nonce), not on every `initialSelection`
+  // identity change; also resets `stage` back to "pick" so a re-import
+  // request always lands on the fresh picker rather than leaving a stale
+  // in-progress/error stage from whatever the panel was doing before — unless
+  // a generation is actively in flight (the promise chain in runGeneration
+  // isn't cancelled just because the picker's selection moved elsewhere, and
+  // yanking the progress UI away would read as the generation itself having
+  // silently stopped).
+  useEffect(() => {
+    if (initialSelection === undefined) return;
+    setSelection(initialSelection);
+    setStage((prev) => (prev.kind === "generating" ? prev : { kind: "pick" }));
+  }, [initialSelectionNonce]);
   const [newName, setNewName] = useState("");
   const [hasFalKey, setHasFalKey] = useState<boolean | null>(null);
   const [stage, setStage] = useState<Stage>({ kind: "pick" });
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const glbInputRef = useRef<HTMLInputElement>(null);
+
+  // Orphaned-generation recovery (see storage/pendingImports.ts): jobs
+  // enqueued on fal.ai whose result was never fetched, most often because
+  // the tab closed/crashed/reloaded between submit and result. Reloaded on
+  // mount only — runGeneration and handleRecoverPendingImport below keep
+  // this in sync as entries are added/resolved within a session.
+  const [pendingImports, setPendingImports] = useState<PendingImport[]>([]);
+  const [pendingStatus, setPendingStatus] = useState<Record<string, string>>({});
 
   useEffect(() => {
     loadFalKey().then((key) => setHasFalKey(key !== null));
+    listPendingImports().then(setPendingImports);
   }, []);
 
   const selectedItem = selection === "__new__" ? undefined : sceneFile.items.find((i) => i.id === selection);
@@ -82,9 +138,27 @@ export function ImportPanel({
     setStage({ kind: "confirm-cost", photo: file });
   }
 
+  // A GLB already generated elsewhere (a prior fal.ai run — Meshy or
+  // Hunyuan3D, doesn't matter, both output plain .glb — recovered via the
+  // "Pending imports" flow above, or downloaded straight from fal.ai's
+  // dashboard/logs) skips generation entirely: no fal.ai call, no cost
+  // dialog, straight to the same confirm-dims step a fresh generation ends
+  // at, so it still gets sized/oriented before committing.
+  function handleGlbPicked(file: File) {
+    setStage({
+      kind: "confirm-dims",
+      glbBlob: file,
+      dims: dimsOf(selectedItem),
+      modelRotationDeg: ZERO_ROTATION,
+    });
+  }
+
   async function runGeneration(photo: File, photoUrl: string | null) {
     setStage({ kind: "generating", photo, phase: "uploading" });
     let uploadedUrl: string | null = photoUrl;
+    // Set inside generateFurnitureGlb's onEnqueue callback, once fal hands
+    // back a request_id — see the pending-import persistence below.
+    let enqueuedRequestId: string | null = null;
     try {
       const falKey = await loadFalKey();
       if (!falKey) throw new FalKeyMissingError();
@@ -95,7 +169,30 @@ export function ImportPanel({
         (url) => {
           uploadedUrl = url;
         },
+        (requestId) => {
+          // Fires right after fal accepts the job — the money is already
+          // spent at this point regardless of whether this tab sticks
+          // around to see the result, so persist enough to recover it
+          // (checkPendingImportStatus + fetchPendingImportGlb below) even
+          // if the tab closes/crashes before generateFurnitureGlb resolves.
+          enqueuedRequestId = requestId;
+          void savePendingImport({
+            requestId,
+            endpoint: HUNYUAN_ENDPOINT,
+            itemId: selection === "__new__" ? undefined : selection,
+            newItemName: selection === "__new__" ? newName || "New item" : undefined,
+            itemLabel: selection === "__new__" ? newName || "New item" : selectedItem?.name ?? selection,
+            photoUrl: uploadedUrl ?? "",
+            submittedAt: Date.now(),
+          }).then(() => listPendingImports().then(setPendingImports));
+        },
       );
+      // Reached this GLB in hand — the job is no longer at risk of being
+      // orphaned, so it doesn't need a recovery entry anymore.
+      if (enqueuedRequestId) {
+        await clearPendingImport(enqueuedRequestId);
+        setPendingImports((list) => list.filter((p) => p.requestId !== enqueuedRequestId));
+      }
       setStage({
         kind: "confirm-dims",
         glbBlob,
@@ -115,11 +212,75 @@ export function ImportPanel({
     }
   }
 
+  // Resumes an orphaned pending import: polls its current status, and if
+  // fal reports it COMPLETED, fetches the GLB and the (still-live, fal-
+  // hosted) source photo, then drops into the same confirm-dims stage a
+  // normal generation would have — so committing it is identical either way.
+  async function handleRecoverPendingImport(entry: PendingImport) {
+    setPendingStatus((s) => ({ ...s, [entry.requestId]: "Checking…" }));
+    try {
+      const falKey = await loadFalKey();
+      if (!falKey) throw new FalKeyMissingError();
+      const status = await checkPendingImportStatus(entry.requestId, falKey);
+      if (status.status !== "COMPLETED") {
+        setPendingStatus((s) => ({
+          ...s,
+          [entry.requestId]: status.status === "IN_QUEUE" ? "Still queued on fal.ai…" : "Still generating…",
+        }));
+        return;
+      }
+      const [glbBlob, photoRes] = await Promise.all([
+        fetchPendingImportGlb(entry.requestId, falKey),
+        entry.photoUrl ? fetch(entry.photoUrl) : Promise.resolve(null),
+      ]);
+      if (!photoRes || !photoRes.ok) {
+        throw new Error("Generated model recovered, but its source photo is no longer reachable on fal.ai.");
+      }
+      const photoBlob = await photoRes.blob();
+
+      setSelection(entry.itemId ?? "__new__");
+      setNewName(entry.newItemName ?? "");
+      setStage({
+        kind: "confirm-dims",
+        glbBlob,
+        photoBlob,
+        dims: dimsOf(entry.itemId ? sceneFile.items.find((i) => i.id === entry.itemId) : undefined),
+        modelRotationDeg: ZERO_ROTATION,
+      });
+
+      await clearPendingImport(entry.requestId);
+      setPendingImports((list) => list.filter((p) => p.requestId !== entry.requestId));
+      setPendingStatus((s) => {
+        const { [entry.requestId]: _discard, ...rest } = s;
+        return rest;
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setPendingStatus((s) => ({ ...s, [entry.requestId]: `Recovery failed: ${message}` }));
+    }
+  }
+
+  async function handleDiscardPendingImport(requestId: string) {
+    await clearPendingImport(requestId);
+    setPendingImports((list) => list.filter((p) => p.requestId !== requestId));
+    setPendingStatus((s) => {
+      const { [requestId]: _discard, ...rest } = s;
+      return rest;
+    });
+  }
+
   async function handleConfirmDims(dims: Dims, modelRotationDeg: ModelRotation) {
     if (stage.kind !== "confirm-dims") return;
     const { glbBlob, photoBlob } = stage;
 
-    const [sourcePhotoHash, glbHash] = await Promise.all([putAsset(photoBlob), putAsset(glbBlob)]);
+    // photoBlob is absent for a manually uploaded .glb (handleGlbPicked) —
+    // applyFurnitureImport (and the schema underneath it) already treats a
+    // missing sourcePhotoHash as valid, falling back to whatever photo the
+    // target item already had (see its comment).
+    const [sourcePhotoHash, glbHash] = await Promise.all([
+      photoBlob ? putAsset(photoBlob) : Promise.resolve(undefined),
+      putAsset(glbBlob),
+    ]);
 
     const itemId =
       selection === "__new__"
@@ -186,6 +347,8 @@ export function ImportPanel({
 
   const canPickPhoto =
     hasFalKey === true && (selection !== "__new__" || newName.trim().length > 0) && stage.kind === "pick";
+  // No fal.ai key needed here — a manually uploaded .glb never calls fal.ai.
+  const canPickGlb = (selection !== "__new__" || newName.trim().length > 0) && stage.kind === "pick";
 
   return (
     <div className="import-panel">
@@ -199,6 +362,50 @@ export function ImportPanel({
 
       {hasFalKey === false && (
         <p className="import-panel-warning">Add a fal.ai key in Settings before importing furniture.</p>
+      )}
+
+      {pendingImports.length > 0 && (
+        <section className="import-panel-pending">
+          <header className="import-panel-pending-header">
+            <span className="import-panel-pending-title">Pending imports</span>
+          </header>
+          <p className="import-panel-pending-hint">
+            Generations that were paid for on fal.ai but never finished downloading here — most likely
+            because this tab closed or lost its connection mid-import. Check status to fetch a finished
+            one instead of paying for it twice.
+          </p>
+          <ul className="import-panel-pending-list">
+            {pendingImports.map((entry) => (
+              <li key={entry.requestId} className="import-panel-pending-item">
+                <div className="import-panel-pending-item-info">
+                  <span className="import-panel-pending-item-label">{entry.itemLabel}</span>
+                  <span className="import-panel-pending-item-time">
+                    submitted {new Date(entry.submittedAt).toLocaleString()}
+                  </span>
+                  {pendingStatus[entry.requestId] && (
+                    <span className="import-panel-pending-item-status">{pendingStatus[entry.requestId]}</span>
+                  )}
+                </div>
+                <div className="import-panel-pending-item-actions">
+                  <button
+                    type="button"
+                    className="import-panel-button-secondary"
+                    onClick={() => void handleRecoverPendingImport(entry)}
+                  >
+                    Check status
+                  </button>
+                  <button
+                    type="button"
+                    className="import-panel-button-secondary"
+                    onClick={() => void handleDiscardPendingImport(entry.requestId)}
+                  >
+                    Discard
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       {stage.kind === "pick" && (
@@ -247,6 +454,30 @@ export function ImportPanel({
           >
             Upload photo…
           </button>
+
+          <input
+            ref={glbInputRef}
+            type="file"
+            accept=".glb,model/gltf-binary"
+            className="import-panel-file-input"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handleGlbPicked(file);
+              e.target.value = "";
+            }}
+          />
+          <button
+            type="button"
+            className="import-panel-button-secondary"
+            disabled={!canPickGlb}
+            onClick={() => glbInputRef.current?.click()}
+          >
+            Upload .glb…
+          </button>
+          <p className="import-panel-hint">
+            Already have a model you like from a previous fal.ai run (Meshy or Hunyuan3D — both output
+            plain .glb) — upload it directly, no generation, no cost.
+          </p>
 
           {selectedItem && (
             <TintRow
@@ -496,7 +727,7 @@ function DimsConfirmForm({
   const [rotation, setRotation] = useState(initialRotation);
   return (
     <div className="import-panel-dims">
-      <p>Model generated — confirm its real-world size (cm) before placing it.</p>
+      <p>Model ready — confirm its real-world size (cm) before placing it.</p>
 
       <ObjectPreview3D glbBlob={glbBlob} dims={dims} modelRotationDeg={rotation} />
 

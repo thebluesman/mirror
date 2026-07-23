@@ -73,6 +73,13 @@
   display: none;
 }
 
+.import-panel-hint {
+  font: var(--text-body);
+  font-size: 12px;
+  color: var(--color-body-muted);
+  margin: 0;
+}
+
 .import-panel-button {
   font: var(--text-button);
   background: var(--color-primary);
@@ -237,4 +244,82 @@
   border: 1px solid var(--color-hairline);
   border-radius: var(--radius-xs);
   background: none;
+}
+
+/* Orphaned-generation recovery, same card shape as .import-panel-tint above.
+   --color-error border/heading calls out that these represent money already
+   spent on fal.ai and not yet resolved locally. */
+.import-panel-pending {
+  background: var(--color-soft-stone);
+  border: 1px solid var(--color-error);
+  border-radius: var(--radius-sm);
+  padding: var(--space-12);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.import-panel-pending-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.import-panel-pending-title {
+  font: var(--text-body);
+  font-weight: 600;
+  color: var(--color-error);
+}
+
+.import-panel-pending-hint {
+  font: var(--text-body);
+  font-size: 12px;
+  color: var(--color-body-muted);
+  margin: 0;
+}
+
+.import-panel-pending-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.import-panel-pending-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-8);
+  background: var(--color-canvas);
+  border-radius: var(--radius-xs);
+  padding: var(--space-8);
+}
+
+.import-panel-pending-item-info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.import-panel-pending-item-label {
+  font: var(--text-body);
+  font-size: 13px;
+  color: var(--color-ink);
+}
+
+.import-panel-pending-item-time,
+.import-panel-pending-item-status {
+  font: var(--text-mono-label);
+  font-size: 11px;
+  color: var(--color-muted-slate);
+}
+
+.import-panel-pending-item-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  flex-shrink: 0;
 }

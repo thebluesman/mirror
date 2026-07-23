@@ -158,6 +158,14 @@ export function ShellTexturePreview3D({
       geometry.dispose();
       material.dispose();
       texture?.dispose();
+      // Same fix as Viewport.tsx's structural-rebuild teardown and
+      // ObjectPreview3D's (2026-07-23, PR #28 review / follow-up): renderer.
+      // dispose() doesn't synchronously release the underlying WebGL
+      // context — deferred to GC. This component remounts a fresh
+      // WebGLRenderer on every new preview `blob`, so repeated re-uploads in
+      // one sitting could stack up contexts before GC catches up. Explicitly
+      // losing the context here returns the slot to the browser immediately.
+      renderer.getContext().getExtension("WEBGL_lose_context")?.loseContext();
       container.removeChild(renderer.domElement);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only `blob` should rebuild the renderer/re-decode the bitmap; surface/repeat/roughnessScale/tint are read live via refs (see applyCalibration)

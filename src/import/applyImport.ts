@@ -16,7 +16,12 @@ export interface ImportResult {
    *  FurnitureItem. Ignored when `itemId` already exists in `scene.items`. */
   newItemName?: string;
   dimsCm: Dims;
-  sourcePhotoHash: string;
+  /** Undefined when the GLB came from a manual upload rather than a fresh
+   *  fal.ai generation (see ImportPanel's "Upload .glb…" path) — there's no
+   *  local photo to hash in that case. The persisted schema has always
+   *  allowed this field to be absent (scene.ts); this interface previously
+   *  required it only because every caller happened to have one. */
+  sourcePhotoHash?: string;
   glbHash: string;
   /** Pre-scale orientation correction for a generated GLB that came out lying
    *  on its side or facing backwards (see loadFurnitureModel.ts). Omitted
@@ -51,7 +56,11 @@ export function applyFurnitureImport(scene: SceneFile, result: ImportResult): Sc
       return {
         ...item,
         dimsCm: result.dimsCm,
-        sourcePhotoHash: result.sourcePhotoHash,
+        // A manual .glb upload (result.sourcePhotoHash undefined) has no new
+        // photo to replace the old one with — keep whatever photo the item
+        // already had rather than clearing it, since the old photo still
+        // describes the real object even though this GLB didn't come from it.
+        sourcePhotoHash: result.sourcePhotoHash ?? item.sourcePhotoHash,
         glbHash: result.glbHash,
         // Full replace, not merge: a re-import onto an existing item (e.g.
         // fixing a wrong source photo) clears a stale correction from the

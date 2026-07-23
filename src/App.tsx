@@ -112,15 +112,22 @@ function App() {
   // docs/proposals/reimport-entry-point.md §14: which item ObjectInspector's
   // "Re-import…" button asked to pre-select in ImportPanel's picker, once
   // the tab switches to "Import". Ephemeral UI-routing state, same shape as
-  // showShortcuts above — not a scene fact, never persisted. Consumed only
-  // as ImportPanel's `useState` initializer (see that component: it's
-  // freshly mounted every time `tab === "Import"` becomes true, a plain
-  // conditional render below, not a keep-alive), so this doesn't need to be
-  // "cleared after use" on that path — but it DOES need clearing on a
-  // direct click of the Import tab button (see TABS.map below), so a stale
-  // pre-selection from an earlier Re-import click can't silently resurface
-  // on a later plain click of the tab.
+  // showShortcuts above — not a scene fact, never persisted. ImportPanel
+  // syncs its own selection off this (and `reimportNonce`, below) via an
+  // effect — it used to only read this as a `useState` initializer, which
+  // silently no-opped if the Import tab was already open when Re-import was
+  // clicked (ImportPanel doesn't remount in that case). This value alone
+  // still needs clearing on a direct click of the Import tab button (see
+  // TABS.map below), so a stale pre-selection from an earlier Re-import
+  // click can't silently resurface on a later plain click of the tab.
   const [reimportTarget, setReimportTarget] = useState<string | null>(null);
+
+  // Bumped on every handleRequestReimport call, including repeat clicks on
+  // the same item — ImportPanel can't tell "same id, new click" apart from
+  // "no click happened" by watching `reimportTarget` alone (the value
+  // wouldn't change), so this nonce is what its sync effect actually keys
+  // off of. See ImportPanel's `initialSelectionNonce` prop comment.
+  const [reimportNonce, setReimportNonce] = useState(0);
 
   // docs/proposals/reimport-entry-point.md §14: ObjectInspector's
   // "Re-import…"/"Import…" button, threaded up through Viewport.tsx's
@@ -130,6 +137,7 @@ function App() {
   // context while re-importing it.
   function handleRequestReimport(itemId: string) {
     setReimportTarget(itemId);
+    setReimportNonce((n) => n + 1);
     setTab("Import");
   }
 
@@ -537,7 +545,12 @@ function App() {
               />
             )}
             {sceneFile && tab === "Import" && (
-              <ImportPanel sceneFile={sceneFile} onImported={handleImported} initialSelection={reimportTarget ?? undefined} />
+              <ImportPanel
+                sceneFile={sceneFile}
+                onImported={handleImported}
+                initialSelection={reimportTarget ?? undefined}
+                initialSelectionNonce={reimportNonce}
+              />
             )}
             {tab === "Settings" && (
               <SettingsPanel sceneFile={sceneFile} onImportProject={handleImportProject} />

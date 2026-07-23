@@ -112,6 +112,11 @@ function summarizeQueueStatus(status: QueueStatus): string | undefined {
   return undefined;
 }
 
+/** fal.ai endpoint pending imports are recorded against — re-exported so
+ *  callers persisting a `PendingImport` (see storage/pendingImports.ts)
+ *  don't need their own copy of this string. */
+export const HUNYUAN_ENDPOINT = ENDPOINT;
+
 /**
  * Runs one photo through Hunyuan3D image-to-3D end to end: configure the client
  * with the caller-supplied key, upload the photo, submit + poll the job, and
@@ -121,13 +126,17 @@ function summarizeQueueStatus(status: QueueStatus): string | undefined {
  * `onPhotoUploaded` as soon as the upload leg completes — *before* the job is
  * submitted — so a caller can remember the URL for a same-photo retry even if
  * generation itself fails later (a failure after this point shouldn't force
- * a re-upload of bytes that already made it to fal's storage).
+ * a re-upload of bytes that already made it to fal's storage). Likewise calls
+ * `onEnqueue` the moment fal hands back a request_id — *before* polling for
+ * the result starts — so a caller can persist it for orphaned-job recovery
+ * (see storage/pendingImports.ts) even if this tab never sees the result.
  */
 export async function generateFurnitureGlb(
   photo: File | { url: string },
   falKey: string,
   onProgress: (p: GenerationProgress) => void,
   onPhotoUploaded?: (url: string) => void,
+  onEnqueue?: (requestId: string) => void,
 ): Promise<{ glbBlob: Blob; photoUrl: string }> {
   if (!falKey) throw new FalKeyMissingError();
   fal.config({ credentials: falKey });
@@ -145,6 +154,7 @@ export async function generateFurnitureGlb(
   const { data } = await fal.subscribe(ENDPOINT, {
     input: { ...REQUEST_DEFAULTS, input_image_url: photoUrl },
     logs: true,
+    onEnqueue,
     onQueueUpdate: (status) => {
       onProgress({
         phase: status.status === "IN_QUEUE" ? "queued" : "generating",
@@ -160,4 +170,28 @@ export async function generateFurnitureGlb(
   const glbBlob = await res.blob();
 
   return { glbBlob, photoUrl };
+}
+
+/** Polls a previously enqueued job's current status — used to check whether
+ *  an orphaned pending import (tab closed/crashed after submit) has finished
+ *  on fal's side yet. Throws if fal no longer recognizes the request_id
+ *  (e.g. it's aged out of fal's queue). */
+export async function checkPendingImportStatus(requestId: string, falKey: string): Promise<QueueStatus> {
+  if (!falKey) throw new FalKeyMissingError();
+  fal.config({ credentials: falKey });
+  return fal.queue.status(ENDPOINT, { requestId, logs: false });
+}
+
+/** Fetches and downloads a completed orphaned job's GLB, the same way
+ *  `generateFurnitureGlb` would have if the tab had stayed open. Only
+ *  meaningful once `checkPendingImportStatus` reports `COMPLETED` — fal's
+ *  queue.result rejects otherwise. */
+export async function fetchPendingImportGlb(requestId: string, falKey: string): Promise<Blob> {
+  if (!falKey) throw new FalKeyMissingError();
+  fal.config({ credentials: falKey });
+  const { data } = await fal.queue.result(ENDPOINT, { requestId });
+  const glbUrl = extractGlbUrl(data);
+  const res = await fetch(glbUrl);
+  if (!res.ok) throw new Error(`GLB download failed: ${res.status} ${res.statusText}`);
+  return res.blob();
 }

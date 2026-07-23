@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { fitModelToDims } from "../scene/loadFurnitureModel";
+import { fitModelToDims, downscaleModelTextures } from "../scene/loadFurnitureModel";
 import type { Dims, ModelRotation } from "../schema/scene";
 import "./ObjectPreview3D.css";
 
@@ -120,6 +120,13 @@ export function ObjectPreview3D({
       .loadAsync(url)
       .then((gltf) => {
         if (cancelled) return;
+        // This preview decodes its own GLB independently of
+        // loadFurnitureModel.ts (an isolated confirm-dims-only scene, not
+        // routed through OPFS/getAsset) — see downscaleModelTextures'
+        // comment: this is specifically the stage a large uploaded/
+        // generated .glb's oversized PBR textures overran VRAM and force-
+        // lost the WebGL context (recurring report, 2026-07-23).
+        downscaleModelTextures(gltf.scene);
         pristine = gltf.scene;
         refit();
       })
@@ -135,6 +142,19 @@ export function ObjectPreview3D({
       resizeObserver.disconnect();
       controls.dispose();
       renderer.dispose();
+      // Same fix as Viewport.tsx's structural-rebuild teardown (2026-07-23,
+      // PR #28 review): renderer.dispose() doesn't synchronously release the
+      // underlying WebGL context — that's deferred to GC. This component
+      // remounts a fresh WebGLRenderer every time confirm-dims is entered
+      // (ImportPanel's Stage), and the "Upload .glb…" path (no fal.ai wait
+      // between imports) makes it trivial to cycle through several of those
+      // in quick succession — enough to hit Chrome's ~16-live-context cap
+      // before GC catches up, at which point the browser force-loses the
+      // oldest context with no recovery handler anywhere in the app: reads
+      // as "the whole screen goes white, needs a refresh." Explicitly losing
+      // the context here returns the slot to the browser immediately instead
+      // of waiting on GC.
+      renderer.getContext().getExtension("WEBGL_lose_context")?.loseContext();
       container.removeChild(renderer.domElement);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only glbBlob should rebuild the renderer/re-decode the GLB; dims/rotation are read live via refs (see refit)

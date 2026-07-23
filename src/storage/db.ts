@@ -7,9 +7,14 @@
 // would eventually hit).
 
 export const DB_NAME = "mirror";
-export const DB_VERSION = 2;
+export const DB_VERSION = 3;
 export const PROJECT_STORE = "project";
 export const SETTINGS_STORE = "settings";
+// Orphaned-generation recovery (see pendingImports.ts): a fal.ai request_id
+// captured the moment a generation job is enqueued, so an interrupted
+// session (tab closed/crashed between submit and result) still has a way to
+// re-poll and fetch the already-paid-for result later, instead of losing it.
+export const PENDING_IMPORTS_STORE = "pendingImports";
 
 export function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -20,6 +25,9 @@ export function openDB(): Promise<IDBDatabase> {
       }
       if (!req.result.objectStoreNames.contains(SETTINGS_STORE)) {
         req.result.createObjectStore(SETTINGS_STORE);
+      }
+      if (!req.result.objectStoreNames.contains(PENDING_IMPORTS_STORE)) {
+        req.result.createObjectStore(PENDING_IMPORTS_STORE);
       }
     };
     req.onsuccess = () => resolve(req.result);
