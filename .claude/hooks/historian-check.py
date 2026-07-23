@@ -33,13 +33,11 @@ import sys
 
 
 WATCHED_PREFIXES = (
-    "PRD-v1.md",
     "DESIGN.md",
     "docs/adr/",
-    "docs/plan/",
-    "product-idea.md",
-    "product-review.md",
+    "docs/proposals/",
     "spike/OUTCOME",
+    "spike-v2/OUTCOME",
     ".claude/skills/",
     ".claude/agents/",
     ".claude/commands/",

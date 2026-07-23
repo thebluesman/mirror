@@ -13,7 +13,7 @@ import { slugify, uniqueId } from "../util/slug";
  *  a full copy, not a diff: buildScene.ts/Viewport.tsx read a layout's
  *  `commands` directly with no base-layout merge step, so a diff-only
  *  layout simply wouldn't render correctly yet. `base` still records the
- *  parent layout id per the schema's intent (schema/scene-schema-draft.md:
+ *  parent layout id per the schema's intent (docs/history/scene-schema-draft.md:
  *  "base: parent layoutId") — forward-looking metadata for whenever a real
  *  diff/undo model lands, unused by any rendering path today. Pure —
  *  caller appends the result to `sceneFile.layouts`. */

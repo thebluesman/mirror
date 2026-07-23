@@ -5,36 +5,38 @@ Local-first browser app to model Shyam's home: import furniture from photos
 shell from surface photos, view the assembled room in real-time PBR. Solo
 project, personal use, PoC-stage.
 
-## Current state (2026-07-18)
+## Current state (2026-07-23)
 
-Three-spike R&D arc **closed** (`spike/OUTCOME*.md` — AI-still NO-GO, real-time
-PBR GO-WITH-REFRAME, photo-derived generation CLEAN GO). Now building **v1:
-import + view only**, per `PRD-v1.md`. Arrangement is v2, measurement is v3 —
-do not pull them forward without Shyam re-opening scope.
+**v1 (import + view) and v2 (arrangement) have both shipped** and passed
+acceptance. The app is now in a deliberate pause for post-v2 hardening and
+open-ended use — Shyam is living with it before deciding what shape comes
+next. Measurement (v3) stays shelved; don't pull it forward without Shyam
+re-opening scope. Two threads are parked, not forgotten: see
+`docs/proposals/multi-view-generation.md` and
+`docs/proposals/undo-redo-history.md`.
 
 ## Canonical documents
 
 | Doc | Holds |
 |---|---|
-| `PRD-v1.md` | v1 scope, flows, architecture decisions, success criteria |
-| `plan-v1.md` | v1 build plan — phases, agent/model assignments, resume protocol |
 | `DESIGN.md` | Visual language (adapted Cohere system) — tokens, components |
-| `product-review.md` | Pre-spike scoping review + addendum (platform/storage/schema rationale) |
-| `spike/OUTCOME*.md` | R&D evidence for what v1 builds on |
-| `docs/adr/` | New decisions from v1 build onward — one per file, supersede-don't-edit |
+| `docs/adr/` | Standing architecture decisions — one per file, supersede-don't-edit |
+| `docs/proposals/` | Scoped-but-not-committed feature designs — status-labeled (deferred/built/parked) |
 | `docs/journal/` | Decision narrative, written by `@historian` — don't edit by hand |
+| `docs/history/` | Superseded/completed docs (PRDs, plans, spike-arc scoping) — archive, not a reading list for current state |
+| `spike/OUTCOME*.md`, `spike-v2/OUTCOME.md` | R&D evidence for what v1/v2 build on |
 
 ## Standing decisions (don't re-litigate; supersede via ADR)
 
 - **Browser-only** shell (no Tauri/Electron) — Vite + React + Three.js, no
-  backend, no SQLite. Rationale recorded in PRD §8.
+  backend, no SQLite. Rationale recorded in `docs/history/PRD-v1.md` §8.
 - **Storage:** versioned JSON project file (File System Access API +
   IndexedDB autosave); binary assets (photos, GLBs, textures) in OPFS,
   content-addressed, referenced by hash from the JSON; zip export for
   portability. `layouts[]`/`current` branch shape in the schema from v1.
-- **Placement (v1):** furniture positions/rotations are seeded by the one-time
-  Figma MCP conversion (like spike 3's `geometry.json`); no in-app
-  repositioning until v2.
+- **Placement:** furniture positions/rotations seed from the one-time Figma
+  MCP conversion (like spike 3's `geometry.json`); in-app move/rotate/
+  elevation with undo shipped in v2.
 - **Only network call:** fal.ai Hunyuan3D (`fal-ai/hunyuan-3d/v3.1/pro/image-to-3d`,
   per ADR-0002 — supersedes v1's Meshy call, `fal-ai/meshy/v6/image-to-3d`).
   Texturing and rendering are local.
@@ -53,7 +55,10 @@ do not pull them forward without Shyam re-opening scope.
 ## Conventions
 
 - All docs are Markdown.
-- ISO dates (`2026-07-18`) everywhere.
-- `spike/` is frozen evidence — don't refactor or "clean up" spike code; v1
-  productizes `spike/scene2.html`'s Three.js core into the app, it doesn't
-  edit the spike in place.
+- ISO dates (`2026-07-23`) everywhere.
+- `spike/` and `spike-v2/` are frozen evidence — don't refactor or "clean up"
+  spike code; v1/v2 productize spike findings into the app, they don't edit
+  the spike in place.
+- `docs/history/` is likewise archive — read it for provenance, don't edit it;
+  a correction to a superseded decision goes in an ADR or the current doc, not
+  back into the historical record.

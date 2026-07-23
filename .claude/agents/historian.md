@@ -119,9 +119,9 @@ and the Stop hook re-fires every turn.
 Watched paths (same set the Stop hook checks):
 
 ```
-PRD-v1.md  DESIGN.md  docs/adr/  docs/plan/  product-idea.md
-product-review.md  spike/OUTCOME*  docs/journal/  .claude/skills/
-.claude/agents/  .claude/commands/  .claude/hooks/  CLAUDE.md
+DESIGN.md  docs/adr/  docs/proposals/  spike/OUTCOME*  spike-v2/OUTCOME*
+docs/journal/  .claude/skills/  .claude/agents/  .claude/commands/
+.claude/hooks/  CLAUDE.md
 ```
 
 ### Commit message

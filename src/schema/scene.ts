@@ -1,5 +1,5 @@
 // Formalized scene schema (Phase 2). Supersedes the illustrative
-// `src/scene/types.ts` mirror and the `schema/scene-schema-draft.md` draft:
+// `src/scene/types.ts` mirror and the `docs/history/scene-schema-draft.md` draft:
 // this module is the single source of truth for both the runtime shape
 // (zod validation) and the compile-time types (z.infer). `types.ts` now
 // re-exports from here.
